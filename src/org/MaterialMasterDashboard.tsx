@@ -176,6 +176,8 @@ export default function MaterialMasterDashboard({id,onBack,onChanged,onEdit,onEx
                     {m.canEdit&&<Button testOverride={m.testOverride} variant='secondary' disabled={busy} onClick={()=>onEdit(id)}><Pencil className='h-4 w-4'/> Edit draft</Button>}
                     {m.canDelete&&<Button testOverride={m.testOverride} variant='danger' disabled={busy} onClick={()=>draftAction('delete')}><Trash2 className='h-4 w-4'/> Delete draft</Button>}
                     {m.canSubmit&&<Button testOverride={m.testOverride} disabled={busy} onClick={()=>draftAction('submit')}>Submit for approval</Button>}
+                    {m.canApprove&&<Button testOverride={m.testOverride} disabled={busy} onClick={()=>decision('approve')}>{!data.approvals.steps.length&&m.testOverride?'Approve · test recovery':m.workflowStage.startsWith('Review')?'Complete review':'Approve request'}</Button>}
+                    {m.canApprove&&<Button testOverride={m.testOverride} variant='secondary' disabled={busy} onClick={()=>decision('reject')}>Reject request</Button>}
                     {m.canExtend&&<Button testOverride={m.testOverride} variant='secondary' disabled={busy} onClick={()=>onExtend(id)}><Plus className='h-4 w-4'/> Extend to warehouse</Button>}
                     {m.canLifecycle&&['approved','active'].includes(m.status)&&<Button testOverride={m.testOverride} variant='secondary' disabled={busy} onClick={()=>lifecycle('disable')}>Disable</Button>}
                     {m.canLifecycle&&m.status==='approved'&&!m.pushedAt&&<Button testOverride={m.testOverride} variant='danger' disabled={busy} onClick={()=>lifecycle('delete')}>Delete approved material</Button>}
@@ -199,7 +201,7 @@ export default function MaterialMasterDashboard({id,onBack,onChanged,onEdit,onEx
                         <dl className='grid gap-x-5 sm:grid-cols-2'>
                             <Fact label='Creation request ID' value={data.approvals.requestId}/>
                             <Fact label='Approved master data ID' value={data.approvals.masterDataId||'Assigned at final approval'}/>
-                            <Fact label='Approval workflow' value={data.approvals.name||data.approvals.code||'Not yet submitted'}/>
+                            <Fact label='Approval workflow' value={data.approvals.name||data.approvals.code||(m.status==='pending_approval'?(m.testOverride?'Test recovery · PRC-001':'Snapshot missing'):'Not yet submitted')}/>
                             <Fact label='Execution and threshold' value={[data.approvals.approvalMode,data.approvals.approvalRule].filter(Boolean).join(' · ')}/>
                             <Fact label='Current stage' value={m.workflowStage||description(m.status)}/>
                             <Fact label='Submitted' value={showDate(m.submittedAt)}/>
@@ -210,7 +212,9 @@ export default function MaterialMasterDashboard({id,onBack,onChanged,onEdit,onEx
                         </div>}
                         {m.testOverride&&<p className='text-xs text-blue-300'>Development test mode · blue-bordered actions can bypass workflow assignment and maker–checker. All bypassed controls are audited.</p>}
                         {!data.approvals.steps.length&&m.status==='pending_approval'&&
-                            <Alert tone='warn'>This request has no valid workflow snapshot. Legacy approval routes cannot be used; an administrator must resolve the request under PRC-001.</Alert>}
+                            (m.testOverride?
+                                <Alert tone='info'>This older request has no workflow snapshot. In development test mode, Approve or Reject performs an audited one-step recovery without recreating the request. Normal approval rules remain enforced outside test mode.</Alert>:
+                                <Alert tone='warn'>This request has no valid workflow snapshot. Ask a workflow administrator to resolve it under PRC-001. The normal maker–checker requirement remains active.</Alert>)}
                         {data.approvals.steps.length>0&&<div className='space-y-2 border-t border-line pt-3'>
                             <h3 className='text-sm font-semibold text-ink'>Configured approval stages</h3>
                             {data.approvals.steps.map(step=><div key={step.number} className='rounded-xl border border-line bg-page p-3'>
