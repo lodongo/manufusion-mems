@@ -9,6 +9,7 @@ import { MATERIAL_LABELS } from '../components/AssetDictionaryBrowser';
 import { appConfirm, appPrompt } from '../components/dialogs';
 import CatalogueAttributeForm, { attributeIssues } from '../components/CatalogueAttributeForm';
 import { ChoiceChip, ConfirmBox, MatchCard, OpenItems, OptionCard, ReviewSection, ShortTextPreview, StepSection, WizardBar, type WizardStep } from './materialCreateUi';
+import { materialMasterHierarchy } from './materialMasterHierarchy';
 
 /** Plain explanation of the three supply relationships (MRO). */
 const SUPPLY_TYPES: Array<{ code: 'OEM' | 'OCM' | 'GENERAL'; title: string; text: string; part: string }> = [
@@ -38,7 +39,8 @@ function shownValue(a: AttrDef, raw: string | undefined, short = false): string 
 const SUPPLY_WORD: Record<string, string> = { OEM: 'the machine maker (OEM)', OCM: 'the component maker (OCM)', GENERAL: 'a general supplier' };
 
 export default function MaterialsMaster() {
-    const { data: tree, loading: treeLoading, error: treeError } = useLoad(() => callBackend<DictTree>(treeApi, { kind: 'materials' }));
+    const { data: tree, loading: treeLoading, error: treeError, reload: reloadMaterialMaster } =
+        useLoad(() => callBackend<DictTree>(treeApi, { kind: 'materials' }));
     const { data: records, loading: recordsLoading, reload } = useLoad(() => callBackend<{ items: SavedMaterial[];isApprover:boolean;currentUserId:string }>(endpoint + '/list'));
     const {data:options}=useLoad(()=>callBackend<{warehouses:Array<{id:string;name:string;code:string;categoryCodes:string[]}>;costCenters:Array<{id:string;name:string;code:string}>;assets:Array<{id:string;name:string;code:string;parentId:string}>;scopedAssemblies:Array<{id:string;name:string;parentId:string}>;uoms:Array<{code:string;label:string;category:string}>;classifications:Array<{code:string;label:string}>;restrictions:Array<{code:string;label:string;description:string}>;vendors:Array<{id:string;name:string}>;assemblies:Array<{id:string;name:string}>}>(endpoint+'/options'));
     const [uomCategory,setUomCategory]=useState('');
@@ -50,7 +52,6 @@ export default function MaterialsMaster() {
     const [subcategory, setSubcategory] = useState('');
     const [family, setFamily] = useState('');
     const [material, setMaterial] = useState('');
-    const [showAllIndustryMaterials,setShowAllIndustryMaterials]=useState(false);
     const [detail, setDetail] = useState<ClassDetail | null>(null);
     const [name, setName] = useState('');
     const [values, setValues] = useState<Record<string, string>>({});
@@ -75,31 +76,41 @@ export default function MaterialsMaster() {
     const [listView,setListView]=useState('my_drafts');
     const [listSearch,setListSearch]=useState('');
     const [similar,setSimilar]=useState<{items:Array<{id:string;name:string;shortText:string;warehouseId:string;score:number;matchedFields:string[];attributeMatches:number;attributeTotal:number;partMatch:boolean;status:string}>;totalCompared:number}|null>(null);
-    // New material adoption defaults to the registered industry's recommendations.
-    // Existing selected items remain visible, and the user can explicitly browse every class.
-    const suggestedMaterials=(tree?.classes??[]).filter(x=>showAllIndustryMaterials||x.financial?.industryRecommended!==false||x.code===material);
-    const categories = (tree?.groups ?? []).filter(x=>suggestedMaterials.some(m=>m.groupCode===x.code));
-    const subcategories = (tree?.categories ?? []).filter(x => x.groupCode === category&&suggestedMaterials.some(m=>m.categoryCode===x.code));
-    const families = (tree?.subcategories ?? []).filter(x => x.categoryCode === subcategory&&suggestedMaterials.some(m=>m.subcategoryCode===x.code));
-    const materials = suggestedMaterials.filter(x => x.subcategoryCode === family);
+    // Every selection is derived from the active PRC Materials Master; no industry
+    // recommendation may silently hide a valid material or a saved draft choice.
+    const hierarchy=materialMasterHierarchy(tree,category,subcategory,family,material);
+    const {categories,subcategories,families,materials}=hierarchy;
     const supplyType=registration.supplyType??'GENERAL';
     const selectedVendor=options?.vendors?.find(v=>v.id===registration.vendorId)?.name??'';
     const partyName=(registration.partyEntryMode??(supplyType==='GENERAL'?'manual':'registered'))==='manual'?registration.partyName??'':selectedVendor;
     const partNumber=supplyType==='OEM'?registration.oemPartNumber??'':supplyType==='OCM'?registration.ocmPartNumber??'':'';
     const shortText=[name.trim(),...((detail?.attributes??[]).filter(a=>a.specific).map(a=>shownValue(a,values[a.code],true)).filter(Boolean)),...(['OEM','OCM'].includes(supplyType)?[partyName.trim(),partNumber.trim()]:[])].filter(Boolean).join('; ').slice(0,120);
     useEffect(() => {
-        if (!material) { setDetail(null); return; }
-        let live = true;
+        if(!material||!hierarchy.validMaterial){setDetail(null);setLoadingDetail(false);return;}
+        let live=true;
+        setDetail(null); // Never display attributes from an earlier material during a new lookup.
         setLoadingDetail(true);
-        callBackend<ClassDetail>(itemApi, { kind: 'materials', code: material }).then(d => { if (live) { setDetail(d); if (!editingId) { setName(d.name); setValues({}); } } }).catch(e => { if (live) setError(e instanceof Error ? e.message : 'Unable to load attributes'); }).finally(() => { if (live) setLoadingDetail(false); });
-        return () => { live = false; };
-    }, [material]);
+        callBackend<ClassDetail>(itemApi,{kind:'materials',code:material}).then(d=>{
+            if(!live)return;
+            if(d.code!==material||d.groupCode!==category||d.categoryCode!==subcategory||
+                d.subcategoryCode!==family)throw new Error('The material classification changed in the active Materials Master. Refresh the master and select it again.');
+            setDetail(d);
+            if(!editingId){setName(d.name);setValues({});}
+        }).catch(e=>{if(live){setDetail(null);setError(e instanceof Error?e.message:'Unable to load the selected material attributes.');}})
+            .finally(()=>{if(live)setLoadingDetail(false);});
+        return()=>{live=false;};
+    },[material,category,subcategory,family,editingId,hierarchy.validMaterial]);
     useEffect(()=>{if(!adding||!material){setLiveMatches([]);setHardDuplicates([]);return;}let active=true;setLiveChecking(true);const timeout=setTimeout(()=>{callBackend<{items:Array<{id:string;name:string;shortText:string;status:string;score:number;partMatch:boolean}>;hardDuplicates:Array<{id:string;name:string;shortText:string;status:string;score:number;partMatch:boolean}>}>(endpoint+'/similar',{excludeId:draftId.current||editingId,material:{name,categoryCode:category,subcategoryCode:subcategory,familyCode:family,materialCode:material,attributes:values,...registration}}).then(r=>{if(active){setLiveMatches(r.items.filter(x=>x.score>90));setHardDuplicates(r.hardDuplicates??[]);}}).catch(()=>{if(active){setLiveMatches([]);setHardDuplicates([]);}}).finally(()=>{if(active)setLiveChecking(false);});},450);return()=>{active=false;clearTimeout(timeout);};},[adding,material,name,category,subcategory,family,values,registration,editingId]);
     useEffect(()=>{if(!adding||!material||name.trim().length<2||extendSource)return;setAutoStatus('Saving draft…');const timer=setTimeout(()=>{const payload={name:name.trim(),shortText,categoryCode:category,subcategoryCode:subcategory,familyCode:family,materialCode:material,attributes:values,...registration,assemblyIds:(registration.assemblyIds??'').split(',').filter(Boolean)};saveQueue.current=saveQueue.current.catch(()=>{}).then(async()=>{const result=await callBackend<{id:string}>(endpoint+'/autosave',{id:draftId.current||editingId,data:payload});draftId.current=result.id;setAutoStatus('Draft saved');}).catch(e=>setAutoStatus(e instanceof Error?'Autosave failed: '+e.message:'Autosave failed'));},650);return()=>clearTimeout(timer);},[adding,material,name,category,subcategory,family,values,registration,shortText,editingId,extendSource]);
     const eligibleWarehouses=(options?.warehouses??[]).filter(w=>w.categoryCodes?.includes(category));
     const duplicateBlocked=hardDuplicates.length>0;
     const [showAttrErrors,setShowAttrErrors]=useState(false);
-    const stage1Issues = [!material?'Select a catalogue material.':'',!detail?'Load material attributes.':'',!name.trim()?'Enter material name.':'',...attributeIssues(detail?.attributes??[],values).map(x=>x.a.name+': '+x.msg)].filter(Boolean);
+    const stage1Issues = [
+        !hierarchy.complete?(hierarchy.selectionIssue||'Select a category, subcategory, family and material from the active Materials Master.'):'',
+        !detail?'Load the selected material attributes from the active Materials Master.':'',
+        !name.trim()?'Enter material name.':'',
+        ...attributeIssues(detail?.attributes??[],values).map(x=>x.a.name+': '+x.msg),
+    ].filter(Boolean);
     const supply=registration.supplyType??'GENERAL';
     const mode=registration.partyEntryMode??(supply==='GENERAL'?'manual':'registered');
     const partKey=supply==='OEM'?'oemPartNumber':supply==='OCM'?'ocmPartNumber':'generalPartNumber';
@@ -140,13 +151,15 @@ export default function MaterialsMaster() {
         requestAnimationFrame(() => topRef.current?.scrollIntoView({ block: 'start', behavior: 'smooth' }));
     };
     const startNew = () => {
-        setAdding(true); setStage(1); draftId.current = ''; setExtendSource(null); setAutoStatus(''); setReviewAgreed(false); setDuplicateConfirmed(false);
-        setSimilar(null); setEditingId(''); setRegistration({ supplyType: 'GENERAL' }); setUomCategory(''); setError(''); setTried({}); setShowAttrErrors(false);
+        setAdding(true);setStage(1);draftId.current='';setExtendSource(null);setAutoStatus('');setReviewAgreed(false);setDuplicateConfirmed(false);
+        setSimilar(null);setEditingId('');setRegistration({supplyType:'GENERAL'});setUomCategory('');setError('');setTried({});setShowAttrErrors(false);
+        setCategory('');setSubcategory('');setFamily('');setMaterial('');setDetail(null);setName('');setValues({});
+        reloadMaterialMaster(); // Resolve the latest published Materials Master when starting a new item.
     };
     const fail = (step: number, message: string) => { setTried((t) => ({ ...t, [step]: true })); setError(message); };
     const next1 = () => {
-        if (!material) return fail(1, 'Choose the material from the catalogue first.');
-        if (!detail) return fail(1, 'Wait for the material attributes to load.');
+        if(!hierarchy.complete)return fail(1,hierarchy.selectionIssue||'Select category, subcategory, family and material from the active Materials Master.');
+        if (!detail) return fail(1, 'Wait for the selected material attributes to load from the active Materials Master.');
         if (!name.trim()) return fail(1, 'Enter the material name.');
         const issues = attributeIssues(detail.attributes, values);
         if (issues.length) {
@@ -213,19 +226,24 @@ export default function MaterialsMaster() {
         </StepSection>}
 
         {stage === 1 && (treeLoading ? <Spinner /> : treeError || !tree ? <Alert tone='error'>{treeError || 'The material reference catalogue is not available. An administrator must load it first.'}</Alert> : <>
-            <StepSection title='Find it in the catalogue' hint='Narrow down from category to the exact material. Each list is searchable.'
-                aside={<button type='button' onClick={() => setShowAllIndustryMaterials((v) => !v)} className='shrink-0 rounded-lg border border-line px-2 py-1.5 text-xs text-soft active:bg-page'>{showAllIndustryMaterials ? 'Recommended only' : 'Show all industries'}</button>}>
+            <StepSection title='Find it in the Materials Master' hint='Choose the category, subcategory, family and material from the active MEMS PRC Materials Master. Every industry is included.'
+                aside={<button type='button' onClick={()=>reloadMaterialMaster()}
+                    className='shrink-0 rounded-lg border border-line px-2 py-1.5 text-xs text-soft active:bg-page'>
+                    Refresh master
+                </button>}>
+                <p className='mb-3 text-xs text-muted'>Active Materials Master {tree?.version||'—'} · {categories.length} categories · {tree?.categories?.length??0} subcategories · {tree?.subcategories?.length??0} families · {tree?.classes?.length??0} materials. No industry-based exclusions.</p>
+                {hierarchy.selectionIssue&&<Alert tone='error'>{hierarchy.selectionIssue} Refresh the master if it has recently changed; your draft has not been deleted.</Alert>}
                 <div className='grid gap-4 sm:grid-cols-2'>
-                    <SelectField id='mm-category' label='Category' required value={category} error={fieldError(1, !category, 'Choose a category.')} onChange={(e) => { setCategory(e.target.value); setSubcategory(''); setFamily(''); setMaterial(''); }}>
+                    <SelectField id='mm-category' label='Material category' required value={category} error={fieldError(1, !hierarchy.validCategory, 'Choose a category from the Materials Master.')} onChange={(e) => { setCategory(e.target.value); setSubcategory(''); setFamily(''); setMaterial(''); setDetail(null);setValues({}); }}>
                         <option value=''>Select category</option>{categories.map((x) => <option key={x.code} value={x.code}>{x.name} ({x.code})</option>)}
                     </SelectField>
-                    <SelectField id='mm-subcategory' label='Subcategory' required disabled={!category} value={subcategory} error={fieldError(1, !!category && !subcategory, 'Choose a subcategory.')} onChange={(e) => { setSubcategory(e.target.value); setFamily(''); setMaterial(''); }}>
+                    <SelectField id='mm-subcategory' label='Material subcategory' required disabled={!hierarchy.validCategory} value={subcategory} error={fieldError(1, !!category && !hierarchy.validSubcategory, 'Choose a subcategory from this category.')} onChange={(e) => { setSubcategory(e.target.value); setFamily(''); setMaterial('');setDetail(null);setValues({}); }}>
                         <option value=''>Select subcategory</option>{subcategories.map((x) => <option key={x.code} value={x.code}>{x.name} ({x.code})</option>)}
                     </SelectField>
-                    <SelectField id='mm-family' label='Family' required disabled={!subcategory} value={family} error={fieldError(1, !!subcategory && !family, 'Choose a family.')} onChange={(e) => { setFamily(e.target.value); setMaterial(''); }}>
+                    <SelectField id='mm-family' label='Material family' required disabled={!hierarchy.validSubcategory} value={family} error={fieldError(1, !!subcategory && !hierarchy.validFamily, 'Choose a family from this subcategory.')} onChange={(e) => { setFamily(e.target.value); setMaterial('');setDetail(null);setValues({}); }}>
                         <option value=''>Select family</option>{families.map((x) => <option key={x.code} value={x.code}>{x.name} ({x.code})</option>)}
                     </SelectField>
-                    <SelectField id='mm-material' label='Material' required disabled={!family} value={material} error={fieldError(1, !!family && !material, 'Choose the material.')} onChange={(e) => setMaterial(e.target.value)}>
+                    <SelectField id='mm-material' label='Material type' required disabled={!hierarchy.validFamily} value={material} error={fieldError(1, !!family && !hierarchy.validMaterial, 'Choose the material from this family.')} onChange={(e) => {setMaterial(e.target.value);setDetail(null);setValues({});}}>
                         <option value=''>Select material</option>{materials.map((x) => <option key={x.code} value={x.code}>{x.name} ({x.code})</option>)}
                     </SelectField>
                 </div>
@@ -236,7 +254,7 @@ export default function MaterialsMaster() {
                     <Field id='mm-name' label='Material name *' value={name} maxLength={160} onChange={(e) => setName(e.target.value)} error={fieldError(1, !name.trim(), 'Enter the material name.')} hint={`${name.length}/160`} />
                     <div className='mt-3'><ShortTextPreview text={shortText} /></div>
                 </StepSection>
-                <StepSection title='Technical attributes' hint='Fill in the required fields from the nameplate, label or box. Each field says where to find the value.'>
+                <StepSection title='Technical attributes from Materials Master' hint='The selected material determines every technical attribute, option, requirement and validation rule. Fill required attributes first; optional details are available below.'>
                     <CatalogueAttributeForm attributes={detail.attributes} values={values} onChange={(code, v) => setValues((p) => ({ ...p, [code]: v }))} guidance={detail.guidance} showErrors={showAttrErrors} />
                 </StepSection>
                 {detail.financial && <details className='rounded-2xl border border-line bg-panel p-4'>
