@@ -10,10 +10,10 @@ import { appConfirm, appPrompt } from '../components/dialogs';
 // Storage setup for Inventory (INV) and Warehousing (WHS) cost centers.
 // Warehouse › storage location › physical location:
 //   warehouse          material categories (one or more), layout per floor, capacity
-//   storage location   a name + a storage location type (INV metadata) + a warehouse restriction (colour) from the
-//                      restriction master shared with materials (Procurement metadata → warehouseRestrictions)
-//   physical location  storage positions in clusters (bin, shelf, pallet place, etc.); each cluster belongs to one storage location
-//                      with subcategories chosen from the warehouse's configured material categories
+//   storage location   a named storage area with a location type (INV metadata)
+//   cluster            specific storage equipment, condition, stacking, subcategories and multiple
+//                      warehouse restrictions from the Procurement / Stock Control master
+//   physical location  storage positions inside clusters (bin, shelf, pallet place, etc.)
 // Position code AB_01_C_02 = floor A, rack row B, rack 01, column C (from the bottom), position 02.
 
 interface FloorLayout {
@@ -224,7 +224,7 @@ function ownerAt(index: OwnerIndex, o: number): Cluster | undefined {
     return undefined;
 }
 
-// Colours come from the warehouse restriction of each storage location (the master shared with materials).
+// Colour is a cluster presentation cue from its first selected master restriction.
 function locationColors(clusters: Cluster[]) {
     return new Map(clusters.map((c) => [c.locationCode, c.color || '#64748B']));
 }
@@ -1516,7 +1516,7 @@ function PhysicalStorage({data,setup,reload}:{data:Data;setup:Setup;reload:()=>v
 
 // ---------------------------------------------------------------------------
 // Topology: every bin of a floor. Unallocated = grey, allocated = white with a border in the colour of the
-// restriction selected on its cluster. Racks are mounted lazily as you scroll.
+// restrictions selected on the cluster. Racks are mounted lazily as you scroll.
 // ---------------------------------------------------------------------------
 
 const LIST_CAP = 20_000;
@@ -1582,7 +1582,7 @@ function Topology({ data, setup, onCluster }: { data: Data; setup: Setup; onClus
                         </span>
                     ))}
                 </div>
-                <p className='text-[11px] text-slate-500'>Allocated positions are white; their border is the colour of the storage location's warehouse restriction.</p>
+                <p className='text-[11px] text-slate-500'>Allocated positions are white; their border reflects the owning cluster's first restriction.</p>
             </Card>
 
             <div className='grid grid-cols-2 gap-1 rounded-xl border border-slate-800 p-1'>
