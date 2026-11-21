@@ -70,7 +70,7 @@ test('runtime routes gate all write actions, use optimistic locking, audit and t
         assert.ok(policy.includes("PRC.materials.draft."+action+".any"));
     }
     assert.ok(backend.includes('materialMakerCheckerConflict(record,ctx.uid)'));
-    assert.ok(backend.includes("bypass(ctx,'material.workflow.assignment.and.maker_checker')"));
+    assert.ok(backend.includes("bypass(ctx,'material.workflow.assignment_and_maker_checker')"));
     assert.ok(backend.includes('makerUids:materialMakerIds('));
     assert.ok(backend.includes('{updateTime:doc.updateTime}'));
     assert.ok(backend.includes("'procurement.material.draft_delete'"));
