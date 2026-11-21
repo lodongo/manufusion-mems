@@ -72,6 +72,13 @@ const CODE_RE = /^[A-Za-z0-9][A-Za-z0-9._ \/-]{0,59}$/;
 /** The one catalog kept in the database; each upload overrides it. */
 const CATALOG_VID = 'current';
 const STAGING = `${VERSIONS}/staging`;
+/** Mobile uploads use an isolated session so another user's upload cannot replace its parts. */
+function assetUploadPath(input:unknown):string{
+    const id=str(input);
+    if(!id)return STAGING; // Backward compatibility for earlier clients.
+    if(!/^[a-f0-9]{32}$/.test(id))throw new HttpError(400,'Invalid asset upload session ID.');
+    return `${VERSIONS}/staging_${id}`;
+}
 
 function rec(ctx: SecureContext, category: string, action: string, target: string, details = '', orgId = '') {
     return audit([{ category, action, actor: ctx.actor, meta: ctx.meta, target: { label: target }, details, orgId }]);
@@ -1109,11 +1116,13 @@ export const assetRoutes = {
             const totalChunks = Number(ctx.body.totalChunks);
             const sha256 = str(ctx.body.sha256);
             const fileName = str(ctx.body.fileName).replace(/[^\w .()-]/g, '').slice(0, 120);
-            if (!Number.isInteger(size) || size < 100 || size > MAX_UPLOAD_BYTES) throw new HttpError(400, 'The file must be between 100 bytes and 12 MB.');
+            const uploadPath=assetUploadPath(ctx.body.uploadId);
+            if (!Number.isInteger(size) || size < 100 || size > MAX_UPLOAD_BYTES) throw new HttpError(400, 'The file must be between 100 bytes and 48 MB.');
             if (!Number.isInteger(totalChunks) || totalChunks < 1 || totalChunks > MAX_CHUNKS) throw new HttpError(400, 'Invalid number of parts.');
             if (!/^[a-f0-9]{64}$/.test(sha256)) throw new HttpError(400, 'Invalid checksum.');
-            for (const d of await listDocs(`${STAGING}/upload`)) await deleteDoc(`${STAGING}/upload/${d.id}`);
-            await writeDoc(STAGING, { status: 'uploading', size, sha256, totalChunks, fileName, received: 0, uploadedBy: ctx.actor.email, createdAt: nowIso() });
+            for (const d of await listDocs(`${uploadPath}/upload`)) await deleteDoc(`${uploadPath}/upload/${d.id}`);
+            await writeDoc(uploadPath, { status: 'uploading', size, sha256, totalChunks, fileName, received: 0,
+                uploadedBy: ctx.actor.email, createdAt: nowIso(), uploadId:str(ctx.body.uploadId) });
             return { ok: true };
         }),
     ],
@@ -1122,32 +1131,45 @@ export const assetRoutes = {
         staff('admin.assets.catalog.chunk', 'write', async (ctx) => {
             const index = Number(ctx.body.index);
             const data = str(ctx.body.data);
-            const s = await getDoc(STAGING);
+            const uploadPath=assetUploadPath(ctx.body.uploadId);
+            const s = await getDoc(uploadPath);
             if (!s || str(s.data.status) !== 'uploading' || str(s.data.uploadedBy) !== ctx.actor.email) throw new HttpError(400, 'Start the upload again.');
             const total = num(s.data.totalChunks) ?? 0;
             if (!Number.isInteger(index) || index < 0 || index >= total) throw new HttpError(400, 'Invalid part number.');
             if (!data || Buffer.byteLength(data, 'utf8') > 900_000) throw new HttpError(400, 'Each part must be under 900 KB.');
-            await writeDoc(`${STAGING}/upload/${String(index).padStart(3, '0')}`, { index, data });
-            return { ok: true };
+            const partHash=createHash('sha256').update(data,'utf8').digest('hex');
+            if(ctx.body.sha256!==undefined&&str(ctx.body.sha256)!==partHash)
+                throw new HttpError(400,'Upload part checksum mismatch. Retry this part.');
+            await writeDoc(`${uploadPath}/upload/${String(index).padStart(3, '0')}`, { index, data, sha256:partHash });
+            return { ok:true,index,sha256:partHash };
         }),
     ],
 
     'POST /api/admin/assets/catalog/finish': [
         staff('admin.assets.catalog.finish', 'write', async (ctx) => {
-            const s = await getDoc(STAGING);
+            const uploadPath=assetUploadPath(ctx.body.uploadId);
+            const s = await getDoc(uploadPath);
             if (!s || str(s.data.status) !== 'uploading' || str(s.data.uploadedBy) !== ctx.actor.email) throw new HttpError(400, 'Start the upload again.');
             const total = num(s.data.totalChunks) ?? 0;
-            const chunks = (await listDocs(`${STAGING}/upload`)).sort((a, b) => (num(a.data.index) ?? 0) - (num(b.data.index) ?? 0));
+            const chunks = (await listDocs(`${uploadPath}/upload`)).sort((a, b) => (num(a.data.index) ?? 0) - (num(b.data.index) ?? 0));
             const cleanup = async () => {
-                for (const c of chunks) await deleteDoc(`${STAGING}/upload/${c.id}`);
-                await deleteDoc(STAGING);
+                for (const c of chunks) await deleteDoc(`${uploadPath}/upload/${c.id}`);
+                await deleteDoc(uploadPath);
             };
             const reject = async (errors: string[], warnings: string[] = []) => {
                 await cleanup();
                 await rec(ctx, 'admin', 'assets.catalog.rejected', str(s.data.fileName) || 'Asset catalog', errors.slice(0, 3).join(' | '));
                 return { ok: false, errors, warnings, stats: {} };
             };
-            if (chunks.length !== total || chunks.some((c, i) => num(c.data.index) !== i)) return reject(['Some parts of the file did not arrive. Upload it again.']);
+            const received=new Set(chunks.map(c=>num(c.data.index)).filter((i):i is number=>i!==null));
+            const missingChunks=Array.from({length:total},(_,i)=>i).filter(i=>!received.has(i));
+            if(missingChunks.length){
+                // Keep session + successfully received parts: client can resend only missing ones.
+                return {ok:false,retryable:true,missingChunks,
+                    errors:[missingChunks.length+' of '+total+' upload parts were not received. Retrying the missing parts.'],
+                    warnings:[],stats:{}};
+            }
+            if(chunks.length!==total)return reject(['Upload has unexpected duplicate parts. Start the upload again.']);
             const textAll = chunks.map((c) => str(c.data.data)).join('');
             const bytes = Buffer.from(textAll, 'utf8');
             if (bytes.length !== num(s.data.size)) return reject([`The file arrived incomplete (${bytes.length} of ${num(s.data.size)} bytes). Upload it again.`]);
