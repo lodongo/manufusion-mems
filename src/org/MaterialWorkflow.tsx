@@ -185,8 +185,6 @@ function Editor({ workflow, roles, users, directoryError, onBack, onSaved }: { w
     const [terminate, setTerminate] = useState(false);
     const [reason, setReason] = useState('');
     const [phrase, setPhrase] = useState('');
-    const [migrationBusy,setMigrationBusy]=useState(false);
-    const [migrationResult,setMigrationResult]=useState('');
     const isMaterialWorkflow=['PRC-001','PRC-002'].includes(workflow.code);
     const confirm = useConfirm();
 
@@ -212,33 +210,6 @@ function Editor({ workflow, roles, users, directoryError, onBack, onSaved }: { w
 
     const update = (patch: Partial<Draft>) => setDraft((d) => ({ ...d, ...patch }));
     const setStep = (i: number, patch: Partial<DraftStep>) => setDraft((d) => ({ ...d, steps: d.steps.map((s, j) => (i === j ? { ...s, ...patch } : s)) }));
-
-    const migrateLegacy=async()=>{
-        if(!isMaterialWorkflow||dirty||!workflow.enabled)return;
-        setMigrationBusy(true);setMigrationResult('');
-        try{
-            const p=await callBackend<{count:number}>( '/api/org/procurement/materials/workflow/migrate',{
-                workflowCode:workflow.code,previewOnly:true,
-            });
-            if(!p.count){setMigrationResult('No legacy pending approvals require migration.');return;}
-            confirm.ask({
-                title:'Adopt '+workflow.code+' for '+p.count+' pending request(s)?',
-                message:'Existing legacy approval decisions will be preserved as an archived audit trail. These requests will restart at the first configured workflow stage so that no old approval bypasses the new authority rules.',
-                confirmLabel:'Migrate pending requests',tone:'danger',
-                acknowledge:'I understand the pending requests will require review and approval again.',
-            },async()=>{
-                setMigrationBusy(true);
-                try{
-                    const r=await callBackend<{migrated:number}>('/api/org/procurement/materials/workflow/migrate',{
-                        workflowCode:workflow.code,confirm:true,
-                    });
-                    setMigrationResult('Moved '+r.migrated+' request(s) onto '+workflow.code+'. Original decisions remain in the legacy approval audit trail.');
-                }catch(e){setMigrationResult(e instanceof Error?e.message:'Migration failed.');}
-                finally{setMigrationBusy(false);}
-            });
-        }catch(e){setMigrationResult(e instanceof Error?e.message:'Unable to check pending approvals.');}
-        finally{setMigrationBusy(false);}
-    };
 
     const back = () => {
         if (!dirty) return onBack();
@@ -296,14 +267,6 @@ function Editor({ workflow, roles, users, directoryError, onBack, onSaved }: { w
                 }
             >
                 {directoryError && <Alert tone='error'>{directoryError}</Alert>}
-                {isMaterialWorkflow&&<Card className='space-y-2'>
-                    <h2 className='font-semibold text-ink'>Existing material requests · workflow migration</h2>
-                    <p className='text-sm text-soft'>The old Approver 1/2/3 configuration is retired. Existing pending requests without workflow assignments must be adopted into {workflow.code}. Original decisions remain archived.</p>
-                    <Button variant='secondary' disabled={migrationBusy||dirty||!workflow.enabled} busy={migrationBusy}
-                        onClick={()=>void migrateLegacy()}>Find and migrate legacy pending requests</Button>
-                    {migrationResult&&<Alert tone='info'>{migrationResult}</Alert>}
-                    {!workflow.enabled&&<p className='text-xs text-soft'>Enable and save this workflow before migrating pending requests.</p>}
-                </Card>}
                 {problems.length > 0 && (
                     <div role='status' className='rounded-lg bg-amber-500/10 p-3 text-sm text-amber-300'>
                         <p className='font-medium'>Before you can save:</p>
