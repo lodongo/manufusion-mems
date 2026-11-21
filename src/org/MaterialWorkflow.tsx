@@ -20,6 +20,7 @@ interface Step {
     role: string;
     uid: string;
     managerLevel: number;
+    action?: 'review' | 'approve';
 }
 interface Workflow {
     code: string;
@@ -46,6 +47,7 @@ interface DraftStep {
     role: string;
     uid: string;
     level: string;
+    action: 'review' | 'approve';
 }
 interface Draft {
     enabled: boolean;
@@ -58,12 +60,12 @@ const API = '/api/org/procurement/workflows';
 const PHRASE = 'TERMINATE ACTIVE WORKFLOWS';
 const MAX_STEPS = 20;
 const normalizePhrase = (v: string) => v.trim().replace(/\s+/g, ' ').toUpperCase();
-const blankStep = (): DraftStep => ({ mode: 'role', role: '', uid: '', level: '1' });
+const blankStep = (): DraftStep => ({ mode: 'role', role: '', uid: '', level: '1', action: 'review' });
 const toDraft = (w: Workflow): Draft => ({
     enabled: w.enabled,
     approvalMode: w.approvalMode || 'sequential',
     approvalRule: w.approvalRule || 'all',
-    steps: (w.steps ?? []).map((s) => ({ mode: s.mode || 'role', role: s.role || '', uid: s.uid || '', level: String(s.managerLevel || 1) })),
+    steps: (w.steps ?? []).map((s,i) => ({ mode: s.mode || 'role', role: s.role || '', uid: s.uid || '', level: String(s.managerLevel || 1),action:s.action|| (i===w.steps.length-1?'approve':'review') })),
 });
 const userName = (u: User) => `${u.firstName ?? ''} ${u.lastName ?? ''}`.trim() || u.uid;
 
@@ -229,7 +231,7 @@ function Editor({ workflow, roles, users, directoryError, onBack, onSaved }: { w
                     enabled: draft.enabled,
                     approvalMode: draft.approvalMode,
                     approvalRule: draft.approvalRule,
-                    steps: draft.steps.map((s) => ({ mode: s.mode, role: s.role, uid: s.uid, managerLevel: Number(s.level) || 1 })),
+                    steps: draft.steps.map((s) => ({ mode: s.mode, role: s.role, uid: s.uid, managerLevel: Number(s.level) || 1,action:s.action })),
                     expectedVersion: workflow.version,
                     terminateActive: terminate,
                     terminationReason: reason.trim(),
@@ -297,13 +299,18 @@ function Editor({ workflow, roles, users, directoryError, onBack, onSaved }: { w
                     return (
                         <Card key={i} className='space-y-3'>
                             <div className='flex items-center justify-between gap-2'>
-                                <span className='text-sm font-semibold text-ink'>Approval {i + 1}</span>
+                                <span className='text-sm font-semibold text-ink'>{workflow.module==='PRC'&&['PRC-001','PRC-002'].includes(workflow.code)?(s.action==='approve'?'Approval stage':'Review stage'):'Workflow stage'} {i + 1}</span>
                                 <Button variant='danger' disabled={draft.steps.length <= 1} onClick={() => update({ steps: draft.steps.filter((_, j) => i !== j) })} aria-label={`Remove approval ${i + 1}`}>
                                     <Trash2 className='h-4 w-4' /> Remove
                                 </Button>
                             </div>
                             <div className='grid gap-3 sm:grid-cols-2'>
-                                <SelectField id={`wf-step-${i}-mode`} label='Approver *' value={s.mode} onChange={(e) => setStep(i, { mode: e.target.value })}>
+                                {['PRC-001','PRC-002'].includes(workflow.code)&&<SelectField id={`wf-step-${i}-action`} label='Stage action *' value={s.action}
+                                    onChange={e=>setStep(i,{action:e.target.value as 'review'|'approve'})}>
+                                    <option value='review'>Review material and recommend</option>
+                                    <option value='approve'>Approve material or extension</option>
+                                </SelectField>}
+                                <SelectField id={`wf-step-${i}-mode`} label='Assigned employee or role *' value={s.mode} onChange={(e) => setStep(i, { mode: e.target.value })}>
                                     <option value='role'>Organization role / position</option>
                                     <option value='manager'>Ascending reporting manager</option>
                                     <option value='user'>Named user</option>
