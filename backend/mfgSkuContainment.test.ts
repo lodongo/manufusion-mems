@@ -79,7 +79,7 @@ test('disallowed or incomplete packaging and bulk selections are rejected',()=>{
     assert.throws(()=>calculateSkuConversion({...base,requiresTransportPackaging:true},params),/Choose transport packaging/);
     assert.throws(()=>calculateSkuConversion({...base,containerId:'CNT_PET'},params),/Bulk storage/);
     assert.throws(()=>calculateSkuConversion({...base,containmentScope:'PRIMARY_CONTAINER'},params),/Choose Bulk storage/);
-    assert.throws(()=>calculateSkuConversion({...common,containmentScope:'BULK_STORAGE'},params),/physical container and size/);
+    assert.throws(()=>calculateSkuConversion({...common,containmentScope:'BULK_STORAGE'},params),/Choose a physical container/);
     assert.throws(()=>calculateSkuConversion({...base,requiresTransportPackaging:'yes' as unknown as boolean},params),/Yes or No/);
 });
 
@@ -126,8 +126,8 @@ test('rating setup guidance distinguishes mismatched and non-container SKUs',()=
     const sku={id:'SKU_000000099',name:'Bulk concentrate',category:'INTERMEDIATE',
         skuComponents:{containmentScope:'BULK_STORAGE',productionFormId:'FRM_01',
             containerId:'CNT_BST',containerSizeId:'SIZ_01'}};
-    assert.equal(skuRatingReadiness(sku,{containerId:'CNT_PET',containerSizeId:'SIZ_02'}).status,
-        'APPLY_SKU_SETUP');
+    assert.equal(skuRatingReadiness({...sku,category:'FINISHED'},
+        {containerId:'CNT_PET',containerSizeId:'SIZ_02'}).status,'APPLY_SKU_SETUP');
     assert.equal(skuRatingReadiness({...sku,skuComponents:{containmentScope:'NONE'}},
         {}).status,'INTERMEDIATE_NO_SPEED');
     assert.equal(skuRatingReadiness({...sku,category:'FINISHED',skuComponents:{containmentScope:'NONE'}},
