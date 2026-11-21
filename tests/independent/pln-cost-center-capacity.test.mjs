@@ -149,14 +149,14 @@ test('mass-based production output converts kilogram throughput to compatible pr
 });
 test('mismatched SKU container, size and category never generate false conversion',()=>{
  assert.throws(()=>derivePhysicalCapacity(sku,params,{...rate,containerCategoryCode:'MET'}),/category or subcategory/);
- assert.throws(()=>derivePhysicalCapacity(sku,params,{...rate,containerSizeId:'SIZE_200'}),/physical-container properties and size/);
+ assert.throws(()=>derivePhysicalCapacity(sku,params,{...rate,containerSizeId:'SIZE_200'}),/configure its capacity directly on the SKU|physical container does not match/);
  assert.throws(()=>derivePhysicalCapacity({...sku,id:'SKU_OTHER'},params,rate),/selected manufactured SKU/);
  const unPacked={...sku,skuComponents:{...sku.skuComponents,packageId:undefined,
   transportPackageId:undefined,transportUnitsPerLoad:undefined}};
  const x=derivePhysicalCapacity(unPacked,params,rate);
  assert.equal(x.productionForm.quantity,9600);
  assert.equal(x.commercialPackaging.quantity,null);
- assert.equal(x.finalProduct.quantity,null);
+ assert.equal(x.finalProduct.quantity,9600);
  assert.equal(x.transportLogistics.quantity,null);
 });
 test('cost centre mapping validates SKU composition, uses optimistic concurrency, and stays out of Asset Register',()=>{
@@ -173,7 +173,7 @@ test('cost centre mapping validates SKU composition, uses optimistic concurrency
  assert.ok(backend.includes('return {costCenterId:id,skuId,revision:'));
  assert.ok(backend.includes('rating};'));
  assert.ok(backend.includes("Physical Container")||backend.includes("physical-container"));
- assert.ok(projection.includes('calculateSkuConversion(components,parameters)'));
+ assert.ok(projection.includes('calculateSkuConversion(components,parameters,'));
  assert.ok(projection.includes('input.containerId!==str(components.containerId)'));
  assert.ok(projection.includes('input.containerSizeId!==str(components.containerSizeId)'));
  assert.ok(!backend.includes('pln_equipment_capacity'));
@@ -186,18 +186,18 @@ test('one editor is shared by the Organization Design gear and Production Planni
  assert.ok(structure.includes("'/api/org/pln/cost-center/eligibility'"));
  assert.ok(structure.includes("setMode(result.manufacturing?{type:'planning'}:{type:'edit'})"));
  assert.ok(structure.includes('<PlnCostCenterSkuSetup costCenterId={node.id}'));
- assert.ok(pln.includes('<PlnCostCenterSetup onMappingsChanged={refreshCapacitySetup} defaultSiteId={formDefaults.defaultSiteId}/>'));
- assert.ok(menu.includes('<PlnCostCenterSkuSetup key={cc} costCenterId={cc} onMappingsChanged={onMappingsChanged}/>'));
+ assert.ok(pln.includes('<PlnCostCenterSetup onMappingsChanged={refreshCapacitySetup}')&&pln.includes('onEditSku={skuId=>'));
+ assert.ok(menu.includes('<PlnCostCenterSkuSetup key={cc} costCenterId={cc} onMappingsChanged={onMappingsChanged} onEditSku={onEditSku}/>'));
  assert.ok(ui.includes('Physical container category'));
  assert.ok(ui.includes('Physical container subcategory / type'));
- assert.ok(ui.includes('Configured physical container size'));
+ assert.ok(ui.includes('Legacy physical container size')&&ui.includes('SKU manual primary-container capacity'));
  assert.ok(ui.includes('Output unit used to express line speed'));
  assert.ok(ui.includes('Count multiplier (Each, Dozen, etc.)'));
  assert.ok(ui.includes('Time period (used for every result)'));
  assert.ok(ui.includes('Final product form'));
  assert.ok(ui.includes('Commercial packaging'));
  assert.ok(ui.includes('Transport & logistics'));
- assert.ok(ui.includes('line.containerSizeId!==sku.skuComponents.containerSizeId'));
+ assert.ok(ui.includes('skuRatingReadiness(selected,line)'));
  assert.ok(ui.includes('/api/org/pln/cost-center/save'));
  assert.ok(index.includes('...plnCostCenterCapacityRoutes'));
  assert.ok(!ui.includes('Commissioned throughput / hour'));
@@ -292,7 +292,7 @@ test('SKU configuration menus and cost-centre scope are compact without losing e
  assert.ok(scope.includes('showLocation||!cc'));
  assert.ok(scope.includes('Change cost centre'));
  assert.ok(scope.includes('setShowLocation(false)'));
- assert.ok(scope.includes('<PlnCostCenterSkuSetup key={cc} costCenterId={cc} onMappingsChanged={onMappingsChanged}/>'));
+ assert.ok(scope.includes('<PlnCostCenterSkuSetup key={cc} costCenterId={cc} onMappingsChanged={onMappingsChanged} onEditSku={onEditSku}/>'));
 });
 test('SKU naming sequence is a standalone configuration section, not product identity',()=>{
  const ui=read('src/org/MfgSkuSetup.tsx');
