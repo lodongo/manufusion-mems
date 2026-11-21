@@ -287,8 +287,8 @@ export function calculateSkuConversion(
         commercialPackagesPerTransportUnit:packagesPerTransport,
         primaryContainersPerTransportUnit:physicalPerLoad,
         productionQtyPerTransportUnit:round(productPerLoad),
-        normalizationUnitsPerTransportUnit:packagesPerTransport!==null
-            ?round((factor??physicalNormalized??0)*packagesPerTransport):null,
+        normalizationUnitsPerTransportUnit:packagesPerTransport!==null&&(factor!==null||physicalNormalized!==null)
+            ?round((factor??physicalNormalized!)*packagesPerTransport):null,
         selectedNames,
     };
 }
