@@ -36,6 +36,8 @@ jobs:
       - run: npm run check
       - name: Asset catalog import safety and mobile transfer regression
         run: node --import tsx --test tests/independent/asset-catalog-import.test.mjs
+      - name: PRC Materials Master classification and attribute regression
+        run: node --import tsx --test tests/independent/prc-material-master-wizard.test.mjs
       - name: Warehouse location subcategory mapping regression
         run: node --import tsx --test tests/independent/warehouse-location-subcategories.test.mjs
       - name: Maintenance governance and access regression tests
