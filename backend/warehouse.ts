@@ -402,6 +402,7 @@ export const warehouseRoutes = {
                 return l ? { ...c, locationName: l.name, classificationLabel: l.restrictionLabel, restrictionCode: l.restrictionCode, restrictionLabel: l.restrictionLabel, aligned: l.aligned, color: l.color } : { ...c, aligned: false };
             });
             const capacity = isObj(d.capacity) ? d.capacity : {};
+            const palletDefaults=isObj(d.palletStacking)?d.palletStacking:{};
             const total = layoutPositions(layout);
             const allocated = clusters.reduce((s, c) => s + c.positions, 0);
             const usedRestrictions = new Set(locations.map((l) => l.restrictionCode));
@@ -414,6 +415,12 @@ export const warehouseRoutes = {
                           materialCategoryCodes: categoryCodesOf(d),
                           storageLocations: locations,
                           storageTypeCode: str(d.storageTypeCode),
+                          palletStacking:{
+                              enabled:str(d.storageTypeCode)==='PAL'&&palletDefaults.enabled===true,
+                              stackedRows:Number(palletDefaults.stackedRows)||1,
+                              stackedColumns:Number(palletDefaults.stackedColumns)||1,
+                              numberOfStacks:Number(palletDefaults.numberOfStacks)||1,
+                          },
                           conditionCode: str(d.conditionCode),
                           layout,
                           capacity: {
@@ -475,6 +482,16 @@ export const warehouseRoutes = {
 
             const storageType = STORAGE_TYPES.find(([c]) => c === str(b.storageTypeCode));
             if (!storageType) throw new HttpError(400, 'Choose the type of storage.');
+            const stackingRaw=isObj(b.palletStacking)?b.palletStacking:{};
+            const stackingEnabled=storageType[0]==='PAL'&&stackingRaw.enabled===true;
+            const palletStacking={
+                enabled:stackingEnabled,
+                stackedRows:stackingEnabled?int(stackingRaw.stackedRows,1,100,'Pallet stacked rows'):1,
+                stackedColumns:stackingEnabled?int(stackingRaw.stackedColumns,1,100,'Pallet stacked columns'):1,
+                numberOfStacks:stackingEnabled?int(stackingRaw.numberOfStacks,1,20,'Pallet number of stacks (high)'):1,
+            };
+            if(palletStacking.stackedRows*palletStacking.stackedColumns>MAX_CLUSTER_POSITIONS)
+                throw new HttpError(400,'Pallet default footprint exceeds the maximum cluster positions.');
             const condition = CONDITIONS.find(([c]) => c === str(b.conditionCode));
             if (!condition) throw new HttpError(400, 'Choose the storage condition.');
 
@@ -605,6 +622,7 @@ export const warehouseRoutes = {
                     locationSeq: seq,
                     storageTypeCode: storageType[0],
                     storageTypeLabel: storageType[1],
+                    palletStacking: palletStacking as unknown as Plain,
                     conditionCode: condition[0],
                     conditionLabel: condition[1],
                     layout: layout as unknown as Plain,
