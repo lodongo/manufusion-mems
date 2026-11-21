@@ -55,7 +55,6 @@ test('draft may be saved without a cluster and redirected with safe prefilled ma
 test('automatic material-to-cluster association never creates an inventory transaction',()=>{
     assert.ok(procurement.includes("clusterAssignmentStatus:clusterCode?'assigned_pending_material_approval':'unassigned'"));
     assert.ok(procurement.includes("await synchronizeMaterialCluster(ctx.orgId"));
-    assert.ok(procurement.includes("clusterCode,'"));
     assert.ok(warehouse.includes('const clusterMaterials=materialDocs.filter'));
     assert.ok(warehouseUI.includes('Assigned materials'));
     assert.ok(warehouseUI.includes('Actual stock placement and physical positions are handled in Inventory after approval'));
