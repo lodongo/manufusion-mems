@@ -4,7 +4,7 @@ import { getNode, record } from './structure';
 import { materialCategories } from './procurement';
 import { locationTypes } from './inventoryMeta';
 import { warehouseRestrictionMaster } from './stockMasters';
-import { MCL_TO_RESTRICTION, SEGREGATED_RESTRICTIONS, restrictionCodesOf, locationBlock } from './restrictionRules';
+import { MCL_TO_RESTRICTION, SEGREGATED_RESTRICTIONS, restrictionCodesOf, locationBlock, binningBlock, effectiveRestriction } from './restrictionRules';
 
 // ---------------------------------------------------------------------------
 // Warehouse and storage setup for cost centers of type Inventory (INV) or Warehousing (WHS).
@@ -803,6 +803,84 @@ export const warehouseRoutes = {
                     `${mode === 'next' ? 'Next free space' : 'From chosen position'} · ${first} to ${last} · ${size} positions · ${location.code} ${location.name} (${restrictionCodes.join(', ')}) · ${subcategories.map((s) => s.code).join(', ')} · ${storageType[1]} / ${condition[1]} · ${palletCapacity===null?'':palletCapacity+' pallet capacity'}`
                 );
                 return { code, positions: size, palletCapacity, firstCode: first, lastCode: last };
+            });
+        }),
+    ],
+
+    'POST /api/org/warehouse/cluster/update': [
+        orgRoute('org.warehouse.cluster.update',null,async(ctx)=>{
+            if(!canEdit(ctx)||!(ctx.role==='org_super_admin'||hasPerm(ctx.directPermissions,'ADM.structure')||
+                ['INV.cluster.create','WHS.cluster.create','WMS.cluster.create'].some(p=>hasPerm(ctx.permissions,p))))
+                throw new HttpError(403,'Cluster configuration permission required.');
+            const node=await storageCostCenter(ctx,str(ctx.body.costCenterId));
+            const code=str(ctx.body.code);
+            if(!CLUSTER_RE.test(code))throw new HttpError(400,'Invalid cluster code.');
+            if(ctx.body.confirm!==true)throw new HttpError(400,'Review and confirm the cluster settings.');
+            return withLock(ctx,node.id,async()=>{
+                const path=clusterCol(ctx.orgId,node.id)+'/'+code;
+                const [doc,wh,master,occupancy]=await Promise.all([
+                    getDoc(path),getDoc(whPath(ctx.orgId,node.id)),
+                    warehouseRestrictionMaster(),listDocs('organizations/'+ctx.orgId+'/warehouse_bin_occupancy'),
+                ]);
+                if(!doc||!wh)throw new HttpError(404,'Cluster or warehouse not found.');
+                const existing=clusterOut(doc,layoutOf(wh.data));
+                const codes=restrictionCodesOf(ctx.body.restrictionCodes);
+                const block=locationBlock(codes,master,'cluster '+code);
+                if(block)throw new HttpError(400,block);
+                if(codes.some(x=>SEGREGATED_RESTRICTIONS.has(x))&&existing.subcategories.length>1)
+                    throw new HttpError(409,'Segregated restrictions require one subcategory in this cluster.');
+                const storageType=STORAGE_TYPES.find(x=>x[0]===(str(ctx.body.storageTypeCode)||existing.storageTypeCode));
+                const condition=CONDITIONS.find(x=>x[0]===(str(ctx.body.conditionCode)||existing.conditionCode||str(wh.data.conditionCode)));
+                if(!storageType||!condition)throw new HttpError(400,'Choose a valid cluster storage type and condition.');
+                const stacking=palletPositionCapacity({
+                    storageTypeCode:storageType[0],
+                    stackingEnabled:ctx.body.stackingEnabled===true,
+                    stackingPattern:str(ctx.body.stackingPattern)||'STRAIGHT',
+                    bottomRowPallets:ctx.body.bottomRowPallets,
+                    bottomRows:ctx.body.bottomRows,
+                    numberOfStacks:ctx.body.numberOfStacks,
+                    count:existing.positions,
+                },storageType[0],Math.max(MAX_CLUSTER_POSITIONS,existing.positions));
+                const held=occupancy.filter(x=>str(x.data.warehouseId)===node.id&&str(x.data.binId).startsWith(code+'__'));
+                if(held.length&&(storageType[0]!==existing.storageTypeCode||
+                    condition[0]!==existing.conditionCode&&condition[0]!==str(wh.data.conditionCode)))
+                    throw new HttpError(409,'This cluster contains linked materials. Delink them before changing storage type or condition.');
+                for(const record of held){
+                    const materialId=str(record.data.materialId);
+                    const [mat,info]=await Promise.all([
+                        getDoc('organizations/'+ctx.orgId+'/materials/'+materialId),
+                        getDoc('organizations/'+ctx.orgId+'/inventory_material_info/'+materialId+'_'+node.id),
+                    ]);
+                    if(!mat)throw new HttpError(409,'A linked material cannot be found. Resolve its occupancy before editing this cluster.');
+                    const effective=effectiveRestriction(info?.data,mat.data);
+                    const mismatch=binningBlock(effective,codes,master,'cluster '+code);
+                    if(mismatch)throw new HttpError(409,'Linked material '+str(mat.data.materialNumber||materialId)+': '+mismatch);
+                }
+                const stamp=nowIso();
+                const selected=codes.map(x=>master.find(m=>m.code===x)!);
+                const data={
+                    ...doc.data,restrictionCodes:codes as unknown as Plain,
+                    restrictionCode:codes[0],restrictionLabel:selected.map(m=>m.label).join(', '),
+                    color:selected[0].color,storageTypeCode:storageType[0],storageTypeLabel:storageType[1],
+                    conditionCode:condition[0],conditionLabel:condition[1],
+                    stackingEnabled:stacking.stackingEnabled,stackingPattern:stacking.stackingPattern,
+                    bottomRowPallets:stacking.bottomRowPallets,bottomRows:stacking.bottomRows,
+                    stackedRows:stacking.stackedRows,stackedColumns:stacking.stackedColumns,
+                    numberOfStacks:stacking.numberOfStacks,secondLevelPallets:stacking.secondLevelPallets,
+                    palletCapacity:stacking.palletCapacity,updatedBy:ctx.uid,updatedAt:stamp,
+                };
+                await writeDoc(path,data);
+                // Existing bin addresses stay stable; synchronise their approved restriction sets.
+                for(const record of held){
+                    await writeDoc('organizations/'+ctx.orgId+'/warehouse_bin_occupancy/'+record.id,{
+                        ...record.data,clusterRestrictionCodes:codes as unknown as Plain,
+                    });
+                }
+                await updateFields(whPath(ctx.orgId,node.id),{updatedAt:stamp});
+                await record(ctx,'org.warehouse.cluster.update',
+                    'Cluster '+code+' of '+str(node.data.code),
+                    'Restrictions '+codes.join(', ')+' · '+storageType[1]+' · '+condition[1]+' · '+stacking.palletCapacity+' pallet capacity');
+                return {ok:true,code,restrictionCodes:codes,palletCapacity:stacking.palletCapacity};
             });
         }),
     ],
