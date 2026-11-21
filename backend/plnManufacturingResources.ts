@@ -37,7 +37,8 @@ async function permitted(ctx:OrgContext,ccId:string,write:boolean){
  if(ctx.role==='org_super_admin')return true;
  const path=await nodePath(ctx.orgId,ccId);
  if(!path.length)return false;
- const perms=write?['MFG.master.edit','PLN.configure','ADM.structure']:['MFG.view','PLN.view','ADM.structure'];
+ const perms=write?['MFG.master.edit','PLN.configure','ADM.structure']:
+    ['MFG.view','PLN.view','ADM.structure','MFG.master.edit','PLN.configure'];
  const scope=await scopeOf(ctx);
  return perms.some(p=>hasPerm(ctx.permissions,p)&&canAt(ctx,p,path,scope));
 }
@@ -72,7 +73,9 @@ const auditResource=async(ctx:OrgContext,action:string,ccId:string,id:string)=>a
 }]);
 export const plnManufacturingResourceRoutes={
  'POST /api/org/pln/resource/list':[orgRoute('org.pln.resource.list',null,async ctx=>{
-   if(ctx.role!=='org_super_admin'&&!['MFG.view','PLN.view','ADM.structure'].some(p=>hasPerm(ctx.permissions,p)))
+   if(ctx.role!=='org_super_admin'&&
+      !['MFG.view','PLN.view','ADM.structure','MFG.master.edit','PLN.configure']
+          .some(p=>hasPerm(ctx.permissions,p)))
       throw new HttpError(403,'Manufacturing or Planning viewing permission required.');
    const [nodes,config,resources]=await Promise.all([
        listDocs(ROOT(ctx.orgId)+'/structure'),
