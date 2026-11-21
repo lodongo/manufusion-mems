@@ -8,6 +8,7 @@ import { Button, Spinner, useLoad } from '../admin/kit';
 import { useConfirm } from '../components/screen';
 import { Balance, Card, FIN_API, FinScreen, Facts, Pending, Pill, fmt, go, useEntity, type Entity } from './finKit';
 import { JournalFeed } from './FinJournal';
+import { costCenterCategoryLabel, costCenterSubcategoryLabel } from '../shared/costCenterTaxonomy';
 
 // Cost centers of a legal entity in finance: every cost center of the entity with its posting status (open, blocked,
 // closed), its account list (a narrower set of the approved profit and loss accounts, which can be imported from another
@@ -21,6 +22,7 @@ interface CcRow {
     department: string;
     site: string;
     costType: string;
+    costSubcategory: string;
     structureStatus: string;
     status: string;
     statusLabel: string;
@@ -36,7 +38,8 @@ const COLS: Array<Column<CcRow>> = [
     { key: 'act', label: 'Actual this year', type: 'number', value: (r) => r.actual, render: (r) => <Balance value={r.actual} /> },
     { key: 'dep', label: 'Department', value: (r) => r.department },
     { key: 'site', label: 'Site', value: (r) => r.site, hidden: true },
-    { key: 'type', label: 'Type', value: (r) => r.costType, hidden: true },
+    { key: 'type', label: 'Category', value: (r) => `${r.costType} · ${costCenterCategoryLabel(r.costType)}` },
+    { key: 'subtype', label: 'Subcategory', value: (r) => r.costSubcategory ? costCenterSubcategoryLabel(r.costType, r.costSubcategory) : 'Not assigned', hidden: true },
     { key: 'list', label: 'Account list', type: 'number', value: (r) => r.restricted, render: (r) => (r.restricted ? `${r.restricted} accounts` : 'All open') },
     { key: 'wh', label: 'Warehouse', value: (r) => (r.warehouse ? 'Yes' : '') },
     { key: 'own', label: 'Mine', value: (r) => (r.owned ? 'Yes' : ''), hidden: true },
@@ -51,7 +54,7 @@ function List({ le }: { le: Entity }) {
 }
 
 interface CcData {
-    cc: { id: string; code: string; name: string; costType: string; structureStatus: string; department: string; site: string; managerRoleCode: string; warehouse: boolean };
+    cc: { id: string; code: string; name: string; costType: string; costSubcategory: string; structureStatus: string; department: string; site: string; managerRoleCode: string; warehouse: boolean };
     status: string;
     statusLabel: string;
     statuses: Record<string, string>;
@@ -312,7 +315,7 @@ function Detail({ le, ccId, tab }: { le: Entity; ccId: string; tab: CcTab }) {
             {msg && <Alert tone='success'>{msg}</Alert>}
             {tab === 'overview' ? (
                 <Card title={`${d.cc.code} ${d.cc.name}`} right={<Pill status={d.status} label={d.statusLabel} />}>
-                    <Facts rows={[['Department', d.cc.department], ['Site', d.cc.site], ['Type', d.cc.costType], ['Structure status', d.cc.structureStatus], ['Warehouse', d.cc.warehouse ? 'Yes' : 'No'], ['You own it', d.owned ? 'Yes' : 'No'], ['Settings version', String(d.version)]]} />
+                    <Facts rows={[['Department', d.cc.department], ['Site', d.cc.site], ['Category', `${d.cc.costType} · ${costCenterCategoryLabel(d.cc.costType)}`], ['Subcategory', d.cc.costSubcategory ? costCenterSubcategoryLabel(d.cc.costType, d.cc.costSubcategory) : 'Not assigned'], ['Structure status', d.cc.structureStatus], ['Warehouse', d.cc.warehouse ? 'Yes' : 'No'], ['You own it', d.owned ? 'Yes' : 'No'], ['Settings version', String(d.version)]]} />
                 </Card>
             ) : (
                 <p className='flex items-center gap-2 text-sm text-ink'>
