@@ -623,12 +623,19 @@ export const plnMfgFoundationRoutes={
                             ?supplied.transportUnitsPerLoad:undefined,
                         normalizationUnitId:str(supplied.normalizationUnitId),
                     };
-                    const result=calculateSkuConversion(selected,configured);
+                    const result=calculateSkuConversion(selected,configured,{
+                        requireProductName:category!=='INTERMEDIATE',
+                    });
                     const physicalPackage=configured.find(p=>p.id===selected.packageId);
                     const naming=await namingSequenceForOrg(ctx.orgId);
                     raw.skuComponents=selected;
                     raw.skuConversion=result;
-                    if(naming.configured&&(creating||applySkuNamingSequence)){
+                    if(category==='INTERMEDIATE'){
+                        // Intermediate bulk/process outputs keep their user-entered identity;
+                        // container configuration must never silently rename WIP masters.
+                        raw.skuNamingSnapshot=old&&isObj(old.data.skuNamingSnapshot)
+                            ?old.data.skuNamingSnapshot:{};
+                    }else if(naming.configured&&(creating||applySkuNamingSequence)){
                         raw.name=composeSkuNameWithSequence(selected,configured,naming.sequence,result);
                         raw.skuNamingSnapshot={revision:naming.revision,sequence:naming.sequence,
                             generatedName:raw.name,generatedAt:nowIso()};
