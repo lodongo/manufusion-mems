@@ -45,3 +45,36 @@ export function catalogUploadIssue(expected:AdminCatalogKind,input:unknown):stri
         return `The ${LABELS[expected]} JSON has no ${collection} entries. Choose a complete master file.`;
     return null;
 }
+
+/** UTF-8 aware chunks: never split a surrogate pair and keep Firestore request payloads small. */
+export function splitUtf8UploadParts(value:string,maxChars=500_000,maxBytes=650_000):string[]{
+    if(maxChars<4||maxBytes<8)throw new Error('Invalid upload chunk limits.');
+    const encoder=new TextEncoder();
+    const parts:string[]=[];
+    let offset=0;
+    while(offset<value.length){
+        let end=Math.min(value.length,offset+maxChars);
+        // Never separate the two UTF-16 code units of a Unicode character.
+        const boundary=()=>{
+            if(end<value.length&&end>offset&&value.charCodeAt(end-1)>=0xD800&&
+                value.charCodeAt(end-1)<=0xDBFF)end--;
+        };
+        boundary();
+        let length=encoder.encode(value.slice(offset,end)).length;
+        if(length>maxBytes){
+            const guess=Math.max(1,Math.floor((end-offset)*(maxBytes/length))-4);
+            end=Math.min(value.length,offset+guess);
+            boundary();
+            length=encoder.encode(value.slice(offset,end)).length;
+            while(length>maxBytes&&end>offset+1){
+                end=Math.max(offset+1,end-512);
+                boundary();
+                length=encoder.encode(value.slice(offset,end)).length;
+            }
+        }
+        if(end<=offset||length>maxBytes)throw new Error('Could not create a safe UTF-8 upload part.');
+        parts.push(value.slice(offset,end));
+        offset=end;
+    }
+    return parts;
+}
