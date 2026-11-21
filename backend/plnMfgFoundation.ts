@@ -604,6 +604,11 @@ export const plnMfgFoundationRoutes={
                     const configured=await skuParametersForOrg(ctx.orgId);
                     if(!configured.length)throw new HttpError(409,'Configure SKU master parameters before creating finished goods.');
                     const selected:SkuComponents={
+                        ...(supplied.containmentScope!==undefined?{containmentScope:str(supplied.containmentScope) as SkuComponents['containmentScope']}:{}),
+                        ...(supplied.requiresCommercialPackaging!==undefined
+                            ?{requiresCommercialPackaging:supplied.requiresCommercialPackaging as boolean}:{}),
+                        ...(supplied.requiresTransportPackaging!==undefined
+                            ?{requiresTransportPackaging:supplied.requiresTransportPackaging as boolean}:{}),
                         productNameId:str(supplied.productNameId),productionFormId:str(supplied.productionFormId),
                         containerId:str(supplied.containerId),containerSizeId:str(supplied.containerSizeId),
                         packageId:str(supplied.packageId),packagingSizeId:str(supplied.packagingSizeId),
