@@ -992,6 +992,14 @@ async function validatePublishedMaterialSelection(draft:Record<string,unknown>):
  * GENERAL remains readable as a legacy alias for old material drafts.
  * A vendor may only be selected later through the authorised procurement workflow.
  */
+/** Every master-level restriction remains mandatory even when Stock Control adds a warehouse override. */
+function materialRequiredRestrictions(info:Record<string,unknown>|undefined,material:Record<string,unknown>):string[]{
+    return restrictionCodesOf([
+        ...restrictionCodesOf(material.warehouseRestrictionCodes,material.warehouseRestriction),
+        effectiveRestriction(info,material),
+    ]);
+}
+
 /** Material-to-cluster association is classification-only until approved and physically allocated in Inventory. */
 async function synchronizeMaterialCluster(ctx:OrgContext,data:Record<string,unknown>):Promise<Record<string,unknown>>{
     const orgId=ctx.orgId;
@@ -1115,9 +1123,7 @@ export const procurementRoutes = {
         const restrictionMaster=await warehouseRestrictionMaster();
         const restrictionInfo=await getDoc(root+'/inventory_material_info/'+id+'_'+warehouseId);
         const classification=effectiveRestriction(restrictionInfo?.data,material.data);
-        const requiredCodes=restrictionCodesOf(
-            str(restrictionInfo?.data.warehouseRestriction)?[classification]:material.data.warehouseRestrictionCodes,
-            classification);
+        const requiredCodes=materialRequiredRestrictions(restrictionInfo?.data,material.data);
         const restrictionBlock=binningBlock(requiredCodes,restrictionCodesOf(bin.restrictionCodes,str(bin.restrictionCode)),restrictionMaster,str(bin.locationLabel)||'this cluster');
         if(restrictionBlock){await audited(ctx,'inventory.bin.link.blocked','Bin '+binId+' · '+str(material.data.materialNumber),{warehouseId,binId,materialId:id,materialRestriction:classification,clusterRestrictions:restrictionCodesOf(bin.restrictionCodes,str(bin.restrictionCode)),reason:restrictionBlock});throw new HttpError(409,restrictionBlock);}if(Array.isArray(bin.subcategoryCodes)&&!bin.subcategoryCodes.map(str).includes(str(material.data.subcategoryCode)))throw new HttpError(409,'This cluster does not permit the material subcategory.');
         if(bin.enabled===false||str(bin.status)==='disabled')throw new HttpError(409,'Bin is disabled.');
@@ -1132,7 +1138,7 @@ export const procurementRoutes = {
     const blockedReason=locationBlock(clusterRestrictions,restrictionMaster,locationLabel);
     if(blockedReason)return {materials:[],blockedReason,restrictionCodes:clusterRestrictions};const infos=new Map((await listDocs(root+'/inventory_material_info')).filter(x=>str(x.data.warehouseId)===warehouseId||x.id.endsWith('_'+warehouseId)).map(x=>[x.id,x.data]));return {restrictionCodes:clusterRestrictions,
     restrictionLabels:clusterRestrictions.map(code=>restrictionMaster.find(x=>x.code===code)?.label||code),
-    blockedReason:'',materials:materials.filter(x=>!occupied.has(x.id)&&!binningBlock(restrictionCodesOf(str(infos.get(x.id+'_'+warehouseId)?.warehouseRestriction)?[effectiveRestriction(infos.get(x.id+'_'+warehouseId),x.data)]:x.data.warehouseRestrictionCodes,effectiveRestriction(infos.get(x.id+'_'+warehouseId),x.data)),clusterRestrictions,restrictionMaster,locationLabel)&&subs.includes(str(x.data.subcategoryCode))&&!!str(x.data.materialNumber)&&(['approved','active'].includes(str(x.data.status).toLowerCase()))&&((Array.isArray(x.data.warehouseIds)&&x.data.warehouseIds.map(str).includes(warehouseId))||(str(x.data.pushedAt)&&str(x.data.warehouseId)===warehouseId)||extensions.some(e=>str(e.data.sourceId)===x.id&&str(e.data.warehouseId)===warehouseId&&str(e.data.status)==='approved'))).map(x=>({id:x.id,materialNumber:str(x.data.materialNumber),name:str(x.data.name),shortText:str(x.data.shortText)}))};})],
+    blockedReason:'',materials:materials.filter(x=>!occupied.has(x.id)&&!binningBlock(materialRequiredRestrictions(infos.get(x.id+'_'+warehouseId),x.data),clusterRestrictions,restrictionMaster,locationLabel)&&subs.includes(str(x.data.subcategoryCode))&&!!str(x.data.materialNumber)&&(['approved','active'].includes(str(x.data.status).toLowerCase()))&&((Array.isArray(x.data.warehouseIds)&&x.data.warehouseIds.map(str).includes(warehouseId))||(str(x.data.pushedAt)&&str(x.data.warehouseId)===warehouseId)||extensions.some(e=>str(e.data.sourceId)===x.id&&str(e.data.warehouseId)===warehouseId&&str(e.data.status)==='approved'))).map(x=>({id:x.id,materialNumber:str(x.data.materialNumber),name:str(x.data.name),shortText:str(x.data.shortText)}))};})],
     'POST /api/org/inventory/material/detail': [orgRoute('org.inventory.material.detail', null, async ctx => {
         if(ctx.role!=='org_super_admin'&&!hasPerm(ctx.permissions,'INV.view')&&!hasPerm(ctx.permissions,'INV.')&&!hasPerm(ctx.permissions,'PRC.view'))throw new HttpError(403,'Inventory access required.');
         const root='organizations/'+ctx.orgId,id=str(ctx.body.id),warehouseId=str(ctx.body.warehouseId);
