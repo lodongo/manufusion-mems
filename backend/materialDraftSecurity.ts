@@ -38,12 +38,16 @@ export function materialDraftCan(
 ): boolean {
     if (!materialApprovalNotStarted(record)) return false;
     if (organizationSuperAdmin) return true;
-    const assigned = new Set(permissions);
-    if (assigned.has('PRC.admin') || assigned.has('PRC.materials.manage')) return true;
-    if (assigned.has('PRC.materials.draft.' + action + '.any')) return true;
+    // Preserve the standard MEMS wildcard semantics for configured organization roles.
+    const permits = (key: string): boolean => permissions.includes('*') ||
+        permissions.includes(key) ||
+        key.split('.').slice(0, -1).some((_, index, parts) =>
+            permissions.includes(parts.slice(0, index + 1).join('.') + '.*'));
+    if (permits('PRC.admin') || permits('PRC.materials.manage')) return true;
+    if (permits('PRC.materials.draft.' + action + '.any')) return true;
     if (idOf(record.createdBy) !== uid) return false;
-    return assigned.has('PRC.materials.draft.' + action + '.own')
-        || assigned.has('PRC.create');
+    return permits('PRC.materials.draft.' + action + '.own')
+        || permits('PRC.create');
 }
 
 /** Records of approvals and rejections are never retroactively made editable by status changes. */
