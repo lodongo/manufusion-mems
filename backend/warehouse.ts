@@ -272,6 +272,12 @@ function clusterOut(doc: Doc, layout: Layout) {
         subcategories: (Array.isArray(d.subcategories) ? (d.subcategories as Plain[]) : []).filter(isObj).map((s) => ({ code: str(s.code), name: str(s.name), categoryCode: str(s.categoryCode) })),
         storageTypeCode: str(d.storageTypeCode),
         storageTypeLabel: str(d.storageTypeLabel),
+        stackingEnabled: str(d.storageTypeCode)==='PAL'&&d.stackingEnabled===true,
+        stackedRows: str(d.storageTypeCode)==='PAL'&&d.stackingEnabled===true?Number(d.stackedRows)||1:null,
+        stackedColumns: str(d.storageTypeCode)==='PAL'&&d.stackingEnabled===true?Number(d.stackedColumns)||1:null,
+        numberOfStacks: str(d.storageTypeCode)==='PAL'&&d.stackingEnabled===true?Number(d.numberOfStacks)||1:null,
+        palletCapacity: str(d.storageTypeCode)==='PAL'
+            ?(d.stackingEnabled===true?Number(d.palletCapacity)||positions:positions):null,
         createdByName: str(d.createdByName),
         createdAt: str(d.createdAt),
     };
@@ -410,7 +416,8 @@ export const warehouseRoutes = {
                           updatedAt: str(d.updatedAt),
                       }
                     : null,
-                summary: { totalPositions: total, allocated, free: total - allocated, clusters: clusters.length },linkedBins,
+                summary: { totalPositions: total, allocated, free: total - allocated, clusters: clusters.length,
+                    palletCapacity: clusters.reduce((sum,c)=>sum+(c.palletCapacity??0),0) },linkedBins,
                 clusters,
                 categories,
                 restrictions: restrictions.filter((c) => c.active || usedRestrictions.has(c.code)),
@@ -638,7 +645,18 @@ export const warehouseRoutes = {
                 const floorNo = int(b.floor, 1, layout.floors.length, 'The floor');
                 const floor = layout.floors[floorNo - 1];
                 const total = floorPositions(floor);
-                const size = int(b.count, 1, Math.min(MAX_CLUSTER_POSITIONS, total), 'The number of positions');
+                const palletType=str(b.storageTypeCode)||str(wh.data.storageTypeCode);
+                const stackingEnabled=palletType==='PAL'&&b.stackingEnabled===true;
+                const stackedRows=stackingEnabled?int(b.stackedRows,1,100,'Stacked rows'):null;
+                const stackedColumns=stackingEnabled?int(b.stackedColumns,1,100,'Stacked columns'):null;
+                const numberOfStacks=stackingEnabled?int(b.numberOfStacks,1,20,'Number of stacks (pallets high)'):null;
+                if(b.stackingEnabled===true&&palletType!=='PAL')
+                    throw new HttpError(400,'Pallet stacking can be configured only for pallet storage.');
+                const footprint=stackingEnabled?(stackedRows??1)*(stackedColumns??1):null;
+                const size=int(b.count,1,Math.min(MAX_CLUSTER_POSITIONS,total),'The number of physical positions');
+                if(footprint!==null&&size!==footprint)
+                    throw new HttpError(400,'Pallet floor positions must equal stacked rows × stacked columns.');
+                const palletCapacity=palletType==='PAL'?size*(numberOfStacks??1):null;
 
                 // Storage location of this warehouse.
                 const { locations } = await describeLocations(locationsOf(wh.data));
@@ -731,6 +749,9 @@ export const warehouseRoutes = {
                         subcategories: subcategories as unknown as Plain,
                         storageTypeCode: storageType[0],
                         storageTypeLabel: storageType[1],
+                        stackingEnabled,
+                        ...(stackingEnabled?{stackedRows,stackedColumns,numberOfStacks}:{}),
+                        palletCapacity,
                         positions: size,
                         createdBy: ctx.uid,
                         createdByName: displayName(ctx),
@@ -744,9 +765,9 @@ export const warehouseRoutes = {
                     ctx,
                     'org.warehouse.cluster.create',
                     `Cluster ${code} of ${str(node.data.code)}`,
-                    `${mode === 'next' ? 'Next free space' : 'From chosen bin'} · ${first} to ${last} · ${size} positions · ${location.code} ${location.name} (${location.restrictionCode} ${location.restrictionLabel}) · ${subcategories.map((s) => s.code).join(', ')} · ${storageType[1]}`
+                    `${mode === 'next' ? 'Next free space' : 'From chosen position'} · ${first} to ${last} · ${size} positions · ${location.code} ${location.name} (${location.restrictionCode} ${location.restrictionLabel}) · ${subcategories.map((s) => s.code).join(', ')} · ${storageType[1]} · ${palletCapacity===null?'':palletCapacity+' pallet capacity'}`
                 );
-                return { code, positions: size, firstCode: first, lastCode: last };
+                return { code, positions: size, palletCapacity, firstCode: first, lastCode: last };
             });
         }),
     ],
