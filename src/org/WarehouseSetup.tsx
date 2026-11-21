@@ -1193,8 +1193,10 @@ function ClusterForm({ data, onDone, onCancel }: { data: Data; onDone: (code: st
     const [storageType, setStorageType] = useState(setup.storageTypeCode);
     const [stackingEnabled,setStackingEnabled]=useState(
         setup.storageTypeCode==='PAL'&&setup.palletStacking?.enabled===true);
-    const [stackedRows,setStackedRows]=useState(String(setup.palletStacking?.stackedRows??1));
-    const [stackedColumns,setStackedColumns]=useState(String(setup.palletStacking?.stackedColumns??1));
+    const [stackingPattern,setStackingPattern]=useState<'STRAIGHT'|'PYRAMID'>(
+        setup.palletStacking?.stackingPattern==='PYRAMID'?'PYRAMID':'STRAIGHT');
+    const [stackedRows,setStackedRows]=useState(String(setup.palletStacking?.bottomRows??setup.palletStacking?.stackedRows??1));
+    const [stackedColumns,setStackedColumns]=useState(String(setup.palletStacking?.bottomRowPallets??setup.palletStacking?.stackedColumns??1));
     const [numberOfStacks,setNumberOfStacks]=useState(String(setup.palletStacking?.numberOfStacks??1));
     const [confirmed, setConfirmed] = useState(false);
     const [busy, setBusy] = useState(false);
@@ -1210,13 +1212,16 @@ function ClusterForm({ data, onDone, onCancel }: { data: Data; onDone: (code: st
     const largestGap = useMemo(() => freeGaps(total, occupied).reduce((m, g) => Math.max(m, g[1] - g[0] + 1), 0), [total, occupied]);
     const palletMode=storageType==='PAL';
     const stackMode=palletMode&&stackingEnabled;
-    const stackValues=[stackedRows,stackedColumns,numberOfStacks].map(Number);
-    const stackingValid=stackValues.every((n,i)=>Number.isInteger(n)&&n>=1&&n<=(i===2?20:100))&&
-        [stackedRows,stackedColumns,numberOfStacks].every(x=>x.trim()!=='');
+    const stackValues=[stackedRows,stackedColumns,stackingPattern==='PYRAMID'?'2':numberOfStacks].map(Number);
     const size=stackMode?stackValues[0]*stackValues[1]:Number(countText);
+    const stackingValid=stackValues.every((n,i)=>Number.isInteger(n)&&n>=1&&n<=(i===2?20:100))&&
+        [stackedRows,stackedColumns,stackingPattern==='PYRAMID'?'2':numberOfStacks].every(x=>x.trim()!=='')&&
+        (stackingPattern!=='PYRAMID'||size%2===0);
     const sizeOk=(stackMode?stackingValid:countText.trim()!=='')&&
         Number.isInteger(size)&&size>=1&&size<=data.limits.clusterPositions;
-    const palletCapacity=palletMode&&sizeOk?size*(stackMode?stackValues[2]:1):null;
+    const secondLevelPallets=stackMode&&stackingPattern==='PYRAMID'?size/2:null;
+    const palletCapacity=palletMode&&sizeOk?
+        (stackMode&&stackingPattern==='PYRAMID'?size+(secondLevelPallets??0):size*(stackMode?stackValues[2]:1)):null;
     const startOrd: number | null = mode === 'next' ? (sizeOk ? nextFreeStart(total, occupied, size) : null) : ordOf(floor, start.r, floor.racking ? start.k : 1, floor.racking ? start.c : 1, start.p);
     const endOrd = startOrd !== null && sizeOk ? startOrd + size - 1 : null;
     const fits = endOrd !== null && endOrd <= total - 1;
@@ -1225,7 +1230,8 @@ function ClusterForm({ data, onDone, onCancel }: { data: Data; onDone: (code: st
     const shownOptions = options.filter((l) => (!clusterClass || l.restrictionCode === clusterClass) && (!q.trim() || `${l.code} ${l.name} ${l.typeLabel} ${l.restrictionCode} ${l.restrictionLabel}`.toLowerCase().includes(q.trim().toLowerCase())));
     const chosen = options.find((l) => l.code === location);
     const problems: string[] = [];
-    if (!sizeOk) problems.push(stackMode?'Enter valid pallet rows (1–100), columns (1–100) and stacks high (1–20), within the available floor positions.':
+    if (!sizeOk) problems.push(stackMode?
+        'Enter pallets per bottom row and number of rows (1–100 each). Straight allows 1–20 levels; pyramid is restricted to 2 with exactly half the bottom pallets above (bottom count must be even).':
         `Enter the number of physical positions: a whole number from 1 to ${data.limits.clusterPositions.toLocaleString()}.`);
     else if (mode === 'next' && startOrd === null) problems.push(`Floor ${letter(floorNo)} has no free space of ${size.toLocaleString()} positions in sequence (largest free space: ${largestGap.toLocaleString()}).`);
     if (startOrd !== null && endOrd !== null && !fits) problems.push(`Only ${(total - startOrd).toLocaleString()} positions remain on this floor from ${codeAt(floorNo, floor, startOrd)}.`);
@@ -1260,8 +1266,8 @@ function ClusterForm({ data, onDone, onCancel }: { data: Data; onDone: (code: st
                 subcategoryCodes: subCodes,
                 storageTypeCode: storageType,
                 stackingEnabled: stackMode,
-                ...(stackMode?{stackedRows:stackValues[0],stackedColumns:stackValues[1],
-                    numberOfStacks:stackValues[2]}:{}),
+                ...(stackMode?{stackingPattern,bottomRowPallets:stackValues[1],
+                    bottomRows:stackValues[0],numberOfStacks:stackValues[2]}:{}),
                 confirm: confirmed,
             });
             onDone(res.code);
@@ -1325,15 +1331,26 @@ function ClusterForm({ data, onDone, onCancel }: { data: Data; onDone: (code: st
                             Enable pallet stacking
                         </label>
                         {stackingEnabled&&<>
+                            <SelectField id='cl-stacking-pattern' label='Stacking arrangement *' value={stackingPattern}
+                                onChange={e=>{setStackingPattern(e.target.value as 'STRAIGHT'|'PYRAMID');setConfirmed(false);}}>
+                                <option value='STRAIGHT'>Straight — one directly on top of another</option>
+                                <option value='PYRAMID'>Pyramid — maximum 2 levels, half of bottom on top</option>
+                            </SelectField>
                             <div className='grid grid-cols-2 gap-3'>
-                                <NumField id='cl-stack-rows' label='Stacked rows *' value={stackedRows} onChange={change(setStackedRows)}/>
-                                <NumField id='cl-stack-cols' label='Stacked columns *' value={stackedColumns} onChange={change(setStackedColumns)}/>
+                                <NumField id='cl-bottom-row-pallets' label='Pallets per bottom row *' value={stackedColumns} onChange={change(setStackedColumns)}/>
+                                <NumField id='cl-bottom-rows' label='Number of rows *' value={stackedRows} onChange={change(setStackedRows)}/>
                                 <div className='col-span-2'>
-                                    <NumField id='cl-stacks' label='Number of stacks (pallets high) *' value={numberOfStacks} onChange={change(setNumberOfStacks)}/>
+                                    {stackingPattern==='STRAIGHT'?
+                                        <NumField id='cl-stacks' label='Number of levels (pallets high) *'
+                                            value={numberOfStacks} onChange={change(setNumberOfStacks)}/>:
+                                        <p className='rounded-lg border border-line p-3 text-sm text-ink'>Pyramid: fixed at 2 levels. Upper layer must contain exactly half the bottom pallets. Bottom count must be even.</p>}
                                 </div>
                             </div>
-                            <p className='text-xs text-soft'>Ground positions = rows × columns. Pallet capacity = ground positions × pallets high. Check site load, height and stability limits.</p>
-                        </>}
+                            <p className='text-xs text-soft' aria-live='polite'>{sizeOk?
+                                `${size.toLocaleString()} bottom pallets + ${(palletCapacity??size)-size} above = ${palletCapacity?.toLocaleString()} pallet places`:
+                                'Enter valid dimensions. Pyramid requires an even bottom pallet count.'}</p>
+                            <p className='text-xs text-soft'>Pallet capacity is an estimate, subject to site load, height and stability limits.</p>
+                        </>
                         <div className='grid grid-cols-2 gap-2' aria-live='polite'>
                             <Stat label='Ground positions' value={sizeOk?size.toLocaleString():'—'}/>
                             <Stat label='Pallet capacity' value={palletCapacity===null?'—':palletCapacity.toLocaleString()}/>
@@ -1359,7 +1376,7 @@ function ClusterForm({ data, onDone, onCancel }: { data: Data; onDone: (code: st
                         ))}
                     </div>
                     {!stackMode&&<NumField id='cl-count' label='Number of floor/storage positions *' value={countText} onChange={change(setCountText)} hint={`Up to ${Math.min(data.limits.clusterPositions, total).toLocaleString()} · taken in sequence: rack row › rack › column › position`} />}
-                    {stackMode&&<p className='rounded-lg border border-line bg-panel p-3 text-xs text-soft'>Calculated from the pallet stacking setup above: {sizeOk?size.toLocaleString():'—'} physical positions and {palletCapacity===null?'—':palletCapacity.toLocaleString()} pallet places.</p>}
+                    {stackMode&&<p className='rounded-lg border border-line bg-panel p-3 text-xs text-soft'>Calculated from the {stackingPattern==='PYRAMID'?'two-level pyramid':'straight stack'} above: {sizeOk?size.toLocaleString():'—'} physical ground positions and {palletCapacity===null?'—':palletCapacity.toLocaleString()} total pallet places.</p>}
                     {mode === 'start' && (
                         <>
                             <p className='text-sm text-slate-300'>Starting physical location</p>
