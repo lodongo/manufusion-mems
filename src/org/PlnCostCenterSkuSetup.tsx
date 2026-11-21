@@ -2,9 +2,10 @@ import {useEffect,useId,useState,type ReactNode} from 'react';
 import {Alert,Field,SelectField} from '../components/ui';
 import {callBackend} from '../lib/backend';
 import {THROUGHPUT_OUTPUTS,throughputOutput,throughputOutputGroups} from '../shared/throughputOutput';
+import {skuRatingReadiness} from '../shared/plnSkuRatingReadiness';
 
 type SkuComposition={containerId?:string;containerSizeId?:string;productionFormId?:string;
- packageId?:string;transportPackageId?:string};
+ containmentScope?:string;packageId?:string;transportPackageId?:string};
 type Output={id:string;name:string;siteId:string;uom:string;category:string;status:string;
  skuComponents:SkuComposition;revision:number};
 type Container={id:string;name:string;categoryCode:string;categoryName:string;
@@ -49,13 +50,13 @@ const valid=(x:Line)=>!!(x.skuId&&x.containerId&&x.containerSizeId&&
 function projectedRow(title:string,value:Quantity){
  return <div className='rounded-lg border border-line bg-page p-3'>
   <p className='text-xs text-muted'>{title}</p>
-  <p className='mt-1 text-sm font-semibold'>{value.quantity===null?'Not configured':pretty(value.quantity)+' '+value.unit}</p>
+  <p className='mt-1 text-sm font-semibold'>{value.quantity===null?(value.reason?.toLowerCase().includes('not required')?'Not applicable':'Not configured'):pretty(value.quantity)+' '+value.unit}</p>
   <p className='mt-1 text-xs text-muted'>{value.name}{value.reason?' · '+value.reason:''}</p>
  </div>;
 }
 
 /** The Organization Design gear and PLN hierarchy share one physical-container-based rating editor. */
-export default function PlnCostCenterSkuSetup({costCenterId,initialSkuId='',onBack,onMappingsChanged}:{costCenterId:string;initialSkuId?:string;onBack?:()=>void;onMappingsChanged?:()=>void}){
+export default function PlnCostCenterSkuSetup({costCenterId,initialSkuId='',onBack,onMappingsChanged,onEditSku}:{costCenterId:string;initialSkuId?:string;onBack?:()=>void;onMappingsChanged?:()=>void;onEditSku?:(skuId:string)=>void}){
  const [data,setData]=useState<Details|null>(null),[lines,setLines]=useState<Line[]>([]);
  const [revision,setRevision]=useState(0),[busy,setBusy]=useState(false),[loading,setLoading]=useState(true);
  const [error,setError]=useState(''),[notice,setNotice]=useState('');
@@ -118,20 +119,15 @@ export default function PlnCostCenterSkuSetup({costCenterId,initialSkuId='',onBa
   else if(!sku)result.push('This SKU is not available at the selected site. Refresh the available SKUs.');
   else if(lines.some((x,j)=>j!==i&&x.skuId===line.skuId))
    result.push('This SKU is already mapped to this manufacturing cost centre.');
-  if(sku){
-   if(!sku.skuComponents.containerId||!sku.skuComponents.containerSizeId)
-    result.push('Configure the SKU physical container and its size in Materials & Products first.');
-   if(!container)result.push('Choose an adopted physical container for this SKU.');
-   else{
-    if(container.id!==sku.skuComponents.containerId)
-     result.push('Physical container does not match the SKU in Product Configuration.');
-    if(container.categoryCode!==line.containerCategoryCode||
-       container.subcategoryCode!==line.containerSubcategoryCode)
-     result.push('Physical container category or subcategory does not match its adopted type.');
-   }
-   if(!line.containerSizeId||line.containerSizeId!==sku.skuComponents.containerSizeId)
-    result.push('Select the physical container size configured on this SKU.');
+  const readiness=skuRatingReadiness(sku,line);
+  if(readiness.status!=='READY'){
+   result.push(readiness.message);
+   return result;
   }
+  if(!container)result.push('The SKU physical container is no longer adopted. Re-adopt it under Product Configuration → Physical Containers.');
+  else if(container.categoryCode!==line.containerCategoryCode||
+      container.subcategoryCode!==line.containerSubcategoryCode)
+   result.push('Use the category and subcategory of the SKU-adopted physical container.');
   if(!Number.isFinite(line.ratingQuantity)||line.ratingQuantity<=0||line.ratingQuantity>1e12)
    result.push('Enter a commissioned rating greater than zero and no more than 1,000,000,000,000.');
   if(!data?.units.count.some(u=>u.code===line.ratingUnitCode))
@@ -179,7 +175,12 @@ export default function PlnCostCenterSkuSetup({costCenterId,initialSkuId='',onBa
    projection:null};
  };
  const preview=async(i:number)=>{
-  const line=lines[i];if(!line||!valid(line))return;
+  const line=lines[i];if(!line)return;
+  const readiness=skuRatingReadiness(outputs.find(o=>o.id===line.skuId),line);
+  if(readiness.status!=='READY'){
+   setError(readiness.message);setOpenSku(line.skuId);setShowValidation(true);return;
+  }
+  if(!valid(line)){setError('Enter a commissioned quantity, Count multiplier and time period before calculating.');return;}
   setBusy(true);setError('');setNotice('');
   try{
    const res=await callBackend<{line:Line}>('/api/org/pln/cost-center/preview',{
@@ -266,7 +267,7 @@ export default function PlnCostCenterSkuSetup({costCenterId,initialSkuId='',onBa
     </div>
     <div className='flex flex-wrap items-start justify-between gap-2'>
      <div><h3 className='font-semibold'>SKU allocation</h3>
-      <p className='mt-1 text-xs text-muted'>Rate the selected physical container, then view the equivalent production-form, finished-product, commercial and logistics outputs for the same time interval.</p>
+      <p className='mt-1 text-xs text-muted'>Step 1: Save SKU allocations. Step 2: Complete the physical container and size in Materials & Products. Step 3: Refresh SKUs and configure commissioned ratings. Unneeded packaging does not need configuration.</p>
      </div>
      {data.canConfigure&&<div className='flex flex-wrap gap-2'>
       <Action testOverride={data?.testOverride} secondary disabled={busy||lines.length>=100} onClick={addSku}>Add SKU</Action>
