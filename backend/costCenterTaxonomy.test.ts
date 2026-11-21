@@ -4,7 +4,7 @@ import {
     COST_CENTER_CATEGORIES, costCenterCategoryLabel,
     costCenterSubcategories, costCenterSubcategoryLabel,
     selectedCostCenterSubcategories, costCenterSubcategoriesLabel,
-    validateCostCenterSubcategorySelection,
+    validateCostCenterSubcategorySelection, validateEquipmentCostCenterSubcategory,
 } from '../src/shared/costCenterTaxonomy';
 import { isManufacturingCostType } from './plnCostCenterCapacity';
 
@@ -88,4 +88,29 @@ test('every inventory and warehousing subcategory retains its category-level ope
         assert.equal(validateCostCenterSubcategorySelection(code, subcategoryCodes, subcategoryCodes[0], true).length, 3);
         assert.equal(isManufacturingCostType(code, []), false);
     }
+});
+
+test('equipment unit selects exactly one of the parent cost center activities', () => {
+    const production = costCenterSubcategories('MFG');
+    const parent = { costSubcategories: [production[3].code, production[14].code] };
+    assert.equal(validateEquipmentCostCenterSubcategory(parent, production[14].code, true),
+        production[14].code);
+    assert.equal(validateEquipmentCostCenterSubcategory(
+        { costSubcategory: production[3].code }, production[3].code, true,
+    ), production[3].code, 'Legacy single-selection parent is supported');
+    assert.throws(() => validateEquipmentCostCenterSubcategory(parent, production[2].code, true),
+        /must be one of/);
+    assert.throws(() => validateEquipmentCostCenterSubcategory(parent,
+        costCenterSubcategories('INV')[0].code, true), /must be one of/);
+    assert.throws(() => validateEquipmentCostCenterSubcategory(parent, '', true), /Choose an equipment/);
+    assert.throws(() => validateEquipmentCostCenterSubcategory(parent, [production[3].code], true),
+        /Choose an equipment/);
+});
+
+test('unclassified legacy parent cannot receive new equipment and legacy edits remain possible', () => {
+    assert.throws(() => validateEquipmentCostCenterSubcategory({}, '', true),
+        /Configure at least one/);
+    assert.equal(validateEquipmentCostCenterSubcategory({}, '', false), '');
+    assert.throws(() => validateEquipmentCostCenterSubcategory({}, 'MFG-004', false),
+        /no assigned subcategories/);
 });
