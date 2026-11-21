@@ -9,6 +9,7 @@ import { validatePrimaryContainerSelection, type MfgPrimaryContainerType } from 
 import {validatePackagingLayout, type MfgPackagingType} from './mfgPackagingMetadata';
 import {composeSkuNameFromSequence, type SkuNamingSequence, type SkuNameValues} from '../src/shared/mfgSkuNaming';
 import {throughputOutput} from '../src/shared/throughputOutput';
+import {BULK_STORAGE_CONTAINER_CATEGORY,skuContainmentNeeds,type SkuContainmentScope} from '../src/shared/skuContainmentPolicy';
 
 export const SKU_PARAMETERS={
     productNames:'NME', productionForms:'FRM', containers:'CNT',
@@ -28,6 +29,8 @@ export type SkuParameter={id:string;kind:SkuParameterKind;name:string;
     containersPerLayer?:number;numberOfLayers?:number;
     enabled?:boolean;description?:string};
 export type SkuComponents={
+    containmentScope?:SkuContainmentScope;
+    requiresCommercialPackaging?:boolean;requiresTransportPackaging?:boolean;
     productNameId?:string;productionFormId?:string;containerId?:string;
     containerSizeId?:string;packageId?:string;
     packagingSizeId?:string;packageCountId?:string; // legacy packageCountId read-only compatibility
@@ -36,6 +39,10 @@ export type SkuComponents={
     normalizationUnitId?:string;
 };
 export type SkuConversion={
+    containmentScope:SkuContainmentScope;
+    requiresCommercialPackaging:boolean;requiresTransportPackaging:boolean;
+    productionQtyPerPhysicalContainer:number|null;
+    normalizedUnitsPerPhysicalContainer:number|null;
     productionUom:string;containerSizeInProductionUom:number|null;
     containersPerPackage:number|null;productionQtyPerPackage:number|null;
     normalizationUom:string;productionQtyPerNormalizationUnit:number|null;
@@ -147,13 +154,34 @@ export function calculateSkuConversion(
     const count=values.packagingSizeId
         ? get('packagingSizes',values.packagingSizeId) : get('packageCounts',values.packageCountId);
     const normalize=get('normalizationUnits',values.normalizationUnitId);
-    if(Boolean(container)!==Boolean(size))throw new HttpError(400,'Container and container size must be selected together.');
-    if(!pack&&count)throw new HttpError(400,'Select container packaging before its packaging size.');
+    let needs:ReturnType<typeof skuContainmentNeeds>;
+    try{needs=skuContainmentNeeds(values);}
+    catch(e){throw new HttpError(400,e instanceof Error?e.message:'Invalid SKU requirements.');}
+    if(Boolean(container)!==Boolean(size))throw new HttpError(400,'Physical container and its size must be selected together.');
+    if(needs.containmentScope==='NONE'&&(container||size))
+        throw new HttpError(400,'A direct process-flow SKU must not configure a physical container.');
+    if(needs.containmentScope!=='NONE'&&(!container||!size))
+        throw new HttpError(400,'Choose a physical container and size for the selected containment scope.');
+    if(needs.containmentScope==='BULK_STORAGE'&&container?.categoryCode!==BULK_STORAGE_CONTAINER_CATEGORY)
+        throw new HttpError(400,'Bulk storage SKUs must use a tank, silo or vessel from the Bulk Storage category.');
+    if(needs.containmentScope==='PRIMARY_CONTAINER'&&container?.categoryCode===BULK_STORAGE_CONTAINER_CATEGORY)
+        throw new HttpError(400,'Choose Bulk storage as the containment scope for tanks, silos and bulk vessels.');
+    if(!needs.requiresCommercialPackaging&&(pack||count))
+        throw new HttpError(400,'Commercial packaging is not required; remove its packaging and size configuration.');
+    if(needs.requiresCommercialPackaging&&!pack)
+        throw new HttpError(400,'Select commercial packaging because this SKU requires it.');
+    if(!pack&&count)throw new HttpError(400,'Select commercial packaging before its packaging size.');
     const existingConfiguredLayout=Boolean(pack?.packagingTypeCode&&Number.isSafeInteger(pack.quantity)&&Number(pack.quantity)>0);
     if(pack&&!count&&!existingConfiguredLayout)throw new HttpError(400,'Select the commercial packaging size.');
-    if(transport&&!pack)throw new HttpError(400,'Transport packaging requires commercial packaging.');
-    if((pack||normalize)&&!container)throw new HttpError(400,'Package or normalization requires a configured container and size.');
-    if(normalize&&!pack)throw new HttpError(400,'Select the physical package before normalization.');
+    if(!needs.requiresTransportPackaging&&
+       (transport||values.transportLayeringEnabled||values.transportPackagesPerLayer||values.transportLayerCount||values.transportUnitsPerLoad))
+        throw new HttpError(400,'Transport packaging is not required; remove its loading configuration.');
+    if(needs.requiresTransportPackaging&&!transport)
+        throw new HttpError(400,'Choose transport packaging because this SKU requires it.');
+    if(transport&&!container)
+        throw new HttpError(400,'Transport packaging requires a physical container or bulk vessel.');
+    if(pack&&!container)
+        throw new HttpError(400,'Commercial packaging requires a physical container and its size.');
     const productionUom=str(form?.uom);
     if(!productionUom)throw new HttpError(400,'Production form must define a production unit.');
     // Existing container parameters without category stay readable during migration.
@@ -231,11 +259,19 @@ export function calculateSkuConversion(
         throw new HttpError(400,'Select a transport packaging type before configuring its load.');
     const round=(v:number|null)=>v===null?null:Number(v.toPrecision(12));
     const factor=perPack!==null&&perUnit!==null?perPack/perUnit:null;
+    const physicalNormalized=contentPerContainer!==null&&perUnit!==null?contentPerContainer/perUnit:null;
+    const physicalPerLoad=packagesPerTransport===null?null:(packagedContainers??1)*packagesPerTransport;
+    const productPerLoad=packagesPerTransport===null?null:(perPack??contentPerContainer??0)*packagesPerTransport;
     const reverse=factor!==null?1/factor:null;
     const selectedNames:Record<string,string>={};
     for(const [key,value] of Object.entries({productName:name,productionForm:form,container,containerSize:size,commercialPackage:pack,packageCount:count,transportPackage:transport,normalizationUnit:normalize}))
         if(value)selectedNames[key]=value.name;
     return {
+        containmentScope:needs.containmentScope,
+        requiresCommercialPackaging:needs.requiresCommercialPackaging,
+        requiresTransportPackaging:needs.requiresTransportPackaging,
+        productionQtyPerPhysicalContainer:round(contentPerContainer),
+        normalizedUnitsPerPhysicalContainer:round(physicalNormalized),
         productionUom,containerSizeInProductionUom:round(contentPerContainer),
         containersPerPackage:packagedContainers,
         productionQtyPerPackage:round(perPack),
@@ -249,12 +285,10 @@ export function calculateSkuConversion(
         reverseConversionFactor:round(reverse),
         transportLayeringEnabled:transport?stacking:false,
         commercialPackagesPerTransportUnit:packagesPerTransport,
-        primaryContainersPerTransportUnit:packagedContainers!==null&&packagesPerTransport!==null
-            ?packagedContainers*packagesPerTransport:null,
-        productionQtyPerTransportUnit:perPack!==null&&packagesPerTransport!==null
-            ?round(perPack*packagesPerTransport):null,
-        normalizationUnitsPerTransportUnit:factor!==null&&packagesPerTransport!==null
-            ?round(factor*packagesPerTransport):null,
+        primaryContainersPerTransportUnit:physicalPerLoad,
+        productionQtyPerTransportUnit:round(productPerLoad),
+        normalizationUnitsPerTransportUnit:packagesPerTransport!==null
+            ?round((factor??physicalNormalized??0)*packagesPerTransport):null,
         selectedNames,
     };
 }
