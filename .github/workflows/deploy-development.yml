@@ -65,6 +65,7 @@ jobs:
           npm ci --no-audit --no-fund
           npm run check
           npm run test:cost-centers
+          npm run test:sku-containment
           npm run build
 
       - name: Verify backend can boot and serve /health before container push
