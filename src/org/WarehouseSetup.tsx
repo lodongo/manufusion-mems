@@ -238,6 +238,8 @@ function LocDot({ color, size = 'h-3 w-3' }: { color: string; size?: string }) {
 }
 
 type Tab = 'setup' | 'topology' | 'clusters' | 'positions';
+type ClusterPrefill={warehouseId:string;materialId:string;categoryCode:string;subcategoryCode:string;
+    restrictionCodes:string[];createdAt:number};
 
 export default function WarehouseSetup({ costCenterId, onBack }: { costCenterId: string; onBack: () => void }) {
     const { data, error, loading, reload } = useLoad(() => callBackend<Data>('/api/org/warehouse/get', { costCenterId }), [costCenterId]);
@@ -246,6 +248,22 @@ export default function WarehouseSetup({ costCenterId, onBack }: { costCenterId:
     const [newCluster, setNewCluster] = useState(false);
     const [openCluster, setOpenCluster] = useState('');
     const [positionsOf, setPositionsOf] = useState('');
+    const [prefill,setPrefill]=useState<ClusterPrefill|null>(null);
+    const [handoffWarning,setHandoffWarning]=useState('');
+    useEffect(()=>{
+        if(!data?.configured||!data.canEdit)return;
+        const key='mems.cluster.prefill.'+costCenterId;
+        const raw=sessionStorage.getItem(key);
+        if(!raw)return;
+        sessionStorage.removeItem(key);
+        try{
+            const draft=JSON.parse(raw) as ClusterPrefill;
+            if(draft.warehouseId!==costCenterId||!draft.materialId||
+                !Array.isArray(draft.restrictionCodes)||!draft.restrictionCodes.length||
+                Date.now()-Number(draft.createdAt)>30*60*1000)return;
+            setPrefill(draft);setTab('clusters');setNewCluster(true);
+        }catch{/* Bad or expired handoff is ignored; normal warehouse setup remains accessible. */}
+    },[data?.configured,data?.canEdit,costCenterId]);
 
     if (loading && !data) return <Spinner />;
     if (error || !data) return <Alert tone='error'>{error || 'Could not load the storage setup.'}</Alert>;
@@ -258,7 +276,9 @@ export default function WarehouseSetup({ costCenterId, onBack }: { costCenterId:
     };
 
     if ((editing || !d.configured) && d.canEdit && tab === 'setup') return <SetupForm data={d} onDone={() => (done(), setTab('topology'))} onCancel={d.configured ? () => setEditing(false) : onBack} />;
-    if (newCluster && d.setup) return <ClusterForm data={d} onDone={(c) => (done(), setTab('clusters'), setOpenCluster(c))} onCancel={() => setNewCluster(false)} />;
+    if (newCluster && d.setup) return <ClusterForm data={d} prefill={prefill}
+        onDone={(c,warning) => {done();setPrefill(null);setHandoffWarning(warning||'');setTab('clusters');setOpenCluster(c);}}
+        onCancel={() => {setNewCluster(false);setPrefill(null);}} />;
     const cluster = d.clusters.find((c) => c.code === openCluster);
 
     const pending = d.alignment?.pending ?? [];
@@ -332,6 +352,7 @@ export default function WarehouseSetup({ costCenterId, onBack }: { costCenterId:
                 {tab === 'setup' && d.setup && <SetupView data={d} setup={d.setup} onTopology={() => setTab('topology')} />}
                 {tab === 'topology' && d.setup && <PhysicalStorage data={d} setup={d.setup} reload={reload} />}
                 {tab === 'clusters' && !cluster && <ClusterList data={d} onOpen={setOpenCluster} />}
+                {handoffWarning&&<Alert tone='warn'>{handoffWarning}</Alert>}
                 {tab === 'clusters' && cluster && <ClusterDetail data={d} cluster={cluster} onDeleted={done} onPositions={() => (setPositionsOf(cluster.code), setTab('positions'), setOpenCluster(''))} />}
                 {tab === 'positions' && <PositionList data={d} clusterCode={positionsOf} onCluster={setPositionsOf} />}
             </div>
@@ -1257,13 +1278,14 @@ function AxisSelect({ id, label, max, fmt, value, onChange }: { id: string; labe
 
 type AllocMode = 'next' | 'start';
 
-function ClusterForm({ data, onDone, onCancel }: { data: Data; onDone: (code: string) => void; onCancel: () => void }) {
+function ClusterForm({ data, onDone, onCancel, prefill }: { data: Data;
+    onDone: (code: string,warning?:string) => void; onCancel: () => void; prefill: ClusterPrefill|null }) {
     const setup = data.setup!;
     const floors = setup.layout.floors;
     const options = setup.storageLocations.filter((l) => l.active);
     const whCats = data.categories.filter((c) => setup.materialCategoryCodes.includes(c.code));
     const allSubs = whCats.flatMap((c) => c.subcategories.map((sc) => ({ ...sc, categoryCode: c.code, categoryName: c.name })));
-    const [subCodes, setSubCodes] = useState<string[]>([]);
+    const [subCodes, setSubCodes] = useState<string[]>(prefill?.subcategoryCode?[prefill.subcategoryCode]:[]);
     const [subQ, setSubQ] = useState('');
     const subTerm = subQ.trim().toLowerCase();
     const toggleSub = (code:string)=>{
@@ -1275,8 +1297,11 @@ function ClusterForm({ data, onDone, onCancel }: { data: Data; onDone: (code: st
     const [countText, setCountText] = useState('');
     const [start, setStart] = useState({ r: 1, k: 1, c: 1, p: 1 });
     const [name, setName] = useState('');
-    const [location, setLocation] = useState(options.length === 1 ? options[0].code : '');
-    const [restrictionCodes,setRestrictionCodes]=useState<string[]>([]);
+    const [location, setLocation] = useState(
+        prefill?.subcategoryCode?options.find(loc=>loc.materialCategoryCode===prefill.categoryCode&&
+            loc.materialSubcategoryCodes?.includes(prefill.subcategoryCode))?.code||'':
+            options.length === 1 ? options[0].code : '');
+    const [restrictionCodes,setRestrictionCodes]=useState<string[]>(prefill?.restrictionCodes||[]);
     const toggleRestriction=(code:string)=>{setRestrictionCodes(current=>
         current.includes(code)?current.filter(x=>x!==code):[...current,code]);
         setConfirmed(false);};
@@ -1373,7 +1398,22 @@ function ClusterForm({ data, onDone, onCancel }: { data: Data; onDone: (code: st
                     bottomRows:stackValues[0],numberOfStacks:stackValues[2]}:{}),
                 confirm: confirmed,
             });
-            onDone(res.code);
+            let warning='';
+            if(prefill?.materialId){
+                try{
+                    await callBackend('/api/org/procurement/materials/update',{
+                        id:prefill.materialId,data:{
+                            warehouseId:data.costCenter.id,clusterCode:res.code,
+                            warehouseRestrictionCodes:restrictionCodes,
+                            warehouseRestriction:restrictionCodes[0]||'',
+                        },
+                    });
+                }catch(e){
+                    warning='Cluster '+res.code+' was created, but the saved material draft could not be linked automatically: '+
+                        (e instanceof Error?e.message:'Open the material draft and select this cluster.');
+                }
+            }
+            onDone(res.code,warning);
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Could not create the cluster.');
             setConfirmed(false);
@@ -1396,6 +1436,7 @@ function ClusterForm({ data, onDone, onCancel }: { data: Data; onDone: (code: st
                     </div>
                     <span className='rounded-lg bg-panel px-2.5 py-1.5 text-xs font-semibold text-ink'>7 steps</span>
                 </div>
+                {prefill&&<Alert tone='info'>Material draft {prefill.materialId} · Subcategory {prefill.subcategoryCode} and {prefill.restrictionCodes.length} restriction(s) have been preselected. Complete the physical layout to create its cluster.</Alert>}
                 <div className='rounded-xl border border-line bg-panel px-3 py-2'>
                     <p className={`break-words text-xs font-medium ${clash || (sizeOk && !preview) ? 'text-red-700' : 'text-ink'}`}>
                         {preview || 'Select floor, positions, storage location and material subcategories'}
