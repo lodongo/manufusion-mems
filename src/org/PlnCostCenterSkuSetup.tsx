@@ -251,8 +251,17 @@ export default function PlnCostCenterSkuSetup({costCenterId,initialSkuId='',onBa
       }}>Refresh SKUs</Action>
      </div>}
     </div>
-    <details className='rounded-xl border border-line bg-page p-3' open={!lines.length}>
-     <summary className='cursor-pointer text-sm font-semibold'>Available organization SKUs · {outputs.length} · {already.size} selected</summary>
+    <section className='space-y-2 rounded-xl border border-line bg-page p-3'>
+     <div className='flex flex-wrap items-center justify-between gap-2'>
+      <h4 className='text-sm font-semibold'>SKU list · {outputs.length} available · {already.size} selected</h4>
+      {data.canConfigure&&<Action secondary disabled={busy||!available.length||lines.length>=100}
+       onClick={()=>{
+        const batch=available.slice(0,100-lines.length).map(sku=>newSku(sku.id));
+        setLines(rows=>[...rows,...batch]);
+        if(batch.length)setOpenSku(batch[0].skuId);
+        setError('');setNotice('');
+       }}>Select all available</Action>}
+     </div>
      <p className='my-2 text-xs text-muted'>Select or remove any manufactured SKU within this cost centre. Each mapped SKU gets its own physical-container and throughput rating below. Selection is saved with the commissioned ratings.</p>
      <div className='grid max-h-72 gap-2 overflow-y-auto sm:grid-cols-2'>
       {outputs.map(sku=><label key={sku.id} className='flex min-h-11 cursor-pointer items-center gap-2 rounded-lg border border-line bg-panel p-2 text-sm'>
@@ -275,7 +284,7 @@ export default function PlnCostCenterSkuSetup({costCenterId,initialSkuId='',onBa
        </span>
       </label>)}
      </div>
-    </details>
+    </section>
     {!outputs.length&&<p role='status' className='text-sm text-muted'>No manufactured SKU is configured in this organization. Create one in Materials & Products, then use Refresh SKUs.</p>}
     {!available.length&&lines.length>0&&<p className='text-xs text-muted'>All available organization SKUs are mapped to this manufacturing cost centre. To add more, configure additional manufactured SKUs in Materials & Products, then refresh this list. Your saved ratings remain intact.</p>}
     {lines.map((line,i)=>{
