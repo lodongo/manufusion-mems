@@ -61,7 +61,7 @@ test('wizard refreshes the published PRC catalog, resets new material and loads 
     const backend=read('backend/procurement.ts');
     assert.ok(wizard.includes('materialMasterHierarchy(tree,category,subcategory,family,material)'));
     assert.ok(wizard.includes('reloadMaterialMaster()'));
-    assert.ok(wizard.includes('setCategory('+"'"+''+"'"+');setSubcategory('+"'"+''+"'"+');setFamily('+"'"+''+"'"+');setMaterial('+"'"+''+"'"+')'));
+    assert.ok(wizard.includes("setCategory('');setSubcategory('');setFamily('');setMaterial('')"));
     assert.ok(wizard.includes("callBackend<ClassDetail>(itemApi,{kind:'materials',code:material})"));
     assert.ok(wizard.includes("d.code!==material||d.groupCode!==category||d.categoryCode!==subcategory"));
     assert.ok(wizard.includes('Technical attributes from Materials Master'));
