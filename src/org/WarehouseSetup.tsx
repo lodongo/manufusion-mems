@@ -959,7 +959,99 @@ function ClusterList({ data, onOpen }: { data: Data; onOpen: (code: string) => v
     return <RichTable id='wh.clusters' title='Storage clusters' fileName={`storage_clusters_${data.costCenter.code}`} columns={columns} rows={data.clusters} rowKey={(c) => c.code} onRowClick={(c) => onOpen(c.code)} empty='No clusters yet. Use + Cluster to allocate positions to a storage location.' height='h-[calc(100dvh-15rem)]' />;
 }
 
+function ClusterEditPanel({data,cluster,onSaved,onCancel}:{data:Data;cluster:Cluster;onSaved:()=>void;onCancel:()=>void}){
+    const [codes,setCodes]=useState<string[]>(cluster.restrictionCodes||[]);
+    const [storageType,setStorageType]=useState(cluster.storageTypeCode||'BIN');
+    const [conditionCode,setConditionCode]=useState(cluster.conditionCode||data.setup?.conditionCode||'AMB');
+    const [stacking,setStacking]=useState(cluster.stackingEnabled===true);
+    const [pattern,setPattern]=useState<'STRAIGHT'|'PYRAMID'>(cluster.stackingPattern==='PYRAMID'?'PYRAMID':'STRAIGHT');
+    const [perRow,setPerRow]=useState(String(cluster.bottomRowPallets??cluster.stackedColumns??Math.min(cluster.positions,100)));
+    const [rows,setRows]=useState(String(cluster.bottomRows??cluster.stackedRows??1));
+    const [levels,setLevels]=useState(String(cluster.numberOfStacks??1));
+    const [busy,setBusy]=useState(false);
+    const [error,setError]=useState('');
+    const palletMode=storageType==='PAL';
+    const a=Number(perRow),b=Number(rows),n=pattern==='PYRAMID'?2:Number(levels);
+    const footprint=a*b;
+    const layoutValid=!stacking||(palletMode&&Number.isInteger(a)&&a>=1&&a<=100&&
+        Number.isInteger(b)&&b>=1&&b<=100&&Number.isInteger(n)&&n>=1&&n<=20&&
+        footprint===cluster.positions&&(pattern!=='PYRAMID'||footprint%2===0));
+    const palletCapacity=palletMode?
+        (stacking?(pattern==='PYRAMID'?footprint+footprint/2:footprint*n):cluster.positions):null;
+    const save=async()=>{
+        setError('');
+        if(!codes.length)return setError('Select at least one warehouse restriction.');
+        if(codes.some(code=>!data.restrictions.find(r=>r.code===code&&r.active)))
+            return setError('Select only enabled warehouse restrictions.');
+        if(!layoutValid)return setError('Pallet rows × pallets per bottom row must equal the existing physical positions. Pyramid also needs an even bottom pallet count.');
+        if(!(await appConfirm('Save this cluster configuration? Linked materials must remain compatible with every selected change.')))return;
+        setBusy(true);
+        try{
+            await callBackend('/api/org/warehouse/cluster/update',{
+                costCenterId:data.costCenter.id,code:cluster.code,restrictionCodes:codes,
+                storageTypeCode:storageType,conditionCode,stackingEnabled:stacking&&palletMode,
+                ...(stacking&&palletMode?{stackingPattern:pattern,bottomRowPallets:a,bottomRows:b,numberOfStacks:n}:{}),
+                confirm:true,
+            });
+            onSaved();
+        }catch(e){setError(e instanceof Error?e.message:'Could not update cluster.');}
+        finally{setBusy(false);}
+    };
+    return <Card className='space-y-3'>
+        <h3 className='text-base font-semibold text-ink'>Edit cluster {cluster.code}</h3>
+        <p className='text-xs text-soft'>Restrictions, stacking and conditions are specific to this cluster. Existing physical addresses will not be renumbered.</p>
+        <div className='space-y-2'>
+            <p className='text-sm font-semibold text-ink'>Warehouse restrictions *</p>
+            <div className='max-h-60 space-y-1 overflow-y-auto rounded-xl border border-line bg-page p-2'>
+                {data.restrictions.map(r=><label key={r.code} className='flex min-h-11 items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-ink'>
+                    <input type='checkbox' checked={codes.includes(r.code)} disabled={!r.active&&!codes.includes(r.code)}
+                        onChange={()=>setCodes(current=>current.includes(r.code)?current.filter(x=>x!==r.code):[...current,r.code])}/>
+                    <LocDot color={r.color}/>
+                    <span>{r.code} · {r.label}{!r.active?' (disabled)':''}</span>
+                </label>)}
+            </div>
+            <p className='text-xs text-soft'>Selected: {codes.join(', ')||'None'}. Linked materials must retain at least one matching restriction.</p>
+        </div>
+        <SelectField id='edit-cl-storage' label='Physical storage type *' value={storageType}
+            onChange={e=>{setStorageType(e.target.value);setError('');}}>
+            {data.storageTypes.map(t=><option key={t.code} value={t.code}>{t.label}</option>)}
+        </SelectField>
+        <SelectField id='edit-cl-condition' label='Storage condition *' value={conditionCode}
+            onChange={e=>setConditionCode(e.target.value)}>
+            {data.conditions.map(x=><option key={x.code} value={x.code}>{x.label}</option>)}
+        </SelectField>
+        {palletMode&&<div className='space-y-3 rounded-xl border border-line p-3'>
+            <label className='flex items-center gap-2 text-sm font-medium text-ink'>
+                <input type='checkbox' checked={stacking} onChange={e=>setStacking(e.target.checked)}/>
+                Enable pallet stacking
+            </label>
+            {stacking&&<>
+                <SelectField id='edit-cl-pattern' label='Stacking arrangement *' value={pattern}
+                    onChange={e=>setPattern(e.target.value as 'STRAIGHT'|'PYRAMID')}>
+                    <option value='STRAIGHT'>Straight — one on top of another</option>
+                    <option value='PYRAMID'>Pyramid — 2 levels, half on top</option>
+                </SelectField>
+                <div className='grid grid-cols-2 gap-2'>
+                    <NumField id='edit-cl-per-row' label='Pallets per bottom row *' value={perRow} onChange={setPerRow}/>
+                    <NumField id='edit-cl-rows' label='Number of rows *' value={rows} onChange={setRows}/>
+                </div>
+                {pattern==='STRAIGHT'?
+                    <NumField id='edit-cl-levels' label='Number of levels *' value={levels} onChange={setLevels}/>:
+                    <p className='text-xs text-soft'>Pyramid uses exactly 2 levels, with half the bottom pallets on top.</p>}
+                <p className='text-sm text-ink'>Ground positions: {cluster.positions} · Calculated pallet capacity: {layoutValid?palletCapacity:'Invalid footprint'}</p>
+                {!layoutValid&&<p className='text-xs text-amber-700'>The cluster has {cluster.positions} reserved floor positions. Adjust rows and bottom-row pallets to match; footprint cannot be changed here.</p>}
+            </>}
+        </div>}
+        {error&&<Alert tone='error'>{error}</Alert>}
+        <div className='flex flex-wrap gap-2'>
+            <Button type='button' variant='secondary' disabled={busy} onClick={onCancel}>Cancel</Button>
+            <Button type='button' disabled={busy||!layoutValid||!codes.length} busy={busy} onClick={()=>void save()}>Save cluster</Button>
+        </div>
+    </Card>;
+}
+
 function ClusterDetail({ data, cluster, onDeleted, onPositions }: { data: Data; cluster: Cluster; onDeleted: () => void; onPositions: () => void }) {
+    const [editing,setEditing] = useState(false);
     const [removing, setRemoving] = useState(false);
     const [typed, setTyped] = useState('');
     const [reason, setReason] = useState('');
@@ -977,6 +1069,7 @@ function ClusterDetail({ data, cluster, onDeleted, onPositions }: { data: Data; 
             setBusy(false);
         }
     };
+    if(editing)return <ClusterEditPanel data={data} cluster={cluster} onSaved={onDeleted} onCancel={()=>setEditing(false)}/>;
     return (
         <>
             <Card className='space-y-2'>
@@ -1007,6 +1100,9 @@ function ClusterDetail({ data, cluster, onDeleted, onPositions }: { data: Data; 
                     <Layers className='h-4 w-4' />
                     View positions
                 </Button>
+                {data.canEdit&&!removing&&<Button variant='secondary' onClick={()=>setEditing(true)}>
+                    <Pencil className='h-4 w-4'/>Edit cluster
+                </Button>}
                 {data.canEdit && !removing && (
                     <Button variant='danger' onClick={() => setRemoving(true)}>
                         <Trash2 className='h-4 w-4' />
