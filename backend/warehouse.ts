@@ -335,6 +335,8 @@ interface StoredLocation {
     typeCode: string;
     /** Material category governs which catalog subcategories can be made into clusters. */
     materialCategoryCode: string;
+    /** Selected material catalog subcategories permitted under this location's category. */
+    materialSubcategoryCodes: string[];
     /** Warehouse restriction (RS…) from the shared master: decides what may be binned here. */
     restrictionCode: string;
     /** Material classification (MCL-…) saved before restrictions; kept only to suggest a restriction. */
@@ -349,6 +351,8 @@ function locationsOf(d: Record<string, unknown>): StoredLocation[] {
         name: str(l.name),
         typeCode: str(l.typeCode),
         materialCategoryCode: str(l.materialCategoryCode),
+        materialSubcategoryCodes: Array.isArray(l.materialSubcategoryCodes)
+            ? Array.from(new Set(l.materialSubcategoryCodes.map(str).filter(Boolean))) : [],
         restrictionCode: str(l.restrictionCode),
         classificationCode: str(l.classificationCode),
         active: l.active !== false,
@@ -588,13 +592,35 @@ export const warehouseRoutes = {
                     if(held.length&&materialCategoryCode&&held.some(cl=>
                         cl.subcategories.some(sub=>sub.categoryCode!==materialCategoryCode)))
                         throw new HttpError(409,`${tag}: existing clusters use different material categories. Align or redistribute those clusters before assigning a single catalog category.`);
+                    const inheritedSubcategories=held.flatMap(cl=>cl.subcategories
+                        .filter(sub=>sub.categoryCode===materialCategoryCode).map(sub=>sub.code));
+                    // Older clients and legacy locations might not yet have a selection. Keep their
+                    // existing cluster mappings until the user explicitly edits the location.
+                    const rawSubcategories=Array.isArray(raw.materialSubcategoryCodes)
+                        ?raw.materialSubcategoryCodes
+                        :(before?.materialSubcategoryCodes.length
+                            ?before.materialSubcategoryCodes:inheritedSubcategories);
+                    const materialSubcategoryCodes=Array.from(new Set(rawSubcategories.map(str).filter(Boolean)));
+                    if(materialCategoryCode){
+                        const category=catalog.find(c=>c.code===materialCategoryCode);
+                        const allowed=new Set(category?.subcategories.map(sub=>sub.code)||[]);
+                        if(!materialSubcategoryCodes.length)
+                            throw new HttpError(400,`${tag}: select at least one material catalog subcategory.`);
+                        const invalid=materialSubcategoryCodes.filter(code=>!allowed.has(code));
+                        if(invalid.length)
+                            throw new HttpError(400,`${tag}: subcategories ${invalid.join(', ')} do not belong to category ${materialCategoryCode}.`);
+                        const inUse=inheritedSubcategories.filter(code=>!materialSubcategoryCodes.includes(code));
+                        if(inUse.length)
+                            throw new HttpError(409,`${tag}: subcategories ${Array.from(new Set(inUse)).join(', ')} are used by existing clusters. Retain them or move those clusters before changing the location.`);
+                    }else if(materialSubcategoryCodes.length)
+                        throw new HttpError(400,`${tag}: select a material category before selecting subcategories.`);
                     // Preserve legacy restriction for existing clusters, but never ask for or change it on location setup.
                     if (!before) {
                         seq += 1;
                         if (seq > 999) throw new HttpError(400, 'Storage location numbering is exhausted for this warehouse.');
                     }
                     return { code: before ? before.code : `SL-${String(seq).padStart(2, '0')}`, name,
-                        typeCode:type.code,materialCategoryCode,
+                        typeCode:type.code,materialCategoryCode,materialSubcategoryCodes,
                         restrictionCode:before?.restrictionCode??'',classificationCode:before?.classificationCode??'',
                         active:raw.active!==false,createdAt:before?.createdAt||now };
                 });
@@ -659,7 +685,7 @@ export const warehouseRoutes = {
                     `Storage of cost center ${str(node.data.code)}`,
                     [
                         `Categories ${categories.map((x) => x.code).join(', ')}`,
-                        `storage locations ${storageLocations.map((loc) => `${loc.code} ${loc.name} (${typeLabel(loc.typeCode)}${loc.active ? '' : ', inactive'})`).join('; ')}`,
+                        `storage locations ${storageLocations.map((loc) => `${loc.code} ${loc.name} (${typeLabel(loc.typeCode)}, category ${loc.materialCategoryCode||'legacy'}, subcategories ${loc.materialSubcategoryCodes.join(', ')||'legacy'}${loc.active ? '' : ', inactive'})`).join('; ')}`,
                         removed.length ? `removed ${removed.map((p) => p.code).join(', ')}` : '',
                         affectedClusters.length ? `FORCE REMOVED ${affectedClusters.length} clusters: ${affectedClusters.map(x=>x.code).join(', ')} by ${ctx.uid}` : '',
                         'Cluster-managed storage types, stacking and conditions',
@@ -723,6 +749,8 @@ export const warehouseRoutes = {
                     if(!s)throw new HttpError(400,`Subcategory ${code} is not in the warehouse's adopted material categories.`);
                     if(location.materialCategoryCode&&s.categoryCode!==location.materialCategoryCode)
                         throw new HttpError(400,`Subcategory ${code} is not under the storage location category ${location.materialCategoryCode}.`);
+                    if(location.materialCategoryCode&&!location.materialSubcategoryCodes.includes(code))
+                        throw new HttpError(400,`Subcategory ${code} is not selected for storage location ${location.code}. Edit the location and select it first.`);
                     return s;
                 });
 
@@ -856,6 +884,8 @@ export const warehouseRoutes = {
                         throw new HttpError(400,'Select an existing subcategory in the warehouse material catalog.');
                     if(location.materialCategoryCode&&requestedSubcategory.categoryCode!==location.materialCategoryCode)
                         throw new HttpError(409,'The selected subcategory must belong to its parent storage-location category.');
+                    if(location.materialCategoryCode&&!location.materialSubcategoryCodes.includes(requestedSubcategory.code))
+                        throw new HttpError(409,'This subcategory is not enabled for the storage location. Edit the location subcategories first.');
                 }
                 const codes=restrictionCodesOf(ctx.body.restrictionCodes);
                 const block=locationBlock(codes,master,'cluster '+code);
