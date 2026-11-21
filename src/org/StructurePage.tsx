@@ -24,7 +24,7 @@ import { Badge, Button, Card, Empty, PageTitle, Spinner, TextArea, useLoad } fro
 import { CHAIN, LEVELS, LEVEL_EXAMPLES, MAX_UPPER_LEVELS, suggestCode, upperName, type FieldDef } from './structureDefs';
 import type { Position } from './PositionsPage';
 import { appConfirm } from '../components/dialogs';
-import { COST_CENTER_CATEGORIES, costCenterCategoryLabel, costCenterSubcategories, costCenterSubcategoryLabel } from '../shared/costCenterTaxonomy';
+import { COST_CENTER_CATEGORIES, costCenterCategoryLabel, costCenterSubcategories, costCenterSubcategoriesLabel, selectedCostCenterSubcategories } from '../shared/costCenterTaxonomy';
 
 interface Node {
     id: string;
@@ -38,7 +38,7 @@ interface Node {
     status: string;
     managerUid: string;
     managerName: string;
-    attributes: Record<string, string | number>;
+    attributes: Record<string, string | number | string[]>;
     roleCodes: string[];
     logoUrl?: string;
     managerRoleCode?: string;
@@ -232,9 +232,7 @@ function NodeView({ id, canEdit, start }: { id: string; canEdit: boolean; start?
                         <>
                             <Row label='Cost center manager' value={node.managerRoleCode ? `${node.managerRoleTitle} (${node.managerRoleCode})` : '—'} />
                             <Row label='Cost center category' value={`${node.attributes.costType ?? '—'} · ${costCenterCategoryLabel(String(node.attributes.costType ?? ''))}`} />
-                            <Row label='Cost center subcategory' value={node.attributes.costSubcategory
-                                ? costCenterSubcategoryLabel(String(node.attributes.costType ?? ''), String(node.attributes.costSubcategory))
-                                : 'Not yet classified (legacy record)'} />
+                            <Row label='Cost center subcategories' value={costCenterSubcategoriesLabel(String(node.attributes.costType ?? ''), node.attributes)} />
                             <Row label='Held by' value={node.managerHolders?.length ? node.managerHolders.join(', ') : 'Nobody assigned yet'} />
                             <Row label='Currency (from legal entity)' value={String(currency ?? '—')} />
                         </>
@@ -680,9 +678,7 @@ export function LegacyNodeView({ id, canEdit }: { id: string; canEdit: boolean }
                         {node.level === 'cost_center' && (
                             <>
                                 <Row label='Cost center category' value={`${node.attributes.costType ?? '—'} · ${costCenterCategoryLabel(String(node.attributes.costType ?? ''))}`} />
-                                <Row label='Cost center subcategory' value={node.attributes.costSubcategory
-                                    ? costCenterSubcategoryLabel(String(node.attributes.costType ?? ''), String(node.attributes.costSubcategory))
-                                    : 'Not yet classified (legacy record)'} />
+                                <Row label='Cost center subcategories' value={costCenterSubcategoriesLabel(String(node.attributes.costType ?? ''), node.attributes)} />
                                 <Row label='Currency (from legal entity)' value={String(data.ancestors.find((a) => a.level === 'legal_entity')?.attributes.currencyCode ?? '—')} />
                             </>
                         )}
@@ -1056,6 +1052,9 @@ function NodeForm({
     const [attributes, setAttributes] = useState<Record<string, string>>(() => Object.fromEntries(Object.entries(existing?.attributes ?? {}).map(([k, v]) => [k, String(v)])));
     const [banks, setBanks] = useState<Array<{ id: string; name: string; swiftCode: string }>>([]);
     const [costTypes, setCostTypes] = useState(COST_CENTER_CATEGORIES);
+    const [selectedSubcategories, setSelectedSubcategories] = useState<string[]>(() =>
+        selectedCostCenterSubcategories(existing?.attributes));
+    const [subcategorySearch, setSubcategorySearch] = useState('');
     const [assetOpts, setAssetOpts] = useState<{ enabled: boolean; assets: Array<{ tag: string; name: string; className: string }> }>({ enabled: true, assets: [] });
     const [matchingAssets, setMatchingAssets] = useState<Array<{ tag: string; name: string; status: string; nodeCode: string }>>([]);
     const [eligibleLoading, setEligibleLoading] = useState(false);
@@ -1149,11 +1148,15 @@ function NodeForm({
         const missing = def.fields.filter((f) => f.required && !String(attributes[f.key] ?? '').trim());
         if (!name.trim()) return setError('Enter a name.');
         if (level === 'cost_center' && !managerRoleCode) return setError('Choose the cost center manager role.');
-        if (level === 'cost_center' && !attributes.costSubcategory &&
-            (!existing || existing.attributes.costType !== attributes.costType || !!existing.attributes.costSubcategory))
-            return setError('Choose a subcategory for the selected cost center category.');
+        if (level === 'cost_center' && !selectedSubcategories.length &&
+            (!existing || existing.attributes.costType !== attributes.costType
+                || selectedCostCenterSubcategories(existing.attributes).length > 0))
+            return setError('Choose at least one subcategory for the selected cost center category.');
         if (missing.length) return setError(`Please complete: ${missing.map((m) => m.label).join(', ')}.`);
         setBusy(true);
+        const payloadAttributes = level === 'cost_center'
+            ? { ...attributes, costSubcategories: selectedSubcategories, costSubcategory: selectedSubcategories[0] ?? '' }
+            : attributes;
         try {
             if (existing) {
                 let id = existing.id;
@@ -1161,12 +1164,12 @@ function NodeForm({
                     const res = await callBackend<{ id: string }>('/api/org/structure/recode', { id, segment });
                     id = res.id;
                 }
-                await callBackend('/api/org/structure/update', { id, name, description, status, managerRoleCode: allowsManager ? managerRoleCode : '', attributes });
+                await callBackend('/api/org/structure/update', { id, name, description, status, managerRoleCode: allowsManager ? managerRoleCode : '', attributes: payloadAttributes });
                 onDone(id !== existing.id ? id : undefined);
             } else {
                 const res = await callBackend<{ id: string }>('/api/org/structure/create', {
                     parentId: parent?.id ?? 'root', level, segment, name, description,
-                    managerRoleCode: allowsManager ? managerRoleCode : '', attributes,
+                    managerRoleCode: allowsManager ? managerRoleCode : '', attributes: payloadAttributes,
                     ...(level === 'work_center' ? { existingAssetTag } : {}),
                 });
                 onDone(res.id);
@@ -1184,23 +1187,79 @@ function NodeForm({
 
     const renderField = (f: FieldDef) => {
         const value = attributes[f.key] ?? '';
-        const set = (v: string) => setAttributes((previous) =>
-            f.key === 'costType'
+        const set = (v: string) => {
+            if (f.key === 'costType' && v !== attributes.costType) {
+                setSelectedSubcategories([]);
+                setSubcategorySearch('');
+            }
+            setAttributes((previous) => f.key === 'costType'
                 ? { ...previous, costType: v, costSubcategory: previous.costType === v ? previous.costSubcategory : '' }
                 : { ...previous, [f.key]: v });
-        const label = `${f.label}${f.required || (f.key === 'costSubcategory' && !existing) ? ' *' : ''}`;
+        };
+        const label = `${f.label}${f.required || f.key === 'costSubcategory' ? ' *' : ''}`;
         if (f.key === 'costSubcategory') {
             const categoryCode = attributes.costType ?? '';
             const subcategories = costTypes.find((type) => type.code === categoryCode)?.subcategories
                 ?? costCenterSubcategories(categoryCode);
+            const shown = subcategories.filter((subcategory) =>
+                `${subcategory.code} ${subcategory.label}`.toLowerCase().includes(subcategorySearch.toLowerCase().trim()));
+            const selectedLabels = selectedSubcategories.map((code) => ({
+                code, label: subcategories.find((subcategory) => subcategory.code === code)?.label ?? code,
+            }));
             return (
-                <SelectField key={f.key} id='sn-costSubcategory' label={label} value={value}
-                    disabled={!categoryCode} onChange={(e) => set(e.target.value)}>
-                    <option value=''>{categoryCode ? 'Select the activity / function...' : 'Choose a category first'}</option>
-                    {subcategories.map((subcategory) => <option key={subcategory.code} value={subcategory.code}>
-                        {subcategory.label}
-                    </option>)}
-                </SelectField>
+                <div key={f.key} className='space-y-3' aria-label='Cost center subcategory multi-selection'>
+                    <div className='flex items-center justify-between gap-2'>
+                        <p id='sn-subcategory-label' className='text-sm font-medium text-ink'>Cost center subcategories *</p>
+                        <span className='text-xs text-soft'>{selectedSubcategories.length} selected</span>
+                    </div>
+                    <p className='text-xs text-soft'>Select every applicable activity within this category. All selections are saved to this cost center.</p>
+                    {!categoryCode ? <p className='rounded-xl border border-line bg-page p-3 text-sm text-muted'>Choose a cost center category first.</p> : (
+                        <>
+                            <input type='search' aria-label='Search cost center subcategories'
+                                value={subcategorySearch} onChange={(event) => setSubcategorySearch(event.target.value)}
+                                placeholder='Find a subcategory...' className='min-h-11 w-full rounded-xl border border-line bg-page px-3 text-base text-ink outline-none focus:border-brand' />
+                            <div className='flex flex-wrap gap-2'>
+                                <button type='button' className='min-h-11 rounded-xl border border-line px-3 text-sm text-ink'
+                                    disabled={!shown.length} onClick={() => setSelectedSubcategories((previous) =>
+                                        [...new Set([...previous, ...shown.map((item) => item.code)])])}>
+                                    Select all shown
+                                </button>
+                                <button type='button' className='min-h-11 rounded-xl border border-line px-3 text-sm text-ink'
+                                    disabled={!selectedSubcategories.length} onClick={() => setSelectedSubcategories([])}>
+                                    Clear selection
+                                </button>
+                            </div>
+                            <div role='group' aria-labelledby='sn-subcategory-label'
+                                className='max-h-64 space-y-1 overflow-y-auto rounded-xl border border-line bg-page p-2'>
+                                {shown.map((subcategory) => (
+                                    <label key={subcategory.code} className='flex min-h-11 cursor-pointer items-center gap-3 rounded-lg px-2 py-2 text-sm text-ink active:bg-panel'>
+                                        <input type='checkbox' className='h-5 w-5 shrink-0 accent-brand' value={subcategory.code}
+                                            checked={selectedSubcategories.includes(subcategory.code)}
+                                            onChange={(event) => setSelectedSubcategories((previous) =>
+                                                event.target.checked
+                                                    ? [...new Set([...previous, subcategory.code])]
+                                                    : previous.filter((code) => code !== subcategory.code))} />
+                                        <span>{subcategory.label}</span>
+                                    </label>
+                                ))}
+                                {!shown.length && <p className='px-2 py-3 text-sm text-muted'>No matching subcategories.</p>}
+                            </div>
+                            {!!selectedLabels.length && (
+                                <div className='flex flex-wrap gap-2' aria-label='Selected cost center subcategories'>
+                                    {selectedLabels.map((subcategory) => (
+                                        <button key={subcategory.code} type='button'
+                                            onClick={() => setSelectedSubcategories((previous) => previous.filter((code) => code !== subcategory.code))}
+                                            title={`Remove ${subcategory.label}`}
+                                            className='flex min-h-10 max-w-full items-center gap-2 rounded-full border border-line bg-panel px-3 py-1 text-left text-xs text-ink'>
+                                            <span className='break-words'>{subcategory.label}</span>
+                                            <X className='h-3.5 w-3.5 shrink-0' />
+                                        </button>
+                                    ))}
+                                </div>
+                            )}
+                        </>
+                    )}
+                </div>
             );
         }
         if (f.type === 'assetClass')
