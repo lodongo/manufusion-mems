@@ -5,6 +5,7 @@ import {THROUGHPUT_OUTPUTS,throughputOutput,throughputOutputGroups} from '../sha
 import {skuRatingReadiness} from '../shared/plnSkuRatingReadiness';
 
 type SkuComposition={containerId?:string;containerSizeId?:string;productionFormId?:string;
+ containerCapacityQuantity?:number;containerCapacityUom?:string;
  containmentScope?:string;packageId?:string;transportPackageId?:string};
 type Output={id:string;name:string;siteId:string;uom:string;category:string;status:string;
  skuComponents:SkuComposition;revision:number};
@@ -44,7 +45,7 @@ function Picker({label,value,onChange,options,disabled=false}:{label:string;valu
  </SelectField>;
 }
 const pretty=(n:number)=>new Intl.NumberFormat(undefined,{maximumFractionDigits:3}).format(n);
-const valid=(x:Line)=>!!(x.skuId&&x.containerId&&x.containerSizeId&&
+const valid=(x:Line)=>!!(x.skuId&&x.containerId&&
  x.containerCategoryCode&&x.containerSubcategoryCode&&
  Number.isFinite(x.ratingQuantity)&&x.ratingQuantity>0&&x.ratingUnitCode&&x.periodUnitCode);
 function projectedRow(title:string,value:Quantity){
@@ -128,6 +129,7 @@ export default function PlnCostCenterSkuSetup({costCenterId,initialSkuId='',onBa
   else if(container.categoryCode!==line.containerCategoryCode||
       container.subcategoryCode!==line.containerSubcategoryCode)
    result.push('Use the category and subcategory of the SKU-adopted physical container.');
+  if(sku?.category==='INTERMEDIATE')return result;
   if(!Number.isFinite(line.ratingQuantity)||line.ratingQuantity<=0||line.ratingQuantity>1e12)
    result.push('Enter a commissioned rating greater than zero and no more than 1,000,000,000,000.');
   if(!data?.units.count.some(u=>u.code===line.ratingUnitCode))
@@ -142,8 +144,9 @@ export default function PlnCostCenterSkuSetup({costCenterId,initialSkuId='',onBa
    result.push('Choose a published Time unit for the rating period.');
   return result;
  };
- const ratedLines=lines.filter(line=>Number.isFinite(line.ratingQuantity)&&line.ratingQuantity>0);
- const issues=lines.flatMap((line,i)=>line.ratingQuantity>0?
+ const ratedLines=lines.filter(line=>outputs.find(sku=>sku.id===line.skuId)?.category==='FINISHED'&&
+  Number.isFinite(line.ratingQuantity)&&line.ratingQuantity>0);
+ const issues=lines.flatMap((line,i)=>outputs.find(sku=>sku.id===line.skuId)?.category==='FINISHED'&&line.ratingQuantity>0?
    lineIssues(line,i).map(message=>({index:i,message})):[]);
  const canSave=ratedLines.length>0&&issues.length===0;
  const update=(i:number,changes:Partial<Line>)=>{
@@ -207,7 +210,7 @@ export default function PlnCostCenterSkuSetup({costCenterId,initialSkuId='',onBa
  const save=async()=>{
   setShowValidation(true);
   if(!ratedLines.length){
-   setError('There are no completed ratings yet. Use Save SKU allocations first, then rate each SKU independently.');
+   setError('No finished-goods ratings entered. Intermediate/WIP SKUs do not need commissioned speeds; use Save SKU allocations.');
    return;
   }
   if(!canSave){
@@ -320,6 +323,11 @@ export default function PlnCostCenterSkuSetup({costCenterId,initialSkuId='',onBa
      const size=data.sizes.find(x=>x.id===line.containerSizeId);
      const expectedContainer=selected?.skuComponents?.containerId||'';
      const expectedSize=selected?.skuComponents?.containerSizeId||'';
+     const manualCapacity=selected?.skuComponents?.containerCapacityQuantity!==undefined||
+       selected?.skuComponents?.containerCapacityUom!==undefined;
+     const manualCapacityName=manualCapacity?String(selected?.skuComponents?.containerCapacityQuantity??'')+
+       ' '+(selected?.skuComponents?.containerCapacityUom||''):'';
+     const intermediate=selected?.category==='INTERMEDIATE';
      const readiness=skuRatingReadiness(selected,line);
      const matching=readiness.status==='READY';
      const masterContainer=data.containers.find(c=>c.id===expectedContainer);
@@ -338,16 +346,18 @@ export default function PlnCostCenterSkuSetup({costCenterId,initialSkuId='',onBa
         <span className='min-w-0'>
          <span className='block break-words text-sm font-semibold'>SKU {i+1} · {selected?.name||line.skuName||line.skuId||'Choose SKU'}</span>
          <span className='mt-1 block text-xs text-muted'>
-          {currentContainer?.name||'Physical container not set'}{size?' · '+size.name:''}
+          {intermediate?'Intermediate/WIP · allocation only':
+           (currentContainer?.name||'Physical container not set')+
+           (manualCapacity?' · '+manualCapacityName:size?' · '+size.name:'')}
          </span>
          <span className='mt-1 block text-xs font-medium text-ink'>
-          {line.ratingQuantity>0?pretty(line.ratingQuantity)+' '+(countUnit?.symbol||line.ratingUnitCode)+
+          {intermediate?'No commissioned speed required':line.ratingQuantity>0?pretty(line.ratingQuantity)+' '+(countUnit?.symbol||line.ratingUnitCode)+
             ' '+(throughputOutput(line.ratingOutputCode||'PRIMARY_CONTAINER')?.name||'primary units')+
             ' / '+(periodUnit?.symbol||line.periodUnitCode):'Commissioned speed not yet configured'}
          </span>
-         {readiness.status==='SKU_SETUP_REQUIRED'&&<span className='mt-1 block text-xs font-medium text-amber-700'>SKU master incomplete · Allocation can be saved</span>}
-         {readiness.status==='NOT_CONTAINER_RATED'&&<span className='mt-1 block text-xs font-medium text-amber-700'>Direct process flow · No container rating</span>}
-         {readiness.status==='APPLY_SKU_SETUP'&&<span className='mt-1 block text-xs font-medium text-amber-700'>Use the SKU's saved physical container and size</span>}
+         {!intermediate&&readiness.status==='SKU_SETUP_REQUIRED'&&<span className='mt-1 block text-xs font-medium text-amber-700'>SKU master incomplete · Allocation can be saved</span>}
+         {!intermediate&&readiness.status==='NOT_CONTAINER_RATED'&&<span className='mt-1 block text-xs font-medium text-amber-700'>Direct process flow · No container rating</span>}
+         {!intermediate&&readiness.status==='APPLY_SKU_SETUP'&&<span className='mt-1 block text-xs font-medium text-amber-700'>Use the SKU's saved physical container and size</span>}
          {rowFaults>0&&<span className='mt-1 block text-xs text-red-500'>{rowFaults} item(s) need correction</span>}
         </span>
        </button>
@@ -362,7 +372,12 @@ export default function PlnCostCenterSkuSetup({costCenterId,initialSkuId='',onBa
        options={[['','Choose SKU'],...outputs.filter(x=>x.id===line.skuId||!already.has(x.id))
         .map(x=>[x.id,x.name+' · '+x.category] as [string,string])]}
        onChange={skuId=>{update(i,newSku(skuId));setOpenSku(skuId||'draft-'+i);}}/>
-      {selected&&<div className='space-y-3 rounded-xl border border-line bg-page p-3'>
+      {intermediate&&<div className='space-y-2 rounded-xl border border-line bg-page p-3 text-sm'>
+       <p className='font-semibold'>Intermediate / WIP · allocation only</p>
+       <p className='text-xs text-muted'>No commissioned speeds or throughput projections apply. Configure a physical container and its manually entered capacity in Materials & Products only when this SKU needs containment. Save SKU allocations to keep the cost-centre mapping.</p>
+       {onEditSku&&selected&&<Action secondary disabled={busy} onClick={()=>onEditSku(selected.id)}>Edit intermediate SKU</Action>}
+      </div>}
+      {selected&&!intermediate&&<div className='space-y-3 rounded-xl border border-line bg-page p-3'>
        <p className='text-sm font-semibold'>Physical container properties</p>
        {readiness.status==='SKU_SETUP_REQUIRED'&&<div className='space-y-2 rounded-xl border border-amber-500/60 bg-panel p-3'>
         <p className='text-sm font-semibold'>SKU master needs setup · {selected.id}</p>
@@ -377,8 +392,8 @@ export default function PlnCostCenterSkuSetup({costCenterId,initialSkuId='',onBa
        </div>}
        {readiness.status==='APPLY_SKU_SETUP'&&<div className='space-y-2 rounded-xl border border-amber-500/60 bg-panel p-3'>
         <p className='text-xs text-muted'>{readiness.message}</p>
-        <p className='text-xs text-muted'>Saved SKU master: {masterContainer?.name||expectedContainer} · {masterSize?.name||expectedSize}</p>
-        <Action testOverride={data.testOverride} secondary disabled={busy||!masterContainer||!masterSize}
+        <p className='text-xs text-muted'>Saved SKU master: {masterContainer?.name||expectedContainer} · {manualCapacity?manualCapacityName:masterSize?.name||expectedSize}</p>
+        <Action testOverride={data.testOverride} secondary disabled={busy||!masterContainer||!manualCapacity&&!masterSize}
          onClick={()=>update(i,{containerId:expectedContainer,containerSizeId:expectedSize,
           containerCategoryCode:masterContainer?.categoryCode||'',containerSubcategoryCode:masterContainer?.subcategoryCode||'',
           ratingOutputCode:masterContainer?.ratingOutputCode||'PRIMARY_CONTAINER',
@@ -402,11 +417,12 @@ export default function PlnCostCenterSkuSetup({costCenterId,initialSkuId='',onBa
           ratingOutputCode:c?.ratingOutputCode||'PRIMARY_CONTAINER',
           primaryContainersPerRatedOutput:undefined});
         }}/>
-       <Picker label='Configured physical container size' value={line.containerSizeId}
+       {!manualCapacity&&<Picker label='Legacy physical container size' value={line.containerSizeId}
         disabled={!data.canConfigure||busy||!currentContainer}
         options={[['','Select container size'],...data.sizes.map(x=>[x.id,
          x.name+' · '+x.quantity+' '+x.uomSymbol] as [string,string])]}
-        onChange={containerSizeId=>update(i,{containerSizeId})}/>
+        onChange={containerSizeId=>update(i,{containerSizeId})}/>}
+       {manualCapacity&&<p className='text-xs text-muted'>SKU manual primary-container capacity: {manualCapacityName}. The production form does not supply a default capacity.</p>}
        {currentContainer&&<div className='rounded-lg border border-line p-3'>
         <p className='text-xs text-muted'>Adopted type: {currentContainer.subcategoryName} · {currentContainer.categoryName}</p>
         <div className='mt-2 grid gap-2 sm:grid-cols-2'>
@@ -419,7 +435,7 @@ export default function PlnCostCenterSkuSetup({costCenterId,initialSkuId='',onBa
         Bulk storage: if rating a filling or transfer process, choose measured litres, kilograms or cubic metres per hour. Whole tanks per hour represents container turnovers, not continuous flow.
        </p>}
       </div>}
-      {selected&&<div className='space-y-3 rounded-xl border border-line p-3'>
+      {selected&&!intermediate&&<div className='space-y-3 rounded-xl border border-line p-3'>
        <h4 className='font-semibold'>Commissioned rating parameters</h4>
        <p className='text-xs text-muted'>What is counted is independent of how many are counted. Choose bottles, cases, pieces, measured volume, mass, length or another industrial output before entering speed.</p>
        <SelectField id={'rated-output-type-'+costCenterId+'-'+i} label='Output unit used to express line speed' required
@@ -460,11 +476,11 @@ export default function PlnCostCenterSkuSetup({costCenterId,initialSkuId='',onBa
          onClick={()=>void preview(i)}>Calculate linked ratings</Action>
        </div>
       </div>}
-      {showValidation&&line.ratingQuantity>0&&lineIssues(line,i).length>0&&<div role='alert' className='rounded-lg border border-red-400 p-3 text-xs text-red-600'>
+      {showValidation&&!intermediate&&line.ratingQuantity>0&&lineIssues(line,i).length>0&&<div role='alert' className='rounded-lg border border-red-400 p-3 text-xs text-red-600'>
        <p className='font-semibold'>SKU {i+1} — correct these issues:</p>
        <ul className='mt-2 list-disc space-y-1 pl-4'>{lineIssues(line,i).map((message,j)=><li key={j}>{message}</li>)}</ul>
       </div>}
-      {line.projection&&<div className='space-y-2 rounded-xl border border-line p-3'>
+      {!intermediate&&line.projection&&<div className='space-y-2 rounded-xl border border-line p-3'>
        <h4 className='font-semibold'>Resolved ratings · same time period</h4>
        <p className='text-xs text-muted'>Basis: {pretty(line.ratingQuantity)} {data.units.count.find(u=>u.code===line.ratingUnitCode)?.name||'units'} {throughputOutput(line.ratingOutputCode||'PRIMARY_CONTAINER')?.name||'primary output'} per {data.units.time.find(u=>u.code===line.periodUnitCode)?.name||'period'}. One rated output equals {pretty(line.projection.source.primaryContainersPerRatedOutput)} SKU physical primary units. Calculated from the selected SKU configuration.</p>
        <div className='grid gap-2 sm:grid-cols-2'>
@@ -481,8 +497,7 @@ export default function PlnCostCenterSkuSetup({costCenterId,initialSkuId='',onBa
     })}
     {!lines.length&&<p className='text-sm text-muted'>No SKUs allocated. Select one or more SKUs, save the allocation, then configure speeds individually.</p>}
     {lines.length>0&&<p className='text-xs text-muted'>
-     Save SKU allocations first without completing ratings. Commissioned ratings must be saved separately;
-     uncommissioned SKUs cannot be scheduled as rated production capacity.
+     Save SKU allocations for both finished and intermediate products. Intermediate/WIP SKUs never require commissioned speeds; only finished goods have the commissioned-rating step.
     </p>}
     {data.canConfigure&&<div className='sticky bottom-0 z-10 space-y-2 rounded-xl border border-line bg-panel p-3 shadow-sm'>
      {showValidation&&issues.length>0&&<div role='alert' className='text-xs text-red-600'>
