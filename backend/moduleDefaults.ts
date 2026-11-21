@@ -13,6 +13,7 @@ import { AST_UTILITY_ITEMS } from './astUtilityDefaults';
 import { DOC_DEFAULT_LISTS } from './docDefaults';
 import { RCA_METADATA_LISTS } from './docRcaDefaults';
 import { orgRoute, staff } from './guards';
+import { COST_CENTER_CATEGORIES, costCenterSubcategories } from '../src/shared/costCenterTaxonomy';
 
 // Default metadata lists that ship with modules. Loaded into
 // module_workspaces/{CODE}/metadata/{key} when a module is initialised or on request.
@@ -30,30 +31,7 @@ interface MetaItem {
 const item = (code: string, label: string): MetaItem => ({ code, label, active: true });
 
 // Broad cost center types. Detailed GL accounts belong to the chart of accounts, not here.
-const COST_CENTER_TYPES: MetaItem[] = [
-    item('EXE', 'Executive and management'),
-    item('ADM', 'Administration'),
-    item('FIN', 'Finance'),
-    item('HRM', 'Human resources'),
-    item('ICT', 'Information technology'),
-    item('MFG', 'Manufacturing'),
-    item('QLT', 'Quality'),
-    item('MNT', 'Maintenance and engineering'),
-    item('UTL', 'Utilities'),
-    item('INV', 'Inventory'),
-    item('WHS', 'Warehousing'),
-    item('PRC', 'Procurement'),
-    item('LOG', 'Logistics and distribution'),
-    item('SAL', 'Sales'),
-    item('MKT', 'Marketing'),
-    item('CSV', 'Customer service'),
-    item('RND', 'Research and development'),
-    item('HSE', 'Health, safety and environment'),
-    item('FAC', 'Facilities'),
-    item('AGR', 'Agriculture and sourcing'),
-    item('PRJ', 'Projects'),
-    item('SSC', 'Shared services'),
-];
+const COST_CENTER_TYPES: MetaItem[] = COST_CENTER_CATEGORIES.map(({ code, label }) => item(code, label));
 
 export const DEFAULT_MODULE_METADATA: Record<string, Array<{ key: string; title: string; description: string; version: number; items: MetaItem[] }>> = {
     MFG: [{
@@ -129,8 +107,8 @@ export const DEFAULT_MODULE_METADATA: Record<string, Array<{ key: string; title:
         {
             key: 'costCenterTypes',
             title: 'Cost center types',
-            description: 'Broad types chosen when setting up cost centers in the organization design, such as Administration, Manufacturing or Warehousing.',
-            version: 2,
+            description: 'Industry-wide cost-center categories; each category has detailed MEMS subcategories. Preserve original category codes and financial postings.',
+            version: 3,
             items: COST_CENTER_TYPES,
         },
     ],
@@ -242,8 +220,20 @@ export const moduleDefaultRoutes = {
     'POST /api/org/reference/cost-center-types': [
         orgRoute('org.reference.cost_center_types', null, async () => {
             const doc = await getDoc('module_workspaces/FIN/metadata/costCenterTypes');
-            const items = (Array.isArray(doc?.data.items) ? (doc?.data.items as Plain[]) : []).filter(isObj).filter((i) => i.active !== false);
-            return { ready: !!doc, types: items.map((i) => ({ code: str(i.code), label: str(i.label) })) };
+            const stored = (Array.isArray(doc?.data.items) ? (doc?.data.items as Plain[]) : []).filter(isObj);
+            const overrides = new Map(stored.map((item) => [str(item.code), item]));
+            const builtIn = COST_CENTER_CATEGORIES
+                .filter((category) => overrides.get(category.code)?.active !== false)
+                .map((category) => ({
+                    code: category.code,
+                    label: str(overrides.get(category.code)?.label) || category.label,
+                    subcategories: category.subcategories,
+                }));
+            const custom = stored.filter((item) => item.active !== false
+                && !COST_CENTER_CATEGORIES.some((category) => category.code === str(item.code)))
+                .map((item) => ({ code: str(item.code), label: str(item.label),
+                    subcategories: costCenterSubcategories(str(item.code)) }));
+            return { ready: true, types: [...builtIn, ...custom] };
         }),
     ],
 };
