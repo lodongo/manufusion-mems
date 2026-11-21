@@ -1188,18 +1188,41 @@ async function materialApproverCanAct(ctx:OrgContext,record:Obj,workflow:Materia
     }
     return false;
 }
+/** Test-only controlled recovery of pre-registry approval records. */
+const materialTestOverride=(ctx:OrgContext):boolean=>ctx.testMode===true&&ctx.role==='org_super_admin';
+function materialTestRecoveryWorkflow(ctx:OrgContext,code:'PRC-001'|'PRC-002'):MaterialWorkflowDefinition{
+    return {code,name:'Development test-mode recovery · '+code,version:1,
+        approvalMode:'sequential',approvalRule:'all',
+        steps:[{mode:'user',uid:ctx.uid,role:'',managerLevel:1,action:'approve'}]};
+}
 async function makeMaterialDecision(ctx:OrgContext,kind:'creation'|'extension'):Promise<{ok:true;status:string;stageLabel:string}>{
     requireModule(ctx,'materials');
     const id=str(ctx.body.id),extension=kind==='extension',root='organizations/'+ctx.orgId;
     const path=root+(extension?'/material_extensions/':'/materials/')+id;
     const doc=await getDoc(path);
     if(!doc||str(doc.data.status)!=='pending_approval')throw new HttpError(409,'No pending material workflow approval.');
-    const data=doc.data;
-    const workflow=materialWorkflowSnapshot(data);
-    if(!workflow||workflow.code!==(extension?'PRC-002':'PRC-001'))
-        throw new HttpError(409,'This request has no valid workflow snapshot. It cannot proceed using retired approval rules; ask an administrator to resolve the request under the configured workflow.');
+    const expectedCode=extension?'PRC-002':'PRC-001';
+    const previous=doc.data;
+    const savedWorkflow=materialWorkflowSnapshot(previous);
+    const missingSnapshot=!savedWorkflow||savedWorkflow.code!==expectedCode;
+    const testOverride=materialTestOverride(ctx);
+    if(missingSnapshot&&!testOverride)
+        throw new HttpError(409,'This request has no valid workflow snapshot. A configured workflow is required outside authorized development test mode.');
+    // Explicitly recover the legacy request only while an authorized test-mode superadmin
+    // executes an action; neither list nor dashboard reads mutate workflow records.
+    const workflow=missingSnapshot?materialTestRecoveryWorkflow(ctx,expectedCode):savedWorkflow!;
+    const data:Obj=missingSnapshot?{
+        ...previous,
+        legacyApprovalHistory:Array.isArray(previous.approvalHistory)?previous.approvalHistory:[],
+        legacyApprovalLevel:Number(previous.approvalLevel)||0,
+        approvalHistory:[],approvalLevel:1,workflowCode:expectedCode,
+        workflowSnapshot:workflow,workflowVersion:workflow.version,
+        workflowRecoveryMode:'development_test_override',
+        workflowRecoveredBy:ctx.uid,workflowRecoveredAt:nowIso(),
+    }:previous;
     if(!await materialApproverCanAct(ctx,data,workflow))
         throw new HttpError(403,'This workflow stage is assigned to a different authorized reviewer or approver.');
+    if(missingSnapshot)bypass(ctx,'material.workflow.missing_snapshot_test_recovery');
     if(ctx.testMode===true&&ctx.role==='org_super_admin')
         bypass(ctx,'material.workflow.assignment_and_maker_checker');
     const decision=str(ctx.body.decision);
@@ -1646,7 +1669,7 @@ export const procurementRoutes = {
                 const workflow=materialWorkflowSnapshot(d.data);
                 const owner=str(d.data.submittedBy||d.data.createdBy);
                 const self=owner===ctx.uid;
-                const assigned=workflow?await materialApproverCanAct(ctx,d.data,workflow):false;
+                const assigned=workflow?await materialApproverCanAct(ctx,d.data,workflow):materialTestOverride(ctx);
                 if(!self&&!assigned)continue;
                 const creator=await getDoc('users/'+owner);
                 const creatorName=[str(creator?.data.firstName),str(creator?.data.lastName)]
@@ -1654,12 +1677,12 @@ export const procurementRoutes = {
                 items.push({id:d.id,type:source.type,label:workflow?.name||source.label,
                     name:str(d.data.name||d.data.materialName||d.data.shortText),status:str(d.data.status),
                     approvalLevel:Number(d.data.approvalLevel)||1,
-                    workflowStage:workflow?materialStageLabel(d.data,workflow):'Workflow snapshot missing · administrator review required',
+                    workflowStage:workflow?materialStageLabel(d.data,workflow):materialTestOverride(ctx)?'Test recovery · approve or reject':'Workflow snapshot missing · administrator review required',
                     submittedAt:str(d.data.submittedAt||d.data.createdAt),owner,creatorName,
                     creatorEmail:str(creator?.data.email),isMine:self,assigned,
                     canApprove:assigned&&(!self||(ctx.testMode===true&&ctx.role==='org_super_admin')),
                     testOverride:ctx.testMode===true&&ctx.role==='org_super_admin',
-                    conflict:self&&assigned&&!(ctx.testMode===true&&ctx.role==='org_super_admin'),configurationOnly:!workflow,
+                    conflict:self&&assigned&&!materialTestOverride(ctx),configurationOnly:!workflow&&!materialTestOverride(ctx),
                     sourceId:str(d.data.sourceId),warehouseId:str(d.data.warehouseId)});
             }
         }
@@ -1768,9 +1791,9 @@ const enabled=ctx.body.enabled===true;const terminate=ctx.body.terminateActive==
         const items=await Promise.all(docs.map(async d=>{
             const workflow=materialWorkflowSnapshot(d.data);
             return {id:d.id,...d.data,
-                workflowStage:workflow?materialStageLabel(d.data,workflow):'Workflow snapshot missing · administrator review required',
-                canApprove:str(d.data.status)==='pending_approval'&&!!workflow&&
-                    await materialApproverCanAct(ctx,d.data,workflow),
+                workflowStage:workflow?materialStageLabel(d.data,workflow):materialTestOverride(ctx)?'Test recovery · approve or reject':'Workflow snapshot missing · administrator review required',
+                canApprove:str(d.data.status)==='pending_approval'&&
+                    (materialTestOverride(ctx)||!!workflow&&await materialApproverCanAct(ctx,d.data,workflow)),
             };
         }));
         return {items};
@@ -1792,7 +1815,7 @@ const enabled=ctx.body.enabled===true;const terminate=ctx.body.terminateActive==
             const extension=w.relation==='Extended'?extensionsById.get(w.requestId):null;
             const snapshot=extension?materialWorkflowSnapshot(extension):null;
             return {...w,canApprove:!!extension&&str(extension.status)==='pending_approval'&&
-                !!snapshot&&await materialApproverCanAct(ctx,extension,snapshot)};
+                (materialTestOverride(ctx)||!!snapshot&&await materialApproverCanAct(ctx,extension,snapshot))};
         }));
         const workflowData=materialWorkflowSnapshot(record);
         const requestApprovals={
@@ -1826,7 +1849,8 @@ const enabled=ctx.body.enabled===true;const terminate=ctx.body.terminateActive==
             canEdit:materialDraftCan(record,ctx.uid,ctx.permissions,'edit',elevated),
             canDelete:materialDraftCan(record,ctx.uid,ctx.permissions,'delete',elevated),
             canSubmit:materialDraftCan(record,ctx.uid,ctx.permissions,'submit',elevated),
-            canApprove:!!workflow&&await materialApproverCanAct(ctx,record,workflow),
+            canApprove:str(record.status)==='pending_approval'&&
+                (materialTestOverride(ctx)||!!workflow&&await materialApproverCanAct(ctx,record,workflow)),
             canExtend:canExtend&&['approved','active'].includes(str(m.status)),
             canLifecycle:lifecycle,
         }};
@@ -1839,12 +1863,12 @@ const enabled=ctx.body.enabled===true;const terminate=ctx.body.terminateActive==
             const pending=str(d.data.status)==='pending_approval';
             const elevated=ctx.role==='org_super_admin';
             return {id:d.id,...d.data,workflowStage:pending?
-                (workflow?materialStageLabel(d.data,workflow):'Workflow snapshot missing · administrator review required'):
+                (workflow?materialStageLabel(d.data,workflow):materialTestOverride(ctx)?'Test recovery · approve or reject':'Workflow snapshot missing · administrator review required'):
                 str(d.data.status)==='approved'||str(d.data.status)==='active'?'Approved':str(d.data.status).replaceAll('_',' '),
                 canEdit:materialDraftCan(d.data,ctx.uid,ctx.permissions,'edit',elevated),
                 canDelete:materialDraftCan(d.data,ctx.uid,ctx.permissions,'delete',elevated),
                 canSubmit:materialDraftCan(d.data,ctx.uid,ctx.permissions,'submit',elevated),
-                canApprove:pending&&!!workflow&&await materialApproverCanAct(ctx,d.data,workflow)};
+                canApprove:pending&&(materialTestOverride(ctx)||!!workflow&&await materialApproverCanAct(ctx,d.data,workflow))};
         }));
         return {items:items.sort((a,b)=>str((b as Obj).createdAt).localeCompare(str((a as Obj).createdAt))),
             testOverride:ctx.testMode===true&&ctx.role==='org_super_admin',
