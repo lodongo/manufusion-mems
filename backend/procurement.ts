@@ -1766,7 +1766,9 @@ const enabled=ctx.body.enabled===true;const terminate=ctx.body.terminateActive==
                 canApprove:pending&&!!workflow&&await materialApproverCanAct(ctx,d.data,workflow)};
         }));
         return {items:items.sort((a,b)=>str((b as Obj).createdAt).localeCompare(str((a as Obj).createdAt))),
-            isApprover:items.some(x=>x.canApprove),currentUserId:ctx.uid};
+            isApprover:items.some(x=>x.canApprove),currentUserId:ctx.uid,
+            canCreate:ctx.role==='org_super_admin'||['PRC.create','PRC.materials.manage','PRC.admin'].some(p=>hasPerm(ctx.permissions,p)),
+            canExtend:ctx.role==='org_super_admin'||['PRC.create','PRC.materials.manage','PRC.admin'].some(p=>hasPerm(ctx.permissions,p))};
     })],
     'POST /api/org/procurement/materials/create': [orgRoute('org.procurement.materials.create', null, async ctx => {
         return createMaterialDraft(ctx);
