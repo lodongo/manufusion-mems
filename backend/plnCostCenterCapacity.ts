@@ -81,7 +81,7 @@ async function authorized(ctx:OrgContext,permission:'read'|'write',id:string){
  const path=await nodePath(ctx.orgId,id);
  if(!path.length)return false;
  const scope=await scopeOf(ctx);
- const perms=permission==='read'?['PLN.view','ADM.structure','MFG.view']:['PLN.configure','ADM.structure'];
+ const perms=permission==='read'?['PLN.view','ADM.structure','MFG.view']:['PLN.configure','ADM.structure','MFG.master.edit'];
  return perms.some(p=>hasPerm(ctx.permissions,p)&&canAt(ctx,p,path,scope));
 }
 async function candidate(ctx:OrgContext,costCenterId:string){
