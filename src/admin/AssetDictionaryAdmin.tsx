@@ -9,6 +9,8 @@ import AssetDictionaryBrowser from '../components/AssetDictionaryBrowser';
 import { fmtDate } from './format';
 import { Button, Card, PageTitle, Spinner, useLoad } from './kit';
 import { appConfirm } from '../components/dialogs';
+import { navigate } from '../lib/route';
+import { catalogUploadIssue, detectAdminCatalogKind, type AdminCatalogKind } from './catalogFileKinds';
 
 // MEMS admin: the asset catalog (asset master data). One catalog lives in the database. Uploading a file checks
 // its structure and replaces the catalog straight away; organizations read it from the database to classify their
@@ -25,7 +27,7 @@ interface CatalogStatus {
     stats: Record<string, number>;
 }
 
-const CHUNK_CHARS = 400_000;
+const CHUNK_CHARS = 350_000;
 
 async function sha256Hex(bytes: Uint8Array): Promise<string> {
     const digest = await crypto.subtle.digest('SHA-256', bytes as unknown as BufferSource);
@@ -38,6 +40,7 @@ export default function AssetDictionaryAdmin({ canWrite }: { canWrite: boolean; 
     const { data, error, loading, reload } = useLoad(() => callBackend<CatalogStatus>('/api/admin/assets/catalog/status'));
     const [progress, setProgress] = useState('');
     const [uploadError, setUploadError] = useState('');
+    const [wrongFileKind,setWrongFileKind]=useState<AdminCatalogKind|null>(null);
     const [result, setResult] = useState<{ ok: boolean; errors: string[]; warnings: string[]; stats: Record<string, number> } | null>(null);
     const [browse, setBrowse] = useState(false);
     const [reconcile, setReconcile] = useState(false);
@@ -48,19 +51,27 @@ export default function AssetDictionaryAdmin({ canWrite }: { canWrite: boolean; 
         e.target.value = '';
         if (!file) return;
         setUploadError('');
+        setWrongFileKind(null);
         setResult(null);
         if (file.size > 48_000_000) return setUploadError('The file is larger than 48 MB.');
         try {
             setProgress('Reading the file…');
             const textAll = await file.text();
-            let parsed: { assetClasses?: unknown[]; attributes?: unknown[]; financialIntegration?: {catalogueRelease?:string} };
+            let parsed: unknown;
             try {
                 parsed = JSON.parse(textAll);
             } catch {
                 throw new Error('The file is not valid JSON.');
             }
-            if (!Array.isArray(parsed.assetClasses) || !Array.isArray(parsed.attributes)) throw new Error('The file has no asset classes or attributes.');
-            if (parsed.financialIntegration && parsed.financialIntegration.catalogueRelease !== 'APPROVED')
+            const issue=catalogUploadIssue('assets',parsed);
+            if(issue){
+                const detected=detectAdminCatalogKind(parsed);
+                if(detected&&detected!=='assets')setWrongFileKind(detected);
+                throw new Error(issue);
+            }
+            const root=parsed as Record<string,unknown>;
+            if(root.financialIntegration&&
+                (root.financialIntegration as Record<string,unknown>).catalogueRelease!=='APPROVED')
                 throw new Error('This financial asset master is a Finance-review draft. It cannot replace the active catalogue until approved.');
             if (data?.loaded && !(await appConfirm('This replaces the asset catalog in the database. Continue?'))) {
                 setProgress('');
@@ -70,15 +81,46 @@ export default function AssetDictionaryAdmin({ canWrite }: { canWrite: boolean; 
             const sha256 = await sha256Hex(bytes);
             const chunks: string[] = [];
             for (let i = 0; i < textAll.length; i += CHUNK_CHARS) chunks.push(textAll.slice(i, i + CHUNK_CHARS));
-            await callBackend('/api/admin/assets/catalog/begin', { size: bytes.length, sha256, totalChunks: chunks.length, fileName: file.name.slice(0, 120) });
-            for (let i = 0; i < chunks.length; i++) {
-                setProgress(`Uploading part ${i + 1} of ${chunks.length}…`);
-                await callBackend('/api/admin/assets/catalog/chunk', { index: i, data: chunks[i] });
+            if(!chunks.length||chunks.length>140)
+                throw new Error('This asset master requires too many upload parts. Choose a file under 48 MB.');
+            const uploadId=crypto.randomUUID().replace(/-/g,'');
+            await callBackend('/api/admin/assets/catalog/begin',
+                {uploadId,size:bytes.length,sha256,totalChunks:chunks.length,fileName:file.name.slice(0,120)});
+            let acknowledged=0;
+            const sendChunk=async(index:number)=>{
+                const payload=chunks[index];
+                const partHash=await sha256Hex(new TextEncoder().encode(payload));
+                for(let attempt=0;attempt<4;attempt++){
+                    try{
+                        const response=await callBackend<{ok:boolean;index:number;sha256:string}>(
+                            '/api/admin/assets/catalog/chunk',{uploadId,index,data:payload,sha256:partHash});
+                        if(!response.ok||response.index!==index||response.sha256!==partHash)
+                            throw new Error('Upload part was not acknowledged correctly.');
+                        setProgress(`Verified ${++acknowledged} of ${chunks.length} upload parts…`);
+                        return;
+                    }catch(err){
+                        if(attempt===3)
+                            throw new Error(`Part ${index+1} could not be saved after four attempts: ${err instanceof Error?err.message:String(err)}`);
+                        await new Promise(resolve=>setTimeout(resolve,(attempt+1)*500));
+                    }
+                }
+            };
+            // Small concurrency avoids overwhelming mobile connections while permitting retries.
+            for(let start=0;start<chunks.length;start+=2)
+                await Promise.all(Array.from({length:Math.min(2,chunks.length-start)},(_,i)=>sendChunk(start+i)));
+            setProgress('Checking integrity and saving to the database…');
+            let res=await callBackend<{ok:boolean;errors:string[];warnings:string[];stats:Record<string,number>;
+                retryable?:boolean;missingChunks?:number[]}>('/api/admin/assets/catalog/finish',{uploadId});
+            for(let pass=0;pass<3&&!res.ok&&res.retryable&&Array.isArray(res.missingChunks)&&res.missingChunks.length;pass++){
+                const missing=res.missingChunks.filter(i=>Number.isInteger(i)&&i>=0&&i<chunks.length);
+                if(!missing.length)break;
+                setProgress(`Repairing ${missing.length} missing upload parts…`);
+                for(const index of missing)await sendChunk(index);
+                setProgress('Checking repaired upload…');
+                res=await callBackend('/api/admin/assets/catalog/finish',{uploadId});
             }
-            setProgress('Checking and saving to the database…');
-            const res = await callBackend<{ ok: boolean; errors: string[]; warnings: string[]; stats: Record<string, number> }>('/api/admin/assets/catalog/finish');
             setResult(res);
-            reload();
+            if(res.ok)reload();
         } catch (err) {
             setUploadError(err instanceof Error ? err.message : 'Upload failed.');
         } finally {
@@ -165,7 +207,14 @@ export default function AssetDictionaryAdmin({ canWrite }: { canWrite: boolean; 
                     )}
                 </div>
                 {data.loaded && <div className='mt-3 border-t border-line pt-3 space-y-2'><p className='font-medium text-sm'>Tools, workshop & test equipment</p><p className='text-xs text-soft'>Reconcile the maintenance catalogue against existing canonical asset classes before expanding the master. The comparison is read-only and never changes existing class codes or financial integration.</p><Button variant='secondary' onClick={()=>setReconcile(true)}>Review tools & equipment overlap</Button></div>}
-                {uploadError && <div className='mt-3'><Alert tone='error'>{uploadError}</Alert></div>}
+                {uploadError&&<div className='mt-3 space-y-2'>
+                    <Alert tone='error'>{uploadError}</Alert>
+                    {wrongFileKind&&<Button variant='secondary' onClick={()=>navigate(
+                        wrongFileKind==='materials'?'admin/material_catalog':
+                        wrongFileKind==='services'?'admin/service_catalog':
+                        wrongFileKind==='gl_accounts'?'admin/gl_accounts':'admin/asset_catalog'
+                    )}>Open the correct catalog</Button>}
+                </div>}
                 {result && (
                     <div className='mt-3 space-y-2'>
                         {result.ok ? (
