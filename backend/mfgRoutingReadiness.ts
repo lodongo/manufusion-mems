@@ -41,7 +41,7 @@ export async function reviewManufacturingRouting(ctx:OrgContext,raw:Obj){
  for(const [index,step] of operations.entries()){
   const code=str(step.code)||'STAGE-'+(index+1);
   const name=str(step.name),stageType=str(step.stageType)||'PRODUCE';
-  const capacityBasis=str(step.capacityBasis)||'RESOURCE_RATE';
+  let capacityBasis=str(step.capacityBasis)||'RESOURCE_RATE';
   const producesSkuId=str(step.producesSkuId),costCenterId=str(step.costCenterId);
   const resourceId=str(step.resourceId),bomId=str(step.bomId);
   if(!name)issue(code,'name','Stage '+(index+1)+' needs a description.');
@@ -58,8 +58,19 @@ export async function reviewManufacturingRouting(ctx:OrgContext,raw:Obj){
   if(resourceId){
    resource=await fetchCached(resourceCache,'mfg_resources',resourceId);
    if(!resource)issue(code,'resourceId','Configured manufacturing resource could not be found.');
-   else if(str(resource.data.siteId)&&str(resource.data.siteId)!==siteId)
-    issue(code,'resourceId','Manufacturing resource belongs to another site.');
+   else{
+    if(['removed','deleted','disabled'].includes(str(resource.data.status)))
+     issue(code,'resourceId','Manufacturing resource is no longer active.');
+    if(str(resource.data.siteId)&&str(resource.data.siteId)!==siteId)
+     issue(code,'resourceId','Manufacturing resource belongs to another site.');
+    if(str(resource.data.sourceKind)==='PRODUCTION_COST_CENTER'){
+     if(str(resource.data.costCenterId)!==costCenterId)
+      issue(code,'resourceId','Choose the resource adopted from this manufacturing cost centre.');
+     // A cost-centre-linked resource never owns a generic nominal throughput.
+     // Always use its actual SKU-specific commissioned capacity from PLN.
+     if(capacityBasis==='RESOURCE_RATE')capacityBasis='PHYSICAL_CONTAINER';
+    }
+   }
   }
   if(costCenterId){
    try{await routingManufacturingCostCenter(ctx,costCenterId,siteId);}
