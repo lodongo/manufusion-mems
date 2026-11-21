@@ -27,6 +27,7 @@ import { audit, auditOut } from './audit';
 import { hasPerm, orgRoute, secure, type OrgContext } from './guards';
 import { detectImage } from './branding';
 import { createUnitAsset, linkWorkCenterAsset, readUnitClass, releaseUnitAsset } from './assets';
+import { COST_CENTER_CATEGORIES, costCenterSubcategories } from '../src/shared/costCenterTaxonomy';
 
 // Organization design.
 // Single legal entity organizations start directly with the legal entity. Groups declare
@@ -122,7 +123,8 @@ const LEVELS: Record<string, LevelDef> = {
         auto: 3,
         managerRequired: true,
         fields: {
-            costType: { label: 'Cost center type', type: 'fin', required: true, list: 'costCenterTypes' },
+            costType: { label: 'Cost center category', type: 'fin', required: true, list: 'costCenterTypes' },
+            costSubcategory: { label: 'Cost center subcategory', type: 'text' },
         },
     },
     work_center: {
@@ -246,7 +248,11 @@ async function refSets() {
         timezones: new Set(countries.map((x) => str(x.timezone)).filter(Boolean)),
         currencies: new Set(items(cur).map((x) => str(x.code))),
         banks: new Set(items(b).map((x) => str(x.id))),
-        finCostTypes: new Set(items(fin).filter((x) => x.active !== false).map((x) => str(x.code))),
+        finCostTypes: new Set([
+            ...COST_CENTER_CATEGORIES.filter((category) => !items(fin).some((entry) =>
+                str(entry.code) === category.code && entry.active === false)).map((category) => category.code),
+            ...items(fin).filter((entry) => entry.active !== false).map((entry) => str(entry.code)),
+        ]),
         codes: (key: string) => {
             const list = lists.find((l) => str(l.key) === key);
             return new Set((Array.isArray(list?.items) ? (list?.items as Plain[]) : []).map((i) => (isObj(i) ? str(i.code) : '')).filter(Boolean));
@@ -254,7 +260,7 @@ async function refSets() {
     };
 }
 
-async function readAttributes(level: string, raw: unknown): Promise<Fields> {
+async function readAttributes(level: string, raw: unknown, requireCostSubcategory = false): Promise<Fields> {
     const def = LEVELS[level];
     const input = (isObj(raw) ? raw : {}) as Record<string, unknown>;
     const out: Fields = {};
@@ -315,6 +321,14 @@ async function readAttributes(level: string, raw: unknown): Promise<Fields> {
             }
         }
         out[key] = s;
+    }
+    if (level === 'cost_center') {
+        const category = str(out.costType);
+        const subcategory = str(out.costSubcategory);
+        if (!subcategory && requireCostSubcategory)
+            throw new HttpError(400, 'Choose a cost center subcategory.');
+        if (subcategory && !costCenterSubcategories(category).some((item) => item.code === subcategory))
+            throw new HttpError(400, 'Choose a subcategory belonging to the selected cost center category.');
     }
     return out;
 }
@@ -576,7 +590,7 @@ export const structureRoutes = {
             const name = text(body, 'name', 2, 120, 'Enter a name (2 to 120 characters).');
             const description = text(body, 'description', 0, 300, 'Description can be up to 300 characters.');
             const manager = await readManagerRole(ctx, body.managerRoleCode, level, parentId, '', level === 'cost_center');
-            const attributes = await readAttributes(level, body.attributes);
+            const attributes = await readAttributes(level, body.attributes, level === 'cost_center');
             let unitClass: { code: string; name: string; categoryCode: string; subcategoryCode: string } | null = null;
             if (level === 'work_center') {
                 delete attributes.assetTag;
@@ -648,7 +662,20 @@ export const structureRoutes = {
             const description = text(ctx.body, 'description', 0, 300, 'Description can be up to 300 characters.');
             const status = str(ctx.body.status) === 'inactive' ? 'inactive' : 'active';
             const manager = await readManagerRole(ctx, ctx.body.managerRoleCode, level, str(doc.data.parentId), doc.id, level === 'cost_center');
-            const attributes = await readAttributes(level, ctx.body.attributes);
+            const previousAttributes = isObj(doc.data.attributes) ? doc.data.attributes : {};
+            const incomingAttributes = isObj(ctx.body.attributes) ? ctx.body.attributes : {};
+            const requireSubcategory = level === 'cost_center'
+                && (str(previousAttributes.costType) !== str(incomingAttributes.costType)
+                    || !!str(previousAttributes.costSubcategory));
+            const attributes = await readAttributes(level, ctx.body.attributes, requireSubcategory);
+            if (level === 'cost_center' && str(previousAttributes.costType) === 'MFG' && str(attributes.costType) !== 'MFG') {
+                const [capacity, resource] = await Promise.all([
+                    getDoc(`organizations/${ctx.orgId}/pln_cost_center_capacity/${doc.id}`),
+                    getDoc(`organizations/${ctx.orgId}/mfg_resource_cost_centers/${doc.id}`),
+                ]);
+                if (capacity || resource) throw new HttpError(409,
+                    'This manufacturing cost center has SKU capacity or resource mappings. Remove those mappings before changing its category.');
+            }
             if (level === 'cost_center' && !['INV', 'WHS'].includes(str(attributes.costType)) && (await getDoc(`organizations/${ctx.orgId}/warehouses/${doc.id}`))) {
                 throw new HttpError(400, 'This cost center has a storage setup, so its type must stay Inventory (INV) or Warehousing (WHS).');
             }
