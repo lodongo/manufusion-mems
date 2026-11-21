@@ -1130,9 +1130,10 @@ function materialWorkflowSnapshot(record:Obj):MaterialWorkflowDefinition|null{
     return {code:str(d.code),name:str(d.name),version:Number(d.version)||1,
         approvalMode:str(d.approvalMode)==='parallel'?'parallel':'sequential',
         approvalRule:str(d.approvalRule)==='any'?'any':'all',
-        steps:d.steps.filter(isObj).map(x=>({mode:str(x.mode) as MaterialWorkflowStep['mode'],
+        steps:d.steps.filter(isObj).map(raw=>{const x=raw as Obj;return {
+            mode:str(x.mode) as MaterialWorkflowStep['mode'],
             role:str(x.role),uid:str(x.uid),managerLevel:Number(x.managerLevel)||1,
-            action:str(x.action)==='review'?'review':'approve'}))};
+            action:str(x.action)==='review'?'review':'approve'};})};
 }
 function materialStageLabel(record:Obj,workflow:MaterialWorkflowDefinition):string{
     if(workflow.approvalMode==='parallel'){
@@ -1700,7 +1701,7 @@ export const procurementRoutes = {
                 str(d.data.status)==='approved'||str(d.data.status)==='active'?'Approved':str(d.data.status).replaceAll('_',' '),
                 canApprove:pending&&!!workflow&&await materialApproverCanAct(ctx,d.data,workflow)};
         }));
-        return {items:items.sort((a,b)=>str(b.createdAt).localeCompare(str(a.createdAt))),
+        return {items:items.sort((a,b)=>str((b as Obj).createdAt).localeCompare(str((a as Obj).createdAt))),
             isApprover:items.some(x=>x.canApprove),currentUserId:ctx.uid};
     })],
     'POST /api/org/procurement/materials/create': [orgRoute('org.procurement.materials.create', null, async ctx => {
