@@ -505,7 +505,9 @@ export default function MaterialsMaster() {
             {similar ? <>
                 <p className='mb-3 text-xs text-muted'>Compared against {similar.totalCompared} existing materials.</p>
                 {similar.items.filter(x=>x.score>85).length ? <div className='max-h-[55dvh] space-y-2 overflow-y-auto overscroll-contain pr-1'>{similar.items.filter(x=>x.score>85).map((x) => <MatchCard key={x.id} score={x.score} name={x.name} shortText={x.shortText} status={x.status}
-                    meta={<>{options?.warehouses.find((w) => w.id === x.warehouseId)?.name ?? x.warehouseId} · {x.matchedFields.join(', ') || 'no hierarchy match'} · attributes {x.attributeMatches}/{x.attributeTotal}{x.partMatch ? ' · part number match' : ''}</>} />)}</div>
+                    meta={<>{options?.warehouses.find((w) => w.id === x.warehouseId)?.name ?? x.warehouseId} · {x.matchedFields.join(', ') || 'no hierarchy match'} · attributes {x.attributeMatches}/{x.attributeTotal}{x.partMatch ? ' · part number match' : ''}</>}
+                    action={<Button variant='secondary' disabled={!['approved','active'].includes(x.status)}
+                        onClick={()=>openExtension(x)}>{['approved','active'].includes(x.status)?'Extend existing':'Not yet approved'}</Button>} />)}</div>
                     : <Alert tone='success'>No materials with similarity above 85% found.</Alert>}
                 <div className='mt-4'><ConfirmBox checked={duplicateConfirmed} onChange={setDuplicateConfirmed}>I have reviewed the closest materials, verified this request is not a duplicate, and confirm submission.</ConfirmBox></div>
             </> : <Spinner />}
