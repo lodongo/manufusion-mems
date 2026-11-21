@@ -455,7 +455,7 @@ export default function PlnCostCenterSkuSetup({costCenterId,initialSkuId='',onBa
     {lines.length>0&&<p className='text-xs text-muted'>
      Save SKU allocations first without completing ratings. Commissioned ratings must be saved separately;
      uncommissioned SKUs cannot be scheduled as rated production capacity.
-    </p>
+    </p>}
     {data.canConfigure&&<div className='sticky bottom-0 z-10 space-y-2 rounded-xl border border-line bg-panel p-3 shadow-sm'>
      {showValidation&&issues.length>0&&<div role='alert' className='text-xs text-red-600'>
       {issues.length} issue(s) prevent saving. Review the relevant SKU cards above.
