@@ -1,5 +1,6 @@
 import {useEffect,useState} from 'react';
 import {callBackend} from '../lib/backend';
+import {ManufacturingResourceDetail} from './ManufacturingResources';
 
 type RatedQuantity={quantity:number|null;unit:string;name:string;reason?:string};
 type Projection={
@@ -21,6 +22,8 @@ type Mapping={
   projection?:Projection|null;conversionIssue?:string};
 };
 type Response={skuId:string;skuName:string;costCenters:Mapping[]};
+type ResourceLocation={costCenterId:string;costCenterName:string;costCenterCode:string;canConfigure:boolean};
+type Resources={costCenters:ResourceLocation[]};
 const format=(n:number)=>new Intl.NumberFormat(undefined,{maximumFractionDigits:3}).format(n);
 function RateOutput({title,value}:{title:string;value:RatedQuantity}){
  return <div className='rounded-lg border border-line bg-page p-3'>
@@ -37,6 +40,18 @@ export default function PlnSkuCostCenterRatings({skuId}:{skuId:string}){
  const [loading,setLoading]=useState(true);
  const [error,setError]=useState('');
  const [reload,setReload]=useState(0);
+ const [opened,setOpened]=useState('');
+ const [chooser,setChooser]=useState(false);
+ const [scopeCenters,setScopeCenters]=useState<ResourceLocation[]>([]);
+ const [selectedCc,setSelectedCc]=useState('');
+ const [scopeError,setScopeError]=useState('');
+ const loadCenters=async()=>{
+  setScopeError('');setChooser(true);
+  try{
+   const r=await callBackend<Resources>('/api/org/pln/resource/list');
+   setScopeCenters(r.costCenters.filter(x=>x.canConfigure));
+  }catch(e){setScopeError(e instanceof Error?e.message:'Unable to list permitted production cost centres.');}
+ };
  useEffect(()=>{
   let active=true;
   setResponse(null);setError('');setLoading(true);
@@ -46,15 +61,38 @@ export default function PlnSkuCostCenterRatings({skuId}:{skuId:string}){
    .finally(()=>{if(active)setLoading(false);});
   return ()=>{active=false;};
  },[skuId,reload]);
+ if(opened)return <ManufacturingResourceDetail key={opened} costCenterId={opened}
+    initialTab='sku' initialSkuId={skuId}
+    onBack={()=>{setOpened('');setReload(n=>n+1);}} onSaved={()=>setReload(n=>n+1)}/>;
  return <section className='space-y-3 rounded-xl border border-line p-3'>
   <div className='flex flex-wrap items-start justify-between gap-2'>
    <div>
     <h3 className='font-semibold text-ink'>Mapped manufacturing cost centres</h3>
     <p className='mt-1 text-xs text-muted'>Commissioned output speed and its equivalent primary-unit throughput for each accessible manufacturing cost centre.</p>
    </div>
-   <button type='button' className='min-h-10 rounded-lg border border-line px-3 text-sm font-semibold'
-    disabled={loading} onClick={()=>setReload(n=>n+1)}>Refresh speeds</button>
+   <div className='flex flex-wrap gap-2'>
+    <button type='button' className='min-h-10 rounded-lg border border-line px-3 text-sm font-semibold'
+     onClick={()=>void loadCenters()}>Allocate SKU</button>
+    <button type='button' className='min-h-10 rounded-lg border border-line px-3 text-sm font-semibold'
+     disabled={loading} onClick={()=>setReload(n=>n+1)}>Refresh speeds</button>
+   </div>
   </div>
+  {chooser&&<section className='space-y-3 rounded-xl border border-line bg-page p-3'>
+   <h4 className='text-sm font-semibold'>Allocate this SKU to a production cost centre</h4>
+   <p className='text-xs text-muted'>Select an authorized cost centre. The same SKU allocation and physical-container rating editor opens as in Manufacturing Resources and Asset Management.</p>
+   {scopeError&&<p role='alert' className='text-xs text-red-600'>{scopeError}</p>}
+   <select aria-label='Production cost centre' className='min-h-11 w-full rounded-xl border border-line bg-panel p-2 text-sm'
+    value={selectedCc} onChange={e=>setSelectedCc(e.target.value)}>
+    <option value=''>Select production cost centre</option>
+    {scopeCenters.map(c=><option key={c.costCenterId} value={c.costCenterId}>{c.costCenterName} · {c.costCenterCode}</option>)}
+   </select>
+   <div className='flex gap-2'>
+    <button type='button' disabled={!selectedCc} className='min-h-11 rounded-xl bg-brand px-4 text-sm font-semibold text-onbrand disabled:opacity-50'
+     onClick={()=>setOpened(selectedCc)}>Configure SKU allocation</button>
+    <button type='button' className='min-h-11 rounded-xl border border-line px-4 text-sm'
+     onClick={()=>setChooser(false)}>Cancel</button>
+   </div>
+  </section>}
   {loading&&<p role='status' className='text-sm text-muted'>Loading manufacturing cost-centre speeds…</p>}
   {error&&<p role='alert' className='rounded-lg border border-red-400 p-3 text-sm text-red-600'>{error}</p>}
   {!loading&&response&&<>
@@ -122,7 +160,11 @@ export default function PlnSkuCostCenterRatings({skuId}:{skuId:string}){
         <p className='text-xs text-muted'>All outputs use the same {row.periodUnit?.name||'selected'} time period. Packaging ratios come from Product Configuration, not from separate cost-centre inputs.</p>
        </div>
       </details>}
-      <p className='text-xs text-muted'>Cost-centre revision {row.revision} · Updated {row.updatedAt?row.updatedAt.slice(0,10):'not recorded'}</p>
+      <div className='flex flex-wrap items-center justify-between gap-2'>
+       <p className='text-xs text-muted'>Cost-centre revision {row.revision} · Updated {row.updatedAt?row.updatedAt.slice(0,10):'not recorded'}</p>
+       <button type='button' className='min-h-10 rounded-lg border border-line px-3 text-sm font-semibold'
+        onClick={()=>setOpened(row.costCenterId)}>Open shared SKU configuration</button>
+      </div>
      </article>;
     })}
    </div>
