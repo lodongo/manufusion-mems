@@ -60,7 +60,8 @@ export function normalizePhysicalRating(raw:unknown):PhysicalRating{
   throw new HttpError(400,'Custom output requires a positive number of physical primary units per rated output.');
  return {skuId:id(x.skuId,'manufactured SKU'),
   containerId:id(x.containerId,'adopted Physical Container'),
-  containerSizeId:id(x.containerSizeId,'physical-container size'),
+  // Manual SKU capacity needs no shared Container Size record.
+  containerSizeId:str(x.containerSizeId)?id(x.containerSizeId,'legacy physical-container size'):'',
   containerCategoryCode:id(x.containerCategoryCode,'container category'),
   containerSubcategoryCode:id(x.containerSubcategoryCode,'container subcategory'),
   ratingQuantity,ratingUnitCode,periodUnitCode,ratingOutputCode,
@@ -75,16 +76,23 @@ export function derivePhysicalCapacity(
  parameters:SkuParameter[],input:PhysicalRating,
 ):CapacityProjection{
  if(sku.id!==input.skuId)throw new HttpError(400,'The rating must use the selected manufactured SKU.');
+ if(sku.category==='INTERMEDIATE')throw new HttpError(400,
+  'Intermediate/WIP SKUs do not use commissioned speeds. Keep the SKU allocated without a rate.');
  const components=sku.skuComponents;
  if(components.containmentScope==='NONE')
   throw new HttpError(400,'This SKU uses direct process flow, not physical containment. Choose a non-container capacity basis or configure a container on the SKU first.');
- if(!str(components.productionFormId)||!str(components.containerId)||!str(components.containerSizeId))
-  throw new HttpError(400,'Complete the SKU production form, physical container and size in Materials & Products before commissioning a rate. A container selected only at the cost centre does not update the SKU.');
+ const manualCapacity=components.containerCapacityQuantity!==undefined||
+    components.containerCapacityUom!==undefined;
+ if(!str(components.productionFormId)||!str(components.containerId)||
+   (!manualCapacity&&!str(components.containerSizeId)))
+  throw new HttpError(400,'Configure the SKU production form, physical container and manual capacity quantity/unit in Materials & Products first.');
  const container=parameters.find(p=>p.kind==='containers'&&p.id===input.containerId&&p.enabled!==false);
- const size=parameters.find(p=>p.kind==='containerSizes'&&p.id===input.containerSizeId&&p.enabled!==false);
- if(!container||!size)throw new HttpError(400,'Select active physical-container properties and size.');
- if(input.containerId!==str(components.containerId)||input.containerSizeId!==str(components.containerSizeId))
-  throw new HttpError(400,'Physical container and size must match the selected SKU composition.');
+ const legacySize=!manualCapacity?parameters.find(p=>p.kind==='containerSizes'&&p.id===input.containerSizeId&&p.enabled!==false):undefined;
+ if(!container||!manualCapacity&&!legacySize)
+  throw new HttpError(400,'Select an active physical container and configure its capacity directly on the SKU.');
+ if(input.containerId!==str(components.containerId)||
+   !manualCapacity&&input.containerSizeId!==str(components.containerSizeId))
+  throw new HttpError(400,'The physical container does not match the SKU master. Apply the saved SKU container.');
  if(str(container.categoryCode)!==input.containerCategoryCode||
     str(container.subcategoryCode)!==input.containerSubcategoryCode)
   throw new HttpError(400,'Physical container category or subcategory does not match its adopted configuration.');
@@ -128,7 +136,10 @@ export function derivePhysicalCapacity(
  return {
   source:{containerName:container.name,containerCategory:str(container.categoryCode),
    containerSubcategory:str(container.subcategoryCode),
-   containerAttributes:container.containerAttributes??{},sizeName:size.name,
+   containerAttributes:container.containerAttributes??{},
+   sizeName:manualCapacity
+    ?String(components.containerCapacityQuantity)+' '+displayUnit(str(components.containerCapacityUom))
+    :legacySize?.name||'Unspecified legacy size',
    countUnit:countUnit.symbol,timeUnit:time.symbol,
    ratedUnits:input.ratingQuantity,physicalContainers:cap(physicalContainers),
    ratingOutputCode:output.code,ratingOutputName:output.name,
