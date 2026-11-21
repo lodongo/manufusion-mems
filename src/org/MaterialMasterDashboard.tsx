@@ -22,7 +22,7 @@ interface WarehouseRow {
     warehouseId:string; warehouseName:string; warehouseCode:string;
     relation:'Created here'|'Extended'|'Existing mapping';
     status:string; requestedAt:string; approvedAt:string; requestId:string; requestedBy:string;
-    mapped:boolean; accessible:boolean;
+    mapped:boolean; accessible:boolean; canApprove?:boolean;
 }
 type AvailabilityRow = WarehouseRow & {
     ledgerState:'Tracked'|'Not tracked'|'Unreconciled'|'Unavailable'|'Restricted';
@@ -107,6 +107,17 @@ export default function MaterialMasterDashboard({id,onBack,onChanged,onEdit,onEx
             if(choice==='reject'&&!comment)return;
             if(choice==='approve'&&!await appConfirm('Complete the assigned workflow stage for '+m.name+'?'))return;
             await run(()=>callBackend('/api/org/procurement/materials/approve',{id,decision:choice,comment}));
+        })();
+    };
+    const extensionDecision=(w:WarehouseRow,choice:'approve'|'reject')=>{
+        if(!w.canApprove||!w.requestId)return;
+        void (async()=>{
+            const comment=choice==='reject'?await appPrompt('Reason for rejecting the extension (at least 10 characters)'):'';
+            if(choice==='reject'&&!comment)return;
+            if(choice==='approve'&&!await appConfirm('Approve extension to '+w.warehouseName+'?'))return;
+            await run(()=>callBackend('/api/org/procurement/materials/extension/approve',{
+                id:w.requestId,decision:choice,comment,
+            }));
         })();
     };
     const draftAction=(choice:'submit'|'delete')=>{
@@ -235,6 +246,10 @@ export default function MaterialMasterDashboard({id,onBack,onChanged,onEdit,onEx
                                 {w.mapped?'Published':w.status||'Not published'}
                             </Badge>
                         </div>
+                        {w.canApprove&&<div className='flex flex-wrap gap-2'>
+                            <Button disabled={busy} onClick={()=>extensionDecision(w,'approve')}>Approve extension</Button>
+                            <Button variant='secondary' disabled={busy} onClick={()=>extensionDecision(w,'reject')}>Reject extension</Button>
+                        </div>}
                         <dl className='grid gap-x-4 sm:grid-cols-2'>
                             <Fact label='Workflow state' value={w.status}/>
                             <Fact label='Created / extension requested' value={showDate(w.requestedAt)}/>
