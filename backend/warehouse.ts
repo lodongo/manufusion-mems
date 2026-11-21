@@ -462,7 +462,7 @@ export const warehouseRoutes = {
             const usedRestrictions = new Set(clusters.flatMap(c=>c.restrictionCodes));
             const usedTypes = new Set(locations.map((l) => l.typeCode));
             return {
-                costCenter: { id: node.id, code: str(node.data.code), name: str(node.data.name), costType: isObj(node.data.attributes) ? str(node.data.attributes.costType) : '' },
+                costCenter: { id: node.id, code: str(node.data.code), name: str(node.data.name), costType: isObj(node.data.attributes) ? str(node.data.attributes.costType) : '', costSubcategory: isObj(node.data.attributes) ? str(node.data.attributes.costSubcategory) : '' },
                 configured: !!doc,
                 setup: doc
                     ? {
