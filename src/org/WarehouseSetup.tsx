@@ -12,8 +12,8 @@ import { appConfirm, appPrompt } from '../components/dialogs';
 //   warehouse          material categories (one or more), layout per floor, capacity
 //   storage location   a name + a storage location type (INV metadata) + a warehouse restriction (colour) from the
 //                      restriction master shared with materials (Procurement metadata → warehouseRestrictions)
-//   physical location  bins in clusters; each cluster sits in one storage location and is for material subcategories
-//                      chosen from the warehouse's categories (subcategories are chosen only here)
+//   physical location  storage positions in clusters (bin, shelf, pallet place, etc.); each cluster belongs to one storage location
+//                      with subcategories chosen from the warehouse's configured material categories
 // Position code AB_01_C_02 = floor A, rack row B, rack 01, column C (from the bottom), position 02.
 
 interface FloorLayout {
@@ -98,6 +98,11 @@ interface Cluster extends Range {
     subcategories: Array<{ code: string; name: string; categoryCode: string }>;
     storageTypeCode: string;
     storageTypeLabel: string;
+    stackingEnabled?: boolean;
+    stackedRows?: number | null;
+    stackedColumns?: number | null;
+    numberOfStacks?: number | null;
+    palletCapacity?: number | null;
     createdByName: string;
     createdAt: string;
 }
@@ -121,7 +126,7 @@ interface Data {
     costCenter: { id: string; code: string; name: string; costType: string };
     configured: boolean;
     setup: Setup | null;
-    summary: { totalPositions: number; allocated: number; free: number; clusters: number };
+    summary: { totalPositions: number; allocated: number; free: number; clusters: number; palletCapacity?: number };
     floorTotals?: Array<{ floor: string; positions: number; allocated: number }>;
     clusters: Cluster[];
     categories: Category[];
@@ -250,7 +255,7 @@ export default function WarehouseSetup({ costCenterId, onBack }: { costCenterId:
         ['setup', 'Overview', null],
         ['topology', 'Storage map', null],
         ['clusters', 'Clusters', d.clusters.length],
-        ['positions', 'Bins', null],
+        ['positions', 'Positions', null],
     ];
 
     return (
@@ -745,7 +750,7 @@ function SetupForm({ data, onDone, onCancel }: { data: Data; onDone: () => void;
 
                 <Card className='space-y-3'>
                     <p className='text-sm font-semibold text-white'>2 · Storage locations *</p>
-                    <p className='text-xs text-soft'>Each storage location has a name, a storage location type and a warehouse restriction (its colour). The restriction comes from the same master as the material&apos;s Stock Control restriction: a material is binned only where both match. Codes SL-01, SL-02… are given automatically.</p>
+                    <p className='text-xs text-soft'>Each location has a name, a type (bins are only one option), and a warehouse restriction. Materials can be allocated where their Stock Control restriction matches. Codes SL-01, SL-02… are automatic.</p>
                     {locs.map((l, i) => {
                         const cls = data.restrictions.find((x) => x.code === l.restrictionCode);
                         const suggestion = data.restrictions.find((x) => x.code === l.suggestedRestrictionCode && x.active);
@@ -1036,7 +1041,12 @@ function ClusterDetail({ data, cluster, onDeleted, onPositions }: { data: Data; 
                     <p className='font-mono font-semibold text-white'>{cluster.code}</p>
                     {cluster.name && <span className='truncate text-sm text-slate-300'>{cluster.name}</span>}
                 </div>
-                <Row label='Positions' value={`${cluster.positions.toLocaleString()} · ${cluster.firstCode} to ${cluster.lastCode}`} />
+                <Row label='Physical positions' value={`${cluster.positions.toLocaleString()} · ${cluster.firstCode} to ${cluster.lastCode}`} />
+                {cluster.palletCapacity!==null&&cluster.palletCapacity!==undefined&&<>
+                    <Row label='Pallet capacity' value={cluster.palletCapacity.toLocaleString()} />
+                    <Row label='Stacking' value={cluster.stackingEnabled?
+                        `${cluster.stackedRows} rows × ${cluster.stackedColumns} columns × ${cluster.numberOfStacks} pallets high`:'Single level'} />
+                </>}
                 <Row label='Floor' value={letter(cluster.floor)} />
                 <Row label='Allocation' value={allocLabel(cluster)} />
                 {cluster.kind === 'box' &&
@@ -1116,6 +1126,10 @@ function ClusterForm({ data, onDone, onCancel }: { data: Data; onDone: (code: st
     const [clusterClass,setClusterClass]=useState(options.length === 1 ? options[0].restrictionCode : '');
     const [q, setQ] = useState('');
     const [storageType, setStorageType] = useState(setup.storageTypeCode);
+    const [stackingEnabled,setStackingEnabled]=useState(false);
+    const [stackedRows,setStackedRows]=useState('1');
+    const [stackedColumns,setStackedColumns]=useState('1');
+    const [numberOfStacks,setNumberOfStacks]=useState('1');
     const [confirmed, setConfirmed] = useState(false);
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState('');
@@ -1128,8 +1142,15 @@ function ClusterForm({ data, onDone, onCancel }: { data: Data; onDone: (code: st
     const index = useMemo(() => ownerIndex(onFloor), [onFloor]);
     const used = occupied.reduce((s, [a, b]) => s + b - a + 1, 0);
     const largestGap = useMemo(() => freeGaps(total, occupied).reduce((m, g) => Math.max(m, g[1] - g[0] + 1), 0), [total, occupied]);
-    const size = Number(countText);
-    const sizeOk = countText.trim() !== '' && Number.isInteger(size) && size >= 1 && size <= data.limits.clusterPositions;
+    const palletMode=storageType==='PAL';
+    const stackMode=palletMode&&stackingEnabled;
+    const stackValues=[stackedRows,stackedColumns,numberOfStacks].map(Number);
+    const stackingValid=stackValues.every((n,i)=>Number.isInteger(n)&&n>=1&&n<=(i===2?20:100))&&
+        [stackedRows,stackedColumns,numberOfStacks].every(x=>x.trim()!=='');
+    const size=stackMode?stackValues[0]*stackValues[1]:Number(countText);
+    const sizeOk=(stackMode?stackingValid:countText.trim()!=='')&&
+        Number.isInteger(size)&&size>=1&&size<=data.limits.clusterPositions;
+    const palletCapacity=palletMode&&sizeOk?size*(stackMode?stackValues[2]:1):null;
     const startOrd: number | null = mode === 'next' ? (sizeOk ? nextFreeStart(total, occupied, size) : null) : ordOf(floor, start.r, floor.racking ? start.k : 1, floor.racking ? start.c : 1, start.p);
     const endOrd = startOrd !== null && sizeOk ? startOrd + size - 1 : null;
     const fits = endOrd !== null && endOrd <= total - 1;
@@ -1138,7 +1159,8 @@ function ClusterForm({ data, onDone, onCancel }: { data: Data; onDone: (code: st
     const shownOptions = options.filter((l) => (!clusterClass || l.restrictionCode === clusterClass) && (!q.trim() || `${l.code} ${l.name} ${l.typeLabel} ${l.restrictionCode} ${l.restrictionLabel}`.toLowerCase().includes(q.trim().toLowerCase())));
     const chosen = options.find((l) => l.code === location);
     const problems: string[] = [];
-    if (!sizeOk) problems.push(`Enter the number of positions: a whole number from 1 to ${data.limits.clusterPositions.toLocaleString()}.`);
+    if (!sizeOk) problems.push(stackMode?'Enter valid pallet rows (1–100), columns (1–100) and stacks high (1–20), within the available floor positions.':
+        `Enter the number of physical positions: a whole number from 1 to ${data.limits.clusterPositions.toLocaleString()}.`);
     else if (mode === 'next' && startOrd === null) problems.push(`Floor ${letter(floorNo)} has no free space of ${size.toLocaleString()} positions in sequence (largest free space: ${largestGap.toLocaleString()}).`);
     if (startOrd !== null && endOrd !== null && !fits) problems.push(`Only ${(total - startOrd).toLocaleString()} positions remain on this floor from ${codeAt(floorNo, floor, startOrd)}.`);
     if (clash) problems.push(`Overlaps cluster ${clash.code} (${clash.firstCode} to ${clash.lastCode}). Every position belongs to one cluster only.`);
@@ -1171,6 +1193,9 @@ function ClusterForm({ data, onDone, onCancel }: { data: Data; onDone: (code: st
                 restrictionCode: chosen?.restrictionCode || clusterClass,
                 subcategoryCodes: subCodes,
                 storageTypeCode: storageType,
+                stackingEnabled: stackMode,
+                ...(stackMode?{stackedRows:stackValues[0],stackedColumns:stackValues[1],
+                    numberOfStacks:stackValues[2]}:{}),
                 confirm: confirmed,
             });
             onDone(res.code);
@@ -1221,7 +1246,7 @@ function ClusterForm({ data, onDone, onCancel }: { data: Data; onDone: (code: st
                 </Card>
 
                 <Card className='space-y-3'>
-                    <p className='text-sm font-semibold text-ink'>2 · Allocate positions *</p><p className='text-xs text-soft'>Use the next free positions, or select a specific starting bin. Occupied bins cannot be reused.</p>
+                    <p className='text-sm font-semibold text-ink'>2 · Allocate physical positions *</p><p className='text-xs text-soft'>Use the next free positions or select a starting physical address. No location can belong to two clusters.</p>
                     <div className='grid grid-cols-1 gap-2'>
                         {(
                             [
@@ -1238,7 +1263,8 @@ function ClusterForm({ data, onDone, onCancel }: { data: Data; onDone: (code: st
                             </button>
                         ))}
                     </div>
-                    <NumField id='cl-count' label='Number of positions *' value={countText} onChange={change(setCountText)} hint={`Up to ${Math.min(data.limits.clusterPositions, total).toLocaleString()} · taken in sequence: rack row › rack › column (from the bottom) › position`} />
+                    {!stackMode&&<NumField id='cl-count' label='Number of floor/storage positions *' value={countText} onChange={change(setCountText)} hint={`Up to ${Math.min(data.limits.clusterPositions, total).toLocaleString()} · taken in sequence: rack row › rack › column › position`} />}
+                    {stackMode&&<p className='rounded-lg border border-line bg-panel p-3 text-xs text-soft'>Pallet floor positions are calculated from stacked rows × columns. Each stack occupies one physical position, regardless of the number of pallets high.</p>}
                     {mode === 'start' && (
                         <>
                             <p className='text-sm text-slate-300'>Starting physical location</p>
@@ -1282,7 +1308,9 @@ function ClusterForm({ data, onDone, onCancel }: { data: Data; onDone: (code: st
                             const on = location === l.code;
                             return (
                                 <li key={l.code}>
-                                    <button type='button' disabled={!l.aligned} onClick={() => {setLocation(l.code);setClusterClass(l.restrictionCode);setConfirmed(false);}} className={`flex w-full items-start gap-3 rounded-xl border-2 p-3 text-left text-sm disabled:opacity-50 ${on ? 'text-white' : 'border-slate-800 text-slate-300'}`} style={on ? { borderColor: l.color, background: `${l.color}1f` } : undefined}>
+                                    <button type='button' disabled={!l.aligned} onClick={() => {setLocation(l.code);setClusterClass(l.restrictionCode);
+                                        if(/pallet/i.test(l.typeLabel))setStorageType('PAL');
+                                        setConfirmed(false);}} className={`flex w-full items-start gap-3 rounded-xl border-2 p-3 text-left text-sm disabled:opacity-50 ${on ? 'text-white' : 'border-slate-800 text-slate-300'}`} style={on ? { borderColor: l.color, background: `${l.color}1f` } : undefined}>
                                         <LocDot color={l.color} size='mt-0.5 h-4 w-4' />
                                         <span className='min-w-0 flex-1'>
                                             {l.name}
@@ -1352,13 +1380,39 @@ function ClusterForm({ data, onDone, onCancel }: { data: Data; onDone: (code: st
                 </Card>
 
                 <Card className='space-y-3'>
-                    <p className='text-sm font-semibold text-ink'>5 · Name and identification</p><p className='text-xs text-soft'>Use a practical name for bin labels and picking. The name is optional.</p><SelectField id='cl-type' label='Physical location type (bin, drawer, pallet position, etc.)' value={storageType} onChange={(e) => setStorageType(e.target.value)}>
+                    <p className='text-sm font-semibold text-ink'>5 · Storage type, pallet capacity and name</p>
+                    <p className='text-xs text-soft'>Use the actual type of position, such as a bin, shelf or pallet place.</p>
+                    <SelectField id='cl-type' label='Physical storage type' value={storageType} onChange={(e) => {setStorageType(e.target.value);setConfirmed(false);}}>
                         {data.storageTypes.map((t) => (
                             <option key={t.code} value={t.code}>
                                 {t.label}
                             </option>
                         ))}
                     </SelectField>
+                    {palletMode&&<div className='space-y-3 rounded-xl border border-line bg-panel p-3'>
+                        <label className='flex min-h-11 items-center gap-3 text-sm font-medium text-ink'>
+                            <input type='checkbox' checked={stackingEnabled}
+                                onChange={e=>{setStackingEnabled(e.target.checked);setConfirmed(false);}} />
+                            Stacking — calculate pallet capacity
+                        </label>
+                        {stackingEnabled&&<>
+                            <div className='grid grid-cols-2 gap-3'>
+                                <NumField id='cl-stack-rows' label='Stacked rows *' value={stackedRows}
+                                    onChange={change(setStackedRows)} />
+                                <NumField id='cl-stack-cols' label='Stacked columns *' value={stackedColumns}
+                                    onChange={change(setStackedColumns)} />
+                                <div className='col-span-2'>
+                                    <NumField id='cl-stacks' label='Number of stacks (pallets high) *'
+                                        value={numberOfStacks} onChange={change(setNumberOfStacks)} />
+                                </div>
+                            </div>
+                            <p className='text-xs text-soft'>Each row × column combination occupies one ground position. Number of stacks means pallets vertically, not additional floor places. Site loading and stacking limits still apply.</p>
+                        </>}
+                        <div className='grid grid-cols-2 gap-2'>
+                            <Stat label='Ground positions' value={sizeOk?size.toLocaleString():'—'}/>
+                            <Stat label='Pallet capacity' value={palletCapacity===null?'—':palletCapacity.toLocaleString()}/>
+                        </div>
+                    </div>}
                     <Field id='cl-name' label='Cluster name (optional)' maxLength={60} placeholder='e.g. Fast movers, bearings aisle' value={name} onChange={(e) => setName(e.target.value)} />
                 </Card>
 
