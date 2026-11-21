@@ -425,7 +425,23 @@ export const warehouseRoutes = {
             const d = doc?.data ?? {};
             const layout = layoutOf(d);
             const [rawClusters, { restrictions, types, locations }] = await Promise.all([clustersOf(ctx.orgId, node.id, layout), describeLocations(locationsOf(d))]);
-            const reservations=await listDocs(`organizations/${ctx.orgId}/warehouse_bin_occupancy`);const linkedBins=reservations.filter(x=>str(x.data.warehouseId)===node.id).map(x=>({binId:str(x.data.binId),materialId:str(x.data.materialId),materialNumber:str(x.data.materialNumber)}));const byCode = new Map(locations.map((l) => [l.code, l]));
+            const [reservations,materialDocs]=await Promise.all([
+                listDocs('organizations/'+ctx.orgId+'/warehouse_bin_occupancy'),
+                listDocs('organizations/'+ctx.orgId+'/materials'),
+            ]);
+            const linkedBins=reservations.filter(x=>str(x.data.warehouseId)===node.id).map(x=>({
+                binId:str(x.data.binId),materialId:str(x.data.materialId),materialNumber:str(x.data.materialNumber),
+            }));
+            // Draft/approved material assignments are not physical stock or bin occupancy.
+            const clusterMaterials=materialDocs.filter(m=>str(m.data.warehouseId)===node.id&&
+                /^CL-\d{4}$/.test(str(m.data.clusterCode))&&
+                !['deleted','cancelled'].includes(str(m.data.status))).map(m=>({
+                    materialId:m.id,clusterCode:str(m.data.clusterCode),
+                    materialNumber:str(m.data.materialNumber),name:str(m.data.name),
+                    status:str(m.data.status),restrictionCodes:restrictionCodesOf(
+                        m.data.warehouseRestrictionCodes,m.data.warehouseRestriction),
+                }));
+            const byCode=new Map(locations.map(l=>[l.code,l]));
             // Cluster-selected restrictions determine material compatibility. Legacy location restriction
             // codes are read as a fallback so existing clusters and allocations remain usable.
             const clusters = rawClusters.map((c) => {
@@ -471,7 +487,7 @@ export const warehouseRoutes = {
                       }
                     : null,
                 summary: { totalPositions: total, allocated, free: total - allocated, clusters: clusters.length,
-                    palletCapacity: clusters.reduce((sum,c)=>sum+(c.palletCapacity??0),0) },linkedBins,
+                    palletCapacity: clusters.reduce((sum,c)=>sum+(c.palletCapacity??0),0) },linkedBins,clusterMaterials,
                 clusters,
                 categories,
                 restrictions: restrictions.filter((c) => c.active || usedRestrictions.has(c.code)),
