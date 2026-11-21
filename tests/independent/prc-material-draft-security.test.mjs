@@ -41,6 +41,10 @@ test('designated delegates need each action explicitly and cannot inherit creato
     assert.equal(materialDraftCan(draft,'bob',delegateEdit,'delete'),false);
     assert.equal(materialDraftCan(draft,'bob',delegateDelete,'delete'),true);
     assert.equal(materialDraftCan(draft,'bob',delegateSubmit,'submit'),true);
+    assert.equal(materialDraftCan(draft,'bob',['PRC.*'],'edit'),true);
+    assert.equal(materialDraftCan(draft,'bob',['PRC.materials.draft.edit.*'],'edit'),true);
+    assert.equal(materialDraftCan(draft,'bob',['PRC.materials.draft.edit.*'],'delete'),false);
+    assert.equal(materialDraftCan(draft,'bob',['*'],'submit'),true);
     assert.equal(materialDraftCan(draft,'bob',['PRC.view'],'edit'),false);
     assert.equal(materialDraftCan(draft,'bob',['PRC.edit'],'delete'),false);
     assert.equal(materialDraftCan(draft,'bob',[], 'edit',true),true);
