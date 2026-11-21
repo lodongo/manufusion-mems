@@ -1803,7 +1803,7 @@ const enabled=ctx.body.enabled===true;const terminate=ctx.body.terminateActive==
                 number:i+1,action:step.action,mode:step.mode,
                 assignee:step.mode==='role'?step.role:step.mode==='user'?step.uid:'Manager level '+step.managerLevel,
                 decisions:(Array.isArray(record.approvalHistory)?record.approvalHistory:[])
-                    .filter(x=>isObj(x)&&Number(x.stepIndex)===i)
+                    .filter(isObj).filter(x=>Number(x.stepIndex)===i)
                     .map(x=>({decision:str(x.decision),by:str(x.by),at:str(x.at),comment:str(x.comment)})),
             })),
             extensions:warehouseRows.filter(x=>x.relation==='Extended').map(w=>{
