@@ -177,6 +177,14 @@ const PART_BYTES = 700_000;
 
 const base = (kind: Kind) => `module_workspaces/${KINDS[kind].module}/catalogs/${kind}`;
 const staging = (kind: Kind) => `module_workspaces/${KINDS[kind].module}/catalog_staging/${kind}`;
+const stagedUpload = (kind:Kind,id:string) => `${staging(kind)}/uploads/${id}`;
+const stagedChunk = (kind:Kind,id:string,index:number) =>
+    `${stagedUpload(kind,id)}/chunks/${String(index).padStart(3,'0')}`;
+const uploadIdOf = (value:unknown) => {
+    const id=str(value);
+    if(!/^[a-f0-9]{32}$/.test(id))throw new HttpError(400,'Invalid or missing upload session. Start a new upload.');
+    return id;
+};
 const arr = (v: unknown): Obj[] => (Array.isArray(v) ? v.filter(isObj) : []);
 const strs = (v: unknown): string[] => (Array.isArray(v) ? v.map(str).filter(Boolean) : []);
 
@@ -518,12 +526,16 @@ function catalogRoutes(area: 'procurement' | 'finance', allowed: Kind[]) {
                 const totalChunks = Number(ctx.body.totalChunks);
                 const sha256 = str(ctx.body.sha256);
                 const fileName = str(ctx.body.fileName).replace(/[^\w .()-]/g, '').slice(0, 120);
+                const uploadId=uploadIdOf(ctx.body.uploadId);
                 if (!Number.isInteger(size) || size < 100 || size > MAX_UPLOAD_BYTES) throw new HttpError(400, 'The file must be between 100 bytes and 48 MB.');
                 if (!Number.isInteger(totalChunks) || totalChunks < 1 || totalChunks > MAX_CHUNKS) throw new HttpError(400, 'Invalid number of parts.');
                 if (!/^[a-f0-9]{64}$/.test(sha256)) throw new HttpError(400, 'Invalid checksum.');
-                for (const d of await listDocs(`${staging(kind)}/upload`)) await deleteDoc(`${staging(kind)}/upload/${d.id}`);
-                await writeDoc(staging(kind), { status: 'uploading', size, sha256, totalChunks, fileName, uploadedBy: ctx.actor.email, createdAt: nowIso() });
-                return { ok: true };
+                // Unique upload IDs isolate concurrent attempts and avoid cross-session chunk deletion.
+                const exists=await getDoc(stagedUpload(kind,uploadId));
+                if(exists)throw new HttpError(409,'This upload session already exists. Start a new upload.');
+                await writeDoc(stagedUpload(kind,uploadId),
+                    {status:'uploading',size,sha256,totalChunks,fileName,uploadedBy:ctx.actor.email,createdAt:nowIso()});
+                return {ok:true,uploadId};
             }),
         ],
 
@@ -532,13 +544,22 @@ function catalogRoutes(area: 'procurement' | 'finance', allowed: Kind[]) {
                 const kind = pick(ctx.body.kind);
                 const index = Number(ctx.body.index);
                 const data = str(ctx.body.data);
-                const s = await getDoc(staging(kind));
+                const uploadId=uploadIdOf(ctx.body.uploadId);
+                const s = await getDoc(stagedUpload(kind,uploadId));
                 if (!s || str(s.data.status) !== 'uploading' || str(s.data.uploadedBy) !== ctx.actor.email) throw new HttpError(400, 'Start the upload again.');
                 const total = num(s.data.totalChunks) ?? 0;
                 if (!Number.isInteger(index) || index < 0 || index >= total) throw new HttpError(400, 'Invalid part number.');
-                if (!data || Buffer.byteLength(data, 'utf8') > 900_000) throw new HttpError(400, 'Each part must be under 900 KB.');
-                await writeDoc(`${staging(kind)}/upload/${String(index).padStart(3, '0')}`, { index, data });
-                return { ok: true };
+                const bytes=Buffer.from(data,'utf8');
+                if(!data||bytes.length>900_000)throw new HttpError(400,'Each part must be under 900 KB.');
+                const expectedHash=str(ctx.body.sha256);
+                const chunkHash=createHash('sha256').update(bytes).digest('hex');
+                if(expectedHash&&expectedHash!==chunkHash)throw new HttpError(400,'Chunk checksum mismatch. Retry this part.');
+                const path=stagedChunk(kind,uploadId,index);
+                await writeDoc(path,{index,data,sha256:chunkHash,byteCount:bytes.length});
+                const verified=await getDoc(path);
+                if(!verified||str(verified.data.sha256)!==chunkHash||num(verified.data.byteCount)!==bytes.length)
+                    throw new HttpError(503,'Part was not verified in storage. Retry this part.');
+                return {ok:true,index,sha256:chunkHash};
             }),
         ],
 
@@ -546,7 +567,8 @@ function catalogRoutes(area: 'procurement' | 'finance', allowed: Kind[]) {
             staff(`admin.${area}.catalog.finish`, 'write', async (ctx) => {
                 const kind = pick(ctx.body.kind);
                 const def = KINDS[kind];
-                const s = await getDoc(staging(kind));
+                const uploadId=uploadIdOf(ctx.body.uploadId);
+                const s = await getDoc(stagedUpload(kind,uploadId));
                 if (!s || str(s.data.status) !== 'uploading' || str(s.data.uploadedBy) !== ctx.actor.email) throw new HttpError(400, 'Start the upload again.');
                 const total = num(s.data.totalChunks) ?? 0;
                 const chunks = (await listDocs(`${staging(kind)}/upload`)).sort((a, b) => (num(a.data.index) ?? 0) - (num(b.data.index) ?? 0));
