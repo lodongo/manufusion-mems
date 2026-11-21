@@ -1166,8 +1166,8 @@ function ClusterForm({ data, onDone, onCancel }: { data: Data; onDone: (code: st
         current.includes(code)?current.filter(x=>x!==code):[...current,code]);
         setConfirmed(false);};
     const [q, setQ] = useState('');
-    const [storageType, setStorageType] = useState(setup.storageTypeCode||'BIN');
-    const [conditionCode,setConditionCode]=useState(setup.conditionCode||'AMB');
+    const [storageType, setStorageType] = useState('');
+    const [conditionCode,setConditionCode]=useState('AMB');
     const [stackingEnabled,setStackingEnabled]=useState(false);
     const [stackingPattern,setStackingPattern]=useState<'STRAIGHT'|'PYRAMID'>('STRAIGHT');
     const [stackedRows,setStackedRows]=useState('1');
@@ -1213,6 +1213,8 @@ function ClusterForm({ data, onDone, onCancel }: { data: Data; onDone: (code: st
     if (startOrd !== null && endOrd !== null && !fits) problems.push(`Only ${(total - startOrd).toLocaleString()} positions remain on this floor from ${codeAt(floorNo, floor, startOrd)}.`);
     if (clash) problems.push(`Overlaps cluster ${clash.code} (${clash.firstCode} to ${clash.lastCode}). Every position belongs to one cluster only.`);
     if (!chosen) problems.push('Choose a storage location.');
+    if (!storageType) problems.push('Choose a physical storage type for this cluster.');
+    if (!conditionCode) problems.push('Choose the storage condition for this cluster.');
     if(!restrictionCodes.length)problems.push('Choose one or more warehouse restrictions for this cluster.');
     if(restrictionCodes.some(code=>!data.restrictions.find(r=>r.code===code&&r.active)))
         problems.push('All cluster warehouse restrictions must be active in the master.');
@@ -1301,6 +1303,7 @@ function ClusterForm({ data, onDone, onCancel }: { data: Data; onDone: (code: st
                     <p className='text-xs text-soft'>Choose pallets to configure stacking before determining the number of storage positions.</p>
                     <SelectField id='cl-type' label='Physical storage type *' value={storageType}
                         onChange={(e)=>{setStorageType(e.target.value);setConfirmed(false);}}>
+                        <option value=''>Choose a storage type…</option>
                         {data.storageTypes.map((t)=><option key={t.code} value={t.code}>{t.label}</option>)}
                     </SelectField>
                     {palletMode&&<div className='space-y-3 rounded-xl border border-line bg-panel p-3' data-testid='cluster-pallet-stacking'>
