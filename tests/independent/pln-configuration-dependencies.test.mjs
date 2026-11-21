@@ -96,7 +96,7 @@ test('PLN navigation gates configurations rather than manufacturing stage execut
  assert.ok(ui.includes('Next step requires:'));
  assert.ok(ui.includes('nextMissing.length>0'));
  assert.ok(ui.includes('configuration dependencies before continuing'));
- assert.ok(ui.includes('<PlnCostCenterSetup onMappingsChanged={refreshCapacitySetup} defaultSiteId={formDefaults.defaultSiteId}/>'));
+ assert.ok(ui.includes('<PlnCostCenterSetup onMappingsChanged={refreshCapacitySetup}')&&ui.includes('onEditSku={skuId=>'));
  assert.ok(costCenter.includes('onMappingsChanged?.()'));
  assert.ok(rules.includes("SETUP_REQUIREMENTS"));
  const backend=read('backend/plnMfgFoundation.ts');
