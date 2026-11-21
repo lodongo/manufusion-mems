@@ -689,17 +689,19 @@ export const warehouseRoutes = {
                 const location = locations.find((x) => x.code === str(b.locationCode));
                 if (!location) throw new HttpError(400, 'Choose one of the storage locations of this warehouse.');
                 if (!location.active) throw new HttpError(400, `${location.code} ${location.name} is inactive. Choose another storage location.`);
-                if (!location.aligned) throw new HttpError(409, `${location.code} ${location.name} is not aligned to the warehouse restriction master. Edit the warehouse and confirm its restriction before creating clusters.`);
+                // Storage locations are structural. Material restrictions are defined by this cluster.
 
                 // Material subcategories, only from the warehouse's categories.
                 const catalog = await materialCategories();
                 const allowed = new Map(
                     catalog.filter((cat) => categoryCodesOf(wh.data).includes(cat.code)).flatMap((cat) => cat.subcategories.map((s) => [s.code, { code: s.code, name: s.name, categoryCode: cat.code }] as const))
                 );
-                const clusterRestriction = str(b.restrictionCode);
-                // The restriction is authoritative on the warehouse storage location. A duplicate
-                // input from the browser is optional; never require users to choose it twice.
-                if (clusterRestriction && clusterRestriction !== location.restrictionCode) throw new HttpError(409, 'This storage location has a different warehouse restriction. Review the chosen location.');
+                const restrictionCodes=restrictionCodesOf(b.restrictionCodes,
+                    b.restrictionCode); // Optional legacy single-code request
+                const restrictionMaster=await warehouseRestrictionMaster();
+                const restrictionIssue=locationBlock(restrictionCodes,restrictionMaster,'this cluster');
+                if(restrictionIssue)throw new HttpError(400,restrictionIssue);
+                const selectedRestrictions=restrictionCodes.map(code=>restrictionMaster.find(x=>x.code===code)!);
                 const subCodes = Array.from(new Set((Array.isArray(b.subcategoryCodes) ? b.subcategoryCodes : []).map(str).filter(Boolean)));
                 if (!subCodes.length) throw new HttpError(400, 'Choose at least one material subcategory for the cluster.');
                 if (subCodes.length > MAX_CLUSTER_SUBCATEGORIES) throw new HttpError(400, `A cluster can hold up to ${MAX_CLUSTER_SUBCATEGORIES} subcategories.`);
@@ -709,9 +711,12 @@ export const warehouseRoutes = {
                     return s;
                 });
 
-                if (SEGREGATED_RESTRICTIONS.has(location.restrictionCode) && subCodes.length > 1) throw new HttpError(409, `${location.restrictionLabel} storage requires segregated clusters: choose one subcategory per cluster.`);
-                const storageType = STORAGE_TYPES.find(([c]) => c === (str(b.storageTypeCode) || str(wh.data.storageTypeCode)));
-                if (!storageType) throw new HttpError(400, 'Choose the type of storage.');
+                if (restrictionCodes.some(code=>SEGREGATED_RESTRICTIONS.has(code))&&subCodes.length>1)
+                    throw new HttpError(409,'Selected segregated warehouse restrictions allow only one material subcategory per cluster.');
+                const storageType=STORAGE_TYPES.find(([c])=>c===(str(b.storageTypeCode)||str(wh.data.storageTypeCode)));
+                if(!storageType)throw new HttpError(400,'Choose a physical storage type for the cluster.');
+                const condition=CONDITIONS.find(([c])=>c===(str(b.conditionCode)||str(wh.data.conditionCode)));
+                if(!condition)throw new HttpError(400,'Choose a storage condition for the cluster.');
 
                 const clusters = await clustersOf(ctx.orgId, node.id, layout);
                 if (clusters.length >= MAX_CLUSTERS) throw new HttpError(400, `A cost center can have up to ${MAX_CLUSTERS} clusters.`);
@@ -769,9 +774,12 @@ export const warehouseRoutes = {
                         locationCode: location.code,
                         locationName: location.name,
                         locationTypeCode: location.typeCode,
-                        restrictionCode: location.restrictionCode,
-                        restrictionLabel: location.restrictionLabel,
-                        color: location.color,
+                        restrictionCodes: restrictionCodes as unknown as Plain,
+                        restrictionCode: restrictionCodes[0],
+                        restrictionLabel: selectedRestrictions.map(x=>x.label).join(', '),
+                        color: selectedRestrictions[0].color,
+                        conditionCode: condition[0],
+                        conditionLabel: condition[1],
                         subcategories: subcategories as unknown as Plain,
                         storageTypeCode: storageType[0],
                         storageTypeLabel: storageType[1],
@@ -792,7 +800,7 @@ export const warehouseRoutes = {
                     ctx,
                     'org.warehouse.cluster.create',
                     `Cluster ${code} of ${str(node.data.code)}`,
-                    `${mode === 'next' ? 'Next free space' : 'From chosen position'} · ${first} to ${last} · ${size} positions · ${location.code} ${location.name} (${location.restrictionCode} ${location.restrictionLabel}) · ${subcategories.map((s) => s.code).join(', ')} · ${storageType[1]} · ${palletCapacity===null?'':palletCapacity+' pallet capacity'}`
+                    `${mode === 'next' ? 'Next free space' : 'From chosen position'} · ${first} to ${last} · ${size} positions · ${location.code} ${location.name} (${restrictionCodes.join(', ')}) · ${subcategories.map((s) => s.code).join(', ')} · ${storageType[1]} / ${condition[1]} · ${palletCapacity===null?'':palletCapacity+' pallet capacity'}`
                 );
                 return { code, positions: size, palletCapacity, firstCode: first, lastCode: last };
             });
@@ -855,7 +863,7 @@ export const warehouseRoutes = {
                             locationCode: c.locationCode,
                             locationName: loc?.name ?? c.locationName,
                             locationType: loc?.typeLabel ?? '',
-                            restriction: loc ? `${loc.restrictionCode} ${loc.restrictionLabel}`.trim() : c.restrictionLabel,
+                            restriction: c.restrictionCodes.join(', '),
                             categories: cats,
                             subcategories: subs,
                             storageType: c.storageTypeLabel,
