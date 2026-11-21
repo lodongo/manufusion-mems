@@ -841,6 +841,22 @@ export const warehouseRoutes = {
                 ]);
                 if(!doc||!wh)throw new HttpError(404,'Cluster or warehouse not found.');
                 const existing=clusterOut(doc,layoutOf(wh.data));
+                const location=locationsOf(wh.data).find(l=>l.code===existing.locationCode);
+                if(!location||!location.active)
+                    throw new HttpError(409,'Parent storage location is missing or inactive.');
+                const requestedSubcategoryCode=str(ctx.body.materialSubcategoryCode);
+                let requestedSubcategory:{code:string;name:string;categoryCode:string}|null=null;
+                if(requestedSubcategoryCode){
+                    const catalog=await materialCategories();
+                    const allowed=catalog.filter(cat=>categoryCodesOf(wh.data).includes(cat.code))
+                        .flatMap(cat=>cat.subcategories.map(sub=>({
+                            code:sub.code,name:sub.name,categoryCode:cat.code})));
+                    requestedSubcategory=allowed.find(x=>x.code===requestedSubcategoryCode)||null;
+                    if(!requestedSubcategory)
+                        throw new HttpError(400,'Select an existing subcategory in the warehouse material catalog.');
+                    if(location.materialCategoryCode&&requestedSubcategory.categoryCode!==location.materialCategoryCode)
+                        throw new HttpError(409,'The selected subcategory must belong to its parent storage-location category.');
+                }
                 const codes=restrictionCodesOf(ctx.body.restrictionCodes);
                 const block=locationBlock(codes,master,'cluster '+code);
                 if(block)throw new HttpError(400,block);
@@ -869,6 +885,9 @@ export const warehouseRoutes = {
                         getDoc('organizations/'+ctx.orgId+'/inventory_material_info/'+materialId+'_'+node.id),
                     ]);
                     if(!mat)throw new HttpError(409,'A linked material cannot be found. Resolve its occupancy before editing this cluster.');
+                    if(requestedSubcategory&&str(mat.data.subcategoryCode)!==requestedSubcategory.code)
+                        throw new HttpError(409,'Linked material '+str(mat.data.materialNumber||materialId)+
+                            ' belongs to another subcategory. Move/delink it before changing this cluster classification.');
                     const effective=effectiveRestriction(info?.data,mat.data);
                     const mismatch=binningBlock(effective,codes,master,'cluster '+code);
                     if(mismatch)throw new HttpError(409,'Linked material '+str(mat.data.materialNumber||materialId)+': '+mismatch);
@@ -876,7 +895,13 @@ export const warehouseRoutes = {
                 const stamp=nowIso();
                 const selected=codes.map(x=>master.find(m=>m.code===x)!);
                 const data={
-                    ...doc.data,restrictionCodes:codes as unknown as Plain,
+                    ...doc.data,
+                    ...(requestedSubcategory?{
+                        materialCategoryCode:requestedSubcategory.categoryCode,
+                        materialSubcategoryCode:requestedSubcategory.code,
+                        subcategories:[requestedSubcategory] as unknown as Plain,
+                    }:{}),
+                    restrictionCodes:codes as unknown as Plain,
                     restrictionCode:codes[0],restrictionLabel:selected.map(m=>m.label).join(', '),
                     color:selected[0].color,storageTypeCode:storageType[0],storageTypeLabel:storageType[1],
                     conditionCode:condition[0],conditionLabel:condition[1],
@@ -896,7 +921,9 @@ export const warehouseRoutes = {
                 await updateFields(whPath(ctx.orgId,node.id),{updatedAt:stamp});
                 await record(ctx,'org.warehouse.cluster.update',
                     'Cluster '+code+' of '+str(node.data.code),
-                    'Restrictions '+codes.join(', ')+' · '+storageType[1]+' · '+condition[1]+' · '+stacking.palletCapacity+' pallet capacity');
+                    'Restrictions '+codes.join(', ')+
+                    (requestedSubcategory?' · Subcategory '+requestedSubcategory.code:'')+
+                    ' · '+storageType[1]+' · '+condition[1]+' · '+stacking.palletCapacity+' pallet capacity');
                 return {ok:true,code,restrictionCodes:codes,palletCapacity:stacking.palletCapacity};
             });
         }),
