@@ -537,8 +537,8 @@ export const warehouseRoutes = {
             const condition = CONDITIONS.find(([c]) => c === str(b.conditionCode));
             if (!condition) throw new HttpError(400, 'Choose the storage condition.');
 
-            // Storage locations: name, storage location type, warehouse restriction (shared master).
-            const [restrictions, types] = await Promise.all([warehouseRestrictionMaster(), locationTypes()]);
+            // Storage location metadata is structural; cluster restrictions are chosen separately.
+            const types = await locationTypes();
             const rawLocations = (Array.isArray(b.storageLocations) ? (b.storageLocations as Plain[]) : []).filter(isObj);
             if (!rawLocations.length) throw new HttpError(400, 'Add at least one storage location.');
             if (rawLocations.length > MAX_LOCATIONS) throw new HttpError(400, `A warehouse can have up to ${MAX_LOCATIONS} storage locations.`);
@@ -603,29 +603,14 @@ export const warehouseRoutes = {
                     names.add(name.toLowerCase());
                     const type = types.find((t) => t.code === str(raw.typeCode));
                     if (!type || (!type.active && before?.typeCode !== type.code)) throw new HttpError(400, `${tag}: choose the storage location type.`);
-                    const rs = restrictions.find((x) => x.code === str(raw.restrictionCode));
-                    if (!rs) throw new HttpError(400, `${tag}: choose the warehouse restriction from the restriction master.`);
-                    if (!rs.active && before?.restrictionCode !== rs.code) throw new HttpError(400, `${tag}: ${rs.label} (${rs.code}) is disabled in the restriction master. Choose an enabled restriction.`);
+                    // Preserve legacy restriction for existing clusters, but never ask for or change it on location setup.
                     if (!before) {
                         seq += 1;
                         if (seq > 999) throw new HttpError(400, 'Storage location numbering is exhausted for this warehouse.');
                     }
-                    return { code: before ? before.code : `SL-${String(seq).padStart(2, '0')}`, name, typeCode: type.code, restrictionCode: rs.code, classificationCode: before?.classificationCode ?? '', active: raw.active !== false, createdAt: before?.createdAt || now };
+                    return { code: before ? before.code : `SL-${String(seq).padStart(2, '0')}`, name, typeCode: type.code, restrictionCode: before?.restrictionCode??'', classificationCode: before?.classificationCode ?? '', active: raw.active !== false, createdAt: before?.createdAt || now };
                 });
-                // A storage location whose restriction changes must hold no binned material: the stock placed
-                // there was matched to the old restriction. Delink first, then change, then bin again.
-                const retagged = storageLocations.filter((s) => {
-                    const before = previous.find((p) => p.code === s.code);
-                    return before && before.restrictionCode && before.restrictionCode !== s.restrictionCode;
-                });
-                if (retagged.length) {
-                    const occupancy = await listDocs(`organizations/${ctx.orgId}/warehouse_bin_occupancy`);
-                    for (const loc of retagged) {
-                        const own = new Set(clusters.filter((x) => x.locationCode === loc.code).map((x) => x.code));
-                        const held = occupancy.filter((o) => str(o.data.warehouseId) === node.id && own.has(str(o.data.binId).split('__')[0]));
-                        if (held.length) throw new HttpError(409, `${loc.code} ${loc.name} holds ${held.length} binned material${held.length === 1 ? '' : 's'} matched to its current restriction. Delink them before changing the restriction.`);
-                    }
-                }
+                // Existing location restriction codes remain untouched as legacy read fallbacks.
                 const kept = new Set(storageLocations.map((s) => s.code));
                 const removed = previous.filter((p) => !kept.has(p.code));
                 const removedInUse = removed.filter((p) => clusters.some((x) => x.locationCode === p.code));
@@ -677,17 +662,13 @@ export const warehouseRoutes = {
                 const affectedClusters=clusters.filter(x=>removedInUse.some(l=>l.code===x.locationCode)||x.subcategories.some(s=>droppedCats.includes(s.categoryCode)));if(affectedClusters.length){if(ctx.body.forceRemoveInUse!==true||str(ctx.body.forceConfirmation)!=='REMOVE IN USE')throw new HttpError(400,'Type REMOVE IN USE to confirm deleting affected clusters.');for(const cluster of affectedClusters)await deleteDoc(clusterCol(ctx.orgId,node.id)+'/'+cluster.code);}await writeDoc(whPath(ctx.orgId, node.id), data);
                 const total = layoutPositions(layout);
                 const typeLabel = (code: string) => types.find((t) => t.code === code)?.label ?? code;
-                const newlyAligned = storageLocations.filter((s) => previous.some((p) => p.code === s.code && !p.restrictionCode));
-                const rsLabel = (code: string) => { const r = restrictions.find((t) => t.code === code); return r ? `${r.code} ${r.label}` : code; };
                 await record(
                     ctx,
                     existing ? 'org.warehouse.update' : 'org.warehouse.create',
                     `Storage of cost center ${str(node.data.code)}`,
                     [
                         `Categories ${categories.map((x) => x.code).join(', ')}`,
-                        `storage locations ${storageLocations.map((s) => `${s.code} ${s.name} (${typeLabel(s.typeCode)}, ${rsLabel(s.restrictionCode)}${s.active ? '' : ', inactive'})`).join('; ')}`,
-                        retagged.length ? `restriction changed ${retagged.map((s) => `${s.code} ${rsLabel(previous.find((p) => p.code === s.code)?.restrictionCode ?? '')} → ${rsLabel(s.restrictionCode)}`).join('; ')}` : '',
-                        newlyAligned.length ? `aligned to the warehouse restriction master: ${newlyAligned.map((s) => `${s.code} ${s.classificationCode || 'unclassified'} → ${rsLabel(s.restrictionCode)}`).join('; ')}` : '',
+                        `storage locations ${storageLocations.map((loc) => `${loc.code} ${loc.name} (${typeLabel(loc.typeCode)}${loc.active ? '' : ', inactive'})`).join('; ')}`,
                         removed.length ? `removed ${removed.map((p) => p.code).join(', ')}` : '',
                         affectedClusters.length ? `FORCE REMOVED ${affectedClusters.length} clusters: ${affectedClusters.map(x=>x.code).join(', ')} by ${ctx.uid}` : '',
                         storageType[1],
