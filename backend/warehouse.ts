@@ -921,6 +921,19 @@ export const warehouseRoutes = {
                     count:existing.positions,
                 },storageType[0],Math.max(MAX_CLUSTER_POSITIONS,existing.positions));
                 const held=occupancy.filter(x=>str(x.data.warehouseId)===node.id&&str(x.data.binId).startsWith(code+'__'));
+                const assigned=(await listDocs('organizations/'+ctx.orgId+'/materials'))
+                    .filter(x=>str(x.data.warehouseId)===node.id&&str(x.data.clusterCode)===code&&
+                        !['deleted','cancelled'].includes(str(x.data.status)));
+                for(const m of assigned){
+                    const subtype=requestedSubcategory?.code||existing.materialSubcategoryCode||
+                        existing.subcategories[0]?.code||'';
+                    if(str(m.data.subcategoryCode)!==subtype)
+                        throw new HttpError(409,'Material '+str(m.data.name)+' is assigned to this cluster with a different subcategory. Reassign it first.');
+                    const current=restrictionCodesOf(m.data.warehouseRestrictionCodes,m.data.warehouseRestriction);
+                    if(!['draft','rejected'].includes(str(m.data.status))&&
+                        (current.length!==codes.length||current.some(v=>!codes.includes(v))))
+                        throw new HttpError(409,'The cluster has an approved or submitted material with a different restriction set. Reassign or review the material before changing restrictions.');
+                }
                 if(held.length&&(storageType[0]!==existing.storageTypeCode||
                     condition[0]!==existing.conditionCode&&condition[0]!==str(wh.data.conditionCode)))
                     throw new HttpError(409,'This cluster contains linked materials. Delink them before changing storage type or condition.');
@@ -958,6 +971,14 @@ export const warehouseRoutes = {
                     palletCapacity:stacking.palletCapacity,updatedBy:ctx.uid,updatedAt:stamp,
                 };
                 await writeDoc(path,data);
+                // Update only editable material drafts. Approved/pending material classifications require
+                // their own approval workflow and cannot be silently rewritten by warehouse setup.
+                for(const m of assigned.filter(m=>['draft','rejected'].includes(str(m.data.status)))){
+                    await writeDoc('organizations/'+ctx.orgId+'/materials/'+m.id,{
+                        ...m.data,warehouseRestrictionCodes:codes as unknown as Plain,
+                        warehouseRestriction:codes[0],updatedAt:stamp,
+                    });
+                }
                 // Existing bin addresses stay stable; synchronise their approved restriction sets.
                 for(const record of held){
                     await writeDoc('organizations/'+ctx.orgId+'/warehouse_bin_occupancy/'+record.id,{
@@ -991,6 +1012,11 @@ export const warehouseRoutes = {
                 const linked=await listDocs('organizations/'+ctx.orgId+'/warehouse_bin_occupancy');
                 if(linked.some(x=>str(x.data.warehouseId)===node.id&&str(x.data.binId).startsWith(code+'__')))
                     throw new HttpError(409,'This cluster contains linked materials. Delink them before deleting its physical positions.');
+                const assigned=(await listDocs('organizations/'+ctx.orgId+'/materials')).filter(m=>
+                    str(m.data.warehouseId)===node.id&&str(m.data.clusterCode)===code&&
+                    !['deleted','cancelled'].includes(str(m.data.status)));
+                if(assigned.length)throw new HttpError(409,'This cluster has '+assigned.length+
+                    ' material master assignment(s). Reassign or unassign them before deleting the cluster.');
                 await deleteDoc(`${clusterCol(ctx.orgId, node.id)}/${code}`);
                 await record(ctx, 'org.warehouse.cluster.delete', `Cluster ${code} of ${str(node.data.code)}`, `${c.firstCode} to ${c.lastCode} · ${c.positions} positions · ${reason.slice(0, 300)}`);
                 return { ok: true };
