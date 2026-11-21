@@ -27,7 +27,7 @@ import { audit, auditOut } from './audit';
 import { hasPerm, orgRoute, secure, type OrgContext } from './guards';
 import { detectImage } from './branding';
 import { createUnitAsset, linkWorkCenterAsset, readUnitClass, releaseUnitAsset } from './assets';
-import { COST_CENTER_CATEGORIES, selectedCostCenterSubcategories, validateCostCenterSubcategorySelection } from '../src/shared/costCenterTaxonomy';
+import { COST_CENTER_CATEGORIES, selectedCostCenterSubcategories, validateCostCenterSubcategorySelection, validateEquipmentCostCenterSubcategory } from '../src/shared/costCenterTaxonomy';
 
 // Organization design.
 // Single legal entity organizations start directly with the legal entity. Groups declare
@@ -133,6 +133,7 @@ const LEVELS: Record<string, LevelDef> = {
         pattern: /^\d{2,3}$/,
         auto: 3,
         fields: {
+            costCenterSubcategory: { label: 'Cost center subcategory', type: 'text' },
             equipmentClass: { label: 'Equipment class', type: 'assetClass' },
             // Link to the unit's asset record (managed by the asset routes, preserved on edit).
             assetTag: { label: 'Asset', type: 'asset' },
@@ -605,6 +606,16 @@ export const structureRoutes = {
             const attributes = await readAttributes(level, body.attributes, level === 'cost_center');
             let unitClass: { code: string; name: string; categoryCode: string; subcategoryCode: string } | null = null;
             if (level === 'work_center') {
+                // This operational subcategory is inherited from the *immediate*
+                // parent cost center, not from the independent technical asset catalog.
+                try {
+                    attributes.costCenterSubcategory = validateEquipmentCostCenterSubcategory(
+                        isObj(parent?.data.attributes) ? parent.data.attributes : {},
+                        attributes.costCenterSubcategory, true,
+                    );
+                } catch (error) {
+                    throw new HttpError(400, error instanceof Error ? error.message : 'Choose a valid parent cost center subcategory.');
+                }
                 delete attributes.assetTag;
                 unitClass = await readUnitClass(ctx, str(attributes.equipmentClass), true);
                 if (unitClass) {
@@ -691,7 +702,33 @@ export const structureRoutes = {
             if (level === 'cost_center' && !['INV', 'WHS'].includes(str(attributes.costType)) && (await getDoc(`organizations/${ctx.orgId}/warehouses/${doc.id}`))) {
                 throw new HttpError(400, 'This cost center has a storage setup, so its type must stay Inventory (INV) or Warehousing (WHS).');
             }
+            if (level === 'cost_center') {
+                // Never orphan equipment classifications by removing a subcategory
+                // while it is still assigned to an existing equipment unit.
+                const allowed = new Set(selectedCostCenterSubcategories(attributes));
+                const inUse = (await childrenOf(ctx.orgId, doc.id))
+                    .filter((child) => child.level === 'work_center'
+                        && !!str(child.attributes.costCenterSubcategory)
+                        && !allowed.has(str(child.attributes.costCenterSubcategory)));
+                if (inUse.length) {
+                    const samples = inUse.slice(0, 5).map((child) => child.code).join(', ');
+                    throw new HttpError(409, `Reassign the equipment subcategory before removing it from this cost center: ${samples}${inUse.length > 5 ? ' and more' : ''}.`);
+                }
+            }
             if (level === 'work_center') {
+                const parent = await getNode(ctx, str(doc.data.parentId));
+                if (str(parent.data.level) !== 'cost_center')
+                    throw new HttpError(400, 'Equipment must belong to a cost center.');
+                const parentAttributes = isObj(parent.data.attributes) ? parent.data.attributes : {};
+                const parentHasCategories = selectedCostCenterSubcategories(parentAttributes).length > 0;
+                try {
+                    attributes.costCenterSubcategory = validateEquipmentCostCenterSubcategory(
+                        parentAttributes, attributes.costCenterSubcategory, parentHasCategories,
+                    );
+                } catch (error) {
+                    throw new HttpError(400, error instanceof Error ? error.message : 'Choose a valid parent cost center subcategory.');
+                }
+                if (!attributes.costCenterSubcategory) delete attributes.costCenterSubcategory;
                 // The asset link is managed from the unit's asset page; keep it exactly as stored.
                 const before = isObj(doc.data.attributes) ? doc.data.attributes : {};
                 const previousTag = str(before.assetTag);
