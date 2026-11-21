@@ -19,7 +19,7 @@ const SUPPLY_TYPES: Array<{ code: 'OEM' | 'OCM' | 'BIDDED'; title: string; text:
     { code: 'BIDDED', title: 'Bidded', text: 'Competitive bidding is required. No supplier is nominated or recommended at material creation; Procurement selects the winning supplier later.', part: '' },
 ];
 
-type SavedMaterial = {warehouseRestrictionCodes?:string[];warehouseRestriction?:string;clusterCode?:string; canApprove?:boolean;createdBy?:string;submittedBy?:string;warehouseId?:string;approvalLevel?:number;uom?:string;oemPartNumber?:string;ocmPartNumber?:string;generalPartNumber?:string; id: string; name: string; shortText: string; categoryCode: string; subcategoryCode: string; familyCode: string; materialCode: string; createdAt: string; status?:string; attributes?:Record<string,string>; assemblyIds?:string[]; supplyType?:string;materialNumber?:string;pushedAt?:string;warehouseIds?:string[] };
+type SavedMaterial = {warehouseRestrictionCodes?:string[];warehouseRestriction?:string;clusterCode?:string; canApprove?:boolean;workflowStage?:string;workflowCode?:string;createdBy?:string;submittedBy?:string;warehouseId?:string;approvalLevel?:number;uom?:string;oemPartNumber?:string;ocmPartNumber?:string;generalPartNumber?:string; id: string; name: string; shortText: string; categoryCode: string; subcategoryCode: string; familyCode: string; materialCode: string; createdAt: string; status?:string; attributes?:Record<string,string>; assemblyIds?:string[]; supplyType?:string;materialNumber?:string;pushedAt?:string;warehouseIds?:string[] };
 const treeApi = '/api/org/procurement/catalog/tree';
 const itemApi = '/api/org/procurement/catalog/item';
 const endpoint = '/api/org/procurement/materials';
@@ -77,13 +77,35 @@ export default function MaterialsMaster() {
     const [autoStatus,setAutoStatus]=useState('');
     const draftId=useRef('');
     const saveQueue=useRef<Promise<unknown>>(Promise.resolve());
-    const [extendSource,setExtendSource]=useState<{id:string;name:string;shortText:string;status:string}|null>(null);
+    const [extendSource,setExtendSource]=useState<SavedMaterial|null>(null);
+    const [extendSearchOpen,setExtendSearchOpen]=useState(false);
+    const [extendSearch,setExtendSearch]=useState('');
     const [extendWarehouse,setExtendWarehouse]=useState('');
     const [extendVerified,setExtendVerified]=useState(false);
     const [extendBusy,setExtendBusy]=useState(false);
-    const {data:extensionRecords,reload:reloadExtensions}=useLoad(()=>callBackend<{items:Array<{id:string;sourceId:string;warehouseId:string;materialName:string;status:string;approvalLevel:number}>}>(endpoint+'/extensions'));
+    const {data:extensionRecords,reload:reloadExtensions}=useLoad(()=>callBackend<{items:Array<{id:string;sourceId:string;warehouseId:string;materialName:string;status:string;approvalLevel:number;workflowStage?:string;canApprove?:boolean;createdBy?:string}>}>(endpoint+'/extensions'));
     const [reviewMaterial,setReviewMaterial]=useState<SavedMaterial|null>(null);const lifecycle=async(action:'allocate'|'push'|'disable'|'delete')=>{if(!reviewMaterial)return;if((action==='delete'||action==='disable'||action==='push')&&!(await appConfirm((action==='delete'?'Delete':action==='disable'?'Disable':'Push to requesting warehouse')+' material '+reviewMaterial.name+'?')))return;setSaving(true);setError('');try{const result=await callBackend<{ok:boolean;materialNumber?:string}>(endpoint+'/lifecycle',{id:reviewMaterial.id,action});setReviewMaterial(p=>p?{...p,...(action==='allocate'?{materialNumber:result.materialNumber}:action==='push'?{status:'active',pushedAt:new Date().toISOString()}:action==='disable'?{status:'disabled'}:{status:'deleted'})}:null);reload();}catch(e){setError(String(e));}finally{setSaving(false);}};
     const [listView,setListView]=useState('my_drafts');
+    const openExtension=(source:{id:string;name:string;status:string})=>{
+        const record=records?.items.find(m=>m.id===source.id);
+        if(!record||!['approved','active'].includes(record.status||'')){
+            setError('Only an approved organization material can be extended. Pending or draft materials must first complete the creation workflow.');
+            return;
+        }
+        setExtendSource(record);setExtendWarehouse('');setExtendVerified(false);setError('');
+    };
+    const approvedMasterMaterials=(records?.items??[]).filter(m=>['approved','active'].includes(m.status||''));
+    const extensionSearchResults=approvedMasterMaterials.filter(m=>{
+        const q=extendSearch.trim().toLowerCase();
+        return !q||[m.name,m.shortText,m.materialNumber,m.id,m.categoryCode,m.familyCode]
+            .some(v=>(v||'').toLowerCase().includes(q));
+    }).slice(0,80);
+    const extensionTargets=(options?.warehouses??[]).filter(w=>
+        !!extendSource&&w.categoryCodes?.includes(extendSource.categoryCode)&&
+        w.id!==extendSource.warehouseId&&
+        !(extendSource.warehouseIds??[]).includes(w.id)&&
+        !(extensionRecords?.items??[]).some(e=>e.sourceId===extendSource.id&&
+            e.warehouseId===w.id&&!['rejected','cancelled','workflow_terminated'].includes(e.status)));
     const [listSearch,setListSearch]=useState('');
     const [similar,setSimilar]=useState<{items:Array<{id:string;name:string;shortText:string;warehouseId:string;score:number;matchedFields:string[];attributeMatches:number;attributeTotal:number;partMatch:boolean;status:string}>;totalCompared:number}|null>(null);
     // Every selection is derived from the active PRC Materials Master; no industry
@@ -272,6 +294,30 @@ export default function MaterialsMaster() {
     const restrictionLabels=restrictionCodes.map(code=>{
         const r=options?.restrictions.find(x=>x.code===code);return r?r.label+' ('+r.code+')':code;
     });
+    const extensionPanel=extendSource&&<StepSection title='Extend organization material' hint='Source: Organization Materials Master (not the MEMS Admin catalogue). Warehouse extension is governed by PRC-002.'>
+        <p className='mb-3 break-words text-sm font-semibold text-ink'>{extendSource.name}
+            <span className='block text-xs font-normal text-muted'>{extendSource.materialNumber||extendSource.id} · {extendSource.shortText}</span>
+        </p>
+        {extensionTargets.length===0&&<Alert tone='warn'>No eligible warehouses are available for extension. The material may already be mapped, an extension may be pending, or the warehouse category may not be configured.</Alert>}
+        <SelectField id='mm-extend-wh' label='Target warehouse' required value={extendWarehouse}
+            onChange={e=>{setExtendWarehouse(e.target.value);setExtendVerified(false);}}>
+            <option value=''>Select accessible warehouse</option>
+            {extensionTargets.map(w=><option key={w.id} value={w.id}>{w.name} ({w.code})</option>)}
+        </SelectField>
+        <div className='mt-3'><ConfirmBox checked={extendVerified} onChange={setExtendVerified}>
+            I verified this existing approved material, its classification and the target warehouse. No duplicate extension should be created.
+        </ConfirmBox></div>
+        <div className='mt-4 flex flex-wrap gap-2'>
+            <Button variant='secondary' className='flex-1 sm:flex-none' onClick={()=>setExtendSource(null)}>Cancel</Button>
+            <Button className='flex-[2] sm:flex-none' disabled={!extendWarehouse||!extendVerified||extendBusy} busy={extendBusy}
+                onClick={async()=>{setExtendBusy(true);setError('');try{
+                    await callBackend(endpoint+'/extension',{sourceId:extendSource.id,warehouseId:extendWarehouse});
+                    setExtendSource(null);setExtendSearchOpen(false);setAdding(false);reloadExtensions();reload();
+                }catch(e){setError(e instanceof Error?e.message:'Material extension request failed.');}
+                finally{setExtendBusy(false);}}}>Submit extension through PRC-002 workflow</Button>
+        </div>
+    </StepSection>;
+
     const wizard = <div className='space-y-4 pb-10'>
         <div ref={topRef} className='scroll-mt-[var(--mems-top,0px)]' />
         <WizardBar title={editingId ? 'Edit material' : 'New material'} steps={steps} stage={stage} onStep={go} onClose={() => setAdding(false)}
@@ -280,24 +326,14 @@ export default function MaterialsMaster() {
 
         {duplicateBlocked && <StepSection title='Existing material found' hint='Creating it again is blocked. Extend the existing material to your warehouse.'>
             <div className='space-y-2'>{hardDuplicates.map((x) => <MatchCard key={x.id} score={x.score} name={x.name} shortText={x.shortText} status={x.status}
-                action={<Button onClick={() => { setExtendSource(x); setExtendWarehouse(''); setExtendVerified(false); }}>Extend this material</Button>} />)}</div>
+                action={<Button disabled={!['approved','active'].includes(x.status)} onClick={()=>openExtension(x)}>{['approved','active'].includes(x.status)?'Extend this material':'Awaiting approval'}</Button>} />)}</div>
         </StepSection>}
         {!duplicateBlocked && !!liveMatches.length && <details key={stage === 1 ? 'open' : 'folded'} open={stage === 1} className='rounded-2xl border border-amber-400/50 bg-amber-400/5 p-3'>
             <summary className='cursor-pointer text-sm font-semibold text-amber-400'>{liveMatches.length === 1 ? '1 very similar material already exists' : liveMatches.length + ' very similar materials already exist'} — check before continuing</summary>
             <div className='mt-3 max-h-[40dvh] space-y-2 overflow-y-auto overscroll-contain'>{liveMatches.map((x) => <MatchCard key={x.id} score={x.score} name={x.name} shortText={x.shortText} status={x.status}
-                action={<Button variant='secondary' onClick={async () => { if (await appConfirm('Extend existing material ' + x.name + ' to another warehouse instead of creating a new material?')) { setExtendSource(x); setExtendWarehouse(''); setExtendVerified(false); } }}>Extend instead</Button>} />)}</div>
+                action={<Button variant='secondary' disabled={!['approved','active'].includes(x.status)} onClick={()=>openExtension(x)}>{['approved','active'].includes(x.status)?'Extend instead':'Not yet approved'}</Button>} />)}</div>
         </details>}
-        {extendSource && <StepSection title='Extend an existing material' hint='The original material stays unchanged. Only approved materials can be extended, and not to a warehouse that already has it or has a pending extension.'>
-            <p className='mb-3 break-words text-sm font-medium text-ink'>{extendSource.name}<span className='block text-xs font-normal text-muted'>{extendSource.shortText}</span></p>
-            <SelectField id='mm-extend-wh' label='Target warehouse' required value={extendWarehouse} onChange={(e) => { setExtendWarehouse(e.target.value); setExtendVerified(false); }}>
-                <option value=''>Select another warehouse</option>{eligibleWarehouses.map((w) => <option key={w.id} value={w.id}>{w.name} ({w.code})</option>)}
-            </SelectField>
-            <div className='mt-3'><ConfirmBox checked={extendVerified} onChange={setExtendVerified}>I have verified the material identity, the target warehouse and that no extension exists yet.</ConfirmBox></div>
-            <div className='mt-4 flex gap-2'>
-                <Button variant='secondary' className='flex-1 sm:flex-none' onClick={() => setExtendSource(null)}>Cancel</Button>
-                <Button className='flex-[2] sm:flex-none' disabled={!extendWarehouse || !extendVerified || extendBusy} busy={extendBusy} onClick={async () => { setExtendBusy(true); setError(''); try { await callBackend(endpoint + '/extension', { sourceId: extendSource.id, warehouseId: extendWarehouse }); setExtendSource(null); setAdding(false); reloadExtensions(); reload(); } catch (e) { setError(e instanceof Error ? e.message : 'Extension failed'); } finally { setExtendBusy(false); } }}>Submit extension for approval</Button>
-            </div>
-        </StepSection>}
+        {extensionPanel}
 
         {stage === 1 && (treeLoading ? <Spinner /> : treeError || !tree ? <Alert tone='error'>{treeError || 'The material reference catalogue is not available. An administrator must load it first.'}</Alert> : <>
             <StepSection title='Find it in the Materials Master' hint='Choose the category, subcategory, family and material from the active MEMS PRC Materials Master. Every industry is included.'
