@@ -13,8 +13,8 @@ test('new creation and warehouse extension require PRC-001 and PRC-002, not a fi
     assert.ok(backend.includes("configuredMaterialWorkflow(ctx.orgId,'PRC-002')"));
     assert.ok(backend.includes("'POST /api/org/procurement/materials/extension'"));
     assert.ok(backend.includes("workflowSnapshot:workflow"));
-    assert.ok(backend.includes("if(ctx.body.roles||ctx.body.modes||ctx.body.delegations)"));
-    assert.ok(backend.includes("Three fixed approvers are retired."));
+    assert.ok(!backend.includes("'POST /api/org/procurement/materials/workflow':"));
+    assert.ok(!backend.includes("'POST /api/org/procurement/materials/workflow/migrate':"));
 });
 test('review and approve roles, actions and SoD are enforced from workflow snapshot',()=>{
     assert.ok(backend.includes("function materialWorkflowSnapshot("));
@@ -42,14 +42,13 @@ test('material extension starts from approved organization master, not PRC refer
     assert.ok(material.includes('extensionTargets='));
     assert.ok(material.includes('Submit extension through PRC-002 workflow'));
 });
-test('migration archives previous approval decisions, and legacy requests cannot bypass configured approval',()=>{
-    assert.ok(backend.includes("'POST /api/org/procurement/materials/workflow/migrate'"));
-    assert.ok(backend.includes('legacyApprovalHistory:'));
-    assert.ok(backend.includes("approvalHistory:[],approvalLevel:1,workflowSnapshot:workflow"));
-    assert.ok(backend.includes("workflowMigratedBy:ctx.uid"));
-    assert.ok(backend.includes("This request is not bound to the configured material workflow."));
-    assert.ok(workflow.includes('Find and migrate legacy pending requests'));
-    assert.ok(workflow.includes('Original decisions remain archived.'));
+test('retired approval migration is absent and unbound requests fail closed',()=>{
+    assert.equal(backend.includes("'POST /api/org/procurement/materials/workflow/migrate'"),false);
+    assert.equal(workflow.includes('Find and migrate legacy pending requests'),false);
+    assert.ok(backend.includes('This request has no valid workflow snapshot.'));
+    assert.ok(backend.includes('Workflow snapshot missing · administrator review required'));
+    assert.ok(backend.includes("materialWorkflowSnapshot(data)"));
+    assert.ok(backend.includes("if(!workflow||workflow.code!==(extension?'PRC-002':'PRC-001'))"));
 });
 test('user-facing material approval and inbox show configured stage names instead of fixed approver numbers',()=>{
     assert.ok(material.includes("workflowStage?:string"));
