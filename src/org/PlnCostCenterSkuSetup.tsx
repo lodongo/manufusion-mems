@@ -470,7 +470,7 @@ export default function PlnCostCenterSkuSetup({costCenterId,initialSkuId='',onBa
         <Action testOverride={data?.testOverride} secondary disabled={busy} onClick={()=>void clear()}>Clear SKU mappings</Action>:null}
        <Action testOverride={data?.testOverride} secondary disabled={busy} onClick={()=>void saveAllocations()}>
         {busy?'Saving…':'Save SKU allocations'}</Action>
-       <Action testOverride={data?.testOverride} disabled={busy||!canSave} onClick={()=>void save()}>{busy?'Saving…':'Save commissioned ratings'}</Action>
+       <Action testOverride={data?.testOverride} disabled={busy} onClick={()=>void save()}>{busy?'Saving…':'Save commissioned ratings'}</Action>
        <Action testOverride={data?.testOverride} secondary disabled={busy||lines.length>=100} onClick={addSku}>Add another SKU</Action>
       </div>
      </div>
