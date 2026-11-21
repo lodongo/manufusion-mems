@@ -983,6 +983,13 @@ function ClusterList({ data, onOpen }: { data: Data; onOpen: (code: string) => v
 
 function ClusterEditPanel({data,cluster,onSaved,onCancel}:{data:Data;cluster:Cluster;onSaved:()=>void;onCancel:()=>void}){
     const [codes,setCodes]=useState<string[]>(cluster.restrictionCodes||[]);
+    const [alignSubcategory,setAlignSubcategory]=useState(false);
+    const [subcategoryCode,setSubcategoryCode]=useState(cluster.materialSubcategoryCode||cluster.subcategories[0]?.code||'');
+    const parentLocation=data.setup?.storageLocations.find(l=>l.code===cluster.locationCode);
+    const eligibleSubcategories=data.categories
+        .filter(cat=>data.setup?.materialCategoryCodes.includes(cat.code)&&
+            (!parentLocation?.materialCategoryCode||cat.code===parentLocation.materialCategoryCode))
+        .flatMap(cat=>cat.subcategories.map(sc=>({...sc,categoryCode:cat.code})));
     const [storageType,setStorageType]=useState(cluster.storageTypeCode||'BIN');
     const [conditionCode,setConditionCode]=useState(cluster.conditionCode||data.setup?.conditionCode||'AMB');
     const [stacking,setStacking]=useState(cluster.stackingEnabled===true);
@@ -1003,6 +1010,8 @@ function ClusterEditPanel({data,cluster,onSaved,onCancel}:{data:Data;cluster:Clu
     const save=async()=>{
         setError('');
         if(!codes.length)return setError('Select at least one warehouse restriction.');
+        if(alignSubcategory&&!eligibleSubcategories.some(x=>x.code===subcategoryCode))
+            return setError('Choose one catalog subcategory allowed for this storage-location category.');
         if(codes.some(code=>!data.restrictions.find(r=>r.code===code&&r.active)))
             return setError('Select only enabled warehouse restrictions.');
         if(!layoutValid)return setError('Pallet rows × pallets per bottom row must equal the existing physical positions. Pyramid also needs an even bottom pallet count.');
@@ -1011,6 +1020,7 @@ function ClusterEditPanel({data,cluster,onSaved,onCancel}:{data:Data;cluster:Clu
         try{
             await callBackend('/api/org/warehouse/cluster/update',{
                 costCenterId:data.costCenter.id,code:cluster.code,restrictionCodes:codes,
+                ...(alignSubcategory?{materialSubcategoryCode:subcategoryCode}:{}),
                 storageTypeCode:storageType,conditionCode,stackingEnabled:stacking&&palletMode,
                 ...(stacking&&palletMode?{stackingPattern:pattern,bottomRowPallets:a,bottomRows:b,numberOfStacks:n}:{}),
                 confirm:true,
@@ -1022,6 +1032,21 @@ function ClusterEditPanel({data,cluster,onSaved,onCancel}:{data:Data;cluster:Clu
     return <Card className='space-y-3'>
         <h3 className='text-base font-semibold text-ink'>Edit cluster {cluster.code}</h3>
         <p className='text-xs text-soft'>Restrictions, stacking and conditions are specific to this cluster. Existing physical addresses will not be renumbered.</p>
+        <div className='space-y-2 rounded-xl border border-line bg-panel p-3'>
+            <p className='text-sm font-semibold text-ink'>Material catalog subcategory (cluster mapping)</p>
+            <p className='text-xs text-soft'>Current: {cluster.subcategories.map(x=>x.code+' · '+x.name).join('; ')||'Not configured'}. Legacy multi-subcategory clusters remain unchanged until deliberately aligned.</p>
+            <label className='flex min-h-11 items-center gap-2 text-sm text-ink'>
+                <input type='checkbox' checked={alignSubcategory}
+                    onChange={e=>setAlignSubcategory(e.target.checked)}/>
+                Align this cluster to one catalog subcategory
+            </label>
+            {alignSubcategory&&<SelectField id='edit-cl-subcategory' label='Catalog subcategory *'
+                value={subcategoryCode} onChange={e=>setSubcategoryCode(e.target.value)}>
+                <option value=''>Select subcategory…</option>
+                {eligibleSubcategories.map(x=><option key={x.code} value={x.code}>{x.code} · {x.name}</option>)}
+            </SelectField>}
+            {alignSubcategory&&<p className='text-xs text-soft'>Materials already linked to this cluster must belong to the selected subcategory; incompatible changes will be rejected.</p>}
+        </div>
         <div className='space-y-2'>
             <p className='text-sm font-semibold text-ink'>Warehouse restrictions *</p>
             <div className='max-h-60 space-y-1 overflow-y-auto rounded-xl border border-line bg-page p-2'>
