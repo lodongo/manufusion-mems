@@ -201,6 +201,8 @@ function Editor({ workflow, roles, users, directoryError, onBack, onSaved }: { w
         ...(isMaterialWorkflow&&draft.steps.length>0&&draft.approvalMode==='sequential'&&
             draft.steps[draft.steps.length-1]?.action!=='approve'
             ? ['The final material workflow stage must be an approval.'] : []),
+        ...(isMaterialWorkflow&&draft.approvalMode==='sequential'&&draft.approvalRule==='any'
+            ? ['Sequential material workflows require all configured stages. Use parallel mode for an Any-one decision.'] : []),
         ...(isMaterialWorkflow&&draft.steps.length>0&&!draft.steps.some(x=>x.action==='approve')
             ? ['At least one approval action is required for material workflows.'] : []),
         ...stepProblems.map((p, i) => (p ? `Approval ${i + 1}: ${p}` : '')).filter(Boolean),
@@ -314,7 +316,7 @@ function Editor({ workflow, roles, users, directoryError, onBack, onSaved }: { w
                 )}
 
                 <Card className='grid gap-3 sm:grid-cols-3'>
-                    <SelectField id='wf-mode' label='Execution order *' value={draft.approvalMode} onChange={(e) => update({ approvalMode: e.target.value })}>
+                    <SelectField id='wf-mode' label='Execution order *' value={draft.approvalMode} onChange={(e) => update({ approvalMode: e.target.value, ...(isMaterialWorkflow&&e.target.value==='sequential'?{approvalRule:'all'}:{}) })}>
                         <option value='sequential'>Sequential</option>
                         <option value='parallel'>Parallel / any order</option>
                     </SelectField>
