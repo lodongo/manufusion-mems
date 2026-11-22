@@ -1010,21 +1010,25 @@ export const plnMfgFoundationRoutes={
                 throw new HttpError(409,'New master data starts with revision zero.');
             const old=creating?null:await getDoc(DOC(ctx.orgId,kind,VALID_ID(requestedId,'Master code')));
             if(kind==='boms'){
-                // Permit an unchanged historical process source to retain its
-                // revision data. All new/changed lines must link a configured
-                // cost-centre utility (never assume an equipment utility path).
+                // Only direct UTILITY lines require their own distribution reference.
+                // SKU and Procurement material lines inherit their registered source,
+                // including cost centre and utility, and must not be asked to select
+                // or duplicate those details in each BOM.
                 const before=ARR(old?.data.components);
-                for(const c of ARR(raw.components).filter(x=>str(x.source)==='PROCESS_SUPPLY')){
+                for(const c of ARR(raw.components).filter(x=>
+                    str(x.source)==='PROCESS_SUPPLY'&&str(x.processSupplyKind)==='UTILITY')){
                     if(str(c.supplyCostCenterId)&&str(c.supplyUtilityCode))continue;
+                    // Preserve unchanged historical equipment-utility references
+                    // without imposing new cost-centre setup on an old revision.
                     const unchanged=before.some(p=>str(p.source)==='PROCESS_SUPPLY'&&
-                        str(p.processSupplyKind)===str(c.processSupplyKind)&&
-                        str(p.skuId)===str(c.skuId)&&str(p.materialId)===str(c.materialId)&&
+                        str(p.processSupplyKind)==='UTILITY'&&
                         str(p.utilityWorkCenterId)===str(c.utilityWorkCenterId)&&
                         str(p.utilityCode)===str(c.utilityCode)&&
                         num(p.quantity)===num(c.quantity)&&str(p.uom)===str(c.uom)&&
                         num(p.requiredFlowPerHour)===num(c.requiredFlowPerHour)&&
                         str(p.deliveryMode)===str(c.deliveryMode));
-                    if(!unchanged)throw new HttpError(400,'Choose a supplying cost centre utility for each new or modified process-supply BOM material.');
+                    if(!unchanged)throw new HttpError(400,
+                        'Choose a supplying cost centre utility for each new or modified direct utility BOM material.');
                 }
             }
 
