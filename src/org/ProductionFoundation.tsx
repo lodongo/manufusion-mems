@@ -533,6 +533,12 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
     const save=async()=>{
         if(!draft||!canSave)return;
         if(active==='items'){
+            if(['FINISHED','INTERMEDIATE'].includes(str(draft.category))&&
+                skuSetup.parameters.some(p=>p.kind==='processClasses'&&p.enabled!==false)&&
+                !str(draft.processClassId)){
+                setError('Select a manufacturing process classification before saving this manufactured SKU.');
+                return;
+            }
             if(str(draft.category)!=='FINISHED'&&!skuSetup.units.some(u=>u.code===str(draft.uom)||u.symbol.toLowerCase()===str(draft.uom).toLowerCase())){
                 setError('Choose a unit category and unit of measure from the MEMS unit registry.');return;
             }
