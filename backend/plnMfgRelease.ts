@@ -10,6 +10,7 @@ import { canAt, nodePath, scopeOf } from './access';
 import { audit } from './audit';
 import { referenceChecks, bomAlternative } from './plnMfgFoundation';
 import {reviewManufacturingRouting} from './mfgRoutingReadiness';
+import {routingSkuIds,routingForSku} from './mfgRoutingSkuMappings';
 import { bomClassificationCode, bomReleaseSlotGroup, mfgMaterialPolicyForOrg } from './mfgMaterialPolicy';
 
 type Kind = 'boms'|'routings';
@@ -64,7 +65,7 @@ export const plnMfgReleaseRoutes={
             if(!await authorized(ctx,'MFG.view',siteId))
                 throw new HttpError(403,'This production site is outside your authorized scope.');
             const all=await listDocs(root(ctx.orgId,kind));
-            const matching=all.filter(row=>str(kind==='boms'?row.data.parentSkuId:row.data.skuId)===skuId);
+            const matching=all.filter(row=>kind==='boms'?str(row.data.parentSkuId)===skuId:routingSkuIds(row.data).includes(skuId));
             const existingTypeIds=new Set(matching.filter(row=>
                 !str(row.data.classificationCode)&&!!str(row.data.type)).map(row=>row.id));
             const records=matching.map(row=>{
@@ -116,7 +117,8 @@ export const plnMfgReleaseRoutes={
             }
             const options=[...alternatives.entries()].map(([alternativeCode,versions])=>{
                 const selected=selectEffectiveForSite(versions,date,siteId);
-                return selected?{alternativeCode,record:selected}:null;
+                const resolved=selected?routingForSku(selected,skuId):null;
+                return selected&&resolved?{alternativeCode,record:resolved}:null;
             }).filter((x):x is NonNullable<typeof x>=>x!==null);
             const selected=options.length===1?options[0].record:null;
             return {kind,skuId,siteId,date,record:selected,available:!!selected,
@@ -178,6 +180,7 @@ export const plnMfgReleaseRoutes={
                             review.issues.slice(0,4).map(i=>i.stageCode+': '+i.message).join('; '));
                 }
                 const comparable=await listDocs(root(ctx.orgId,kind));
+                const assigned=kind==='routings'?routingSkuIds(doc.data):[];
                 const same=comparable.filter(other=>other.id!==id&&str(other.data.status)==='active'&&
                     str(other.data.siteId)===str(doc.data.siteId)&&
                     str(other.data.effectiveFrom)===str(doc.data.effectiveFrom)&&
@@ -185,28 +188,32 @@ export const plnMfgReleaseRoutes={
                         ?str(other.data.parentSkuId)===str(doc.data.parentSkuId)&&
                             bomClassificationCode(other.data)===bomClassificationCode(doc.data)&&
                             bomAlternative(other.data.alternativeCode)===bomAlternative(doc.data.alternativeCode)
-                        :str(other.data.skuId)===str(doc.data.skuId)&&
+                        :routingSkuIds(other.data).some(sku=>assigned.includes(sku))&&
                             bomAlternative(other.data.alternativeCode)===bomAlternative(doc.data.alternativeCode)));
-                if(same.length)throw new HttpError(409,'Another approved version already applies to this SKU, site and effective date.');
+                if(same.length)throw new HttpError(409,'Another approved version already applies to one of these SKUs at this site and effective date.');
             }
             const at=nowIso(),status=decision==='approve'?'active':'rejected';
             const data={...doc.data,status,decisionNote:note,decidedAt:at,decidedBy:ctx.uid,
                 ...(status==='active'?{approvedAt:at,approvedBy:ctx.uid}:{})};
             // Lock the unique approved SKU/site/effective-date slot in the same Firestore
             // commit. Two simultaneous approvals cannot publish conflicting versions.
-            const skuId=str(kind==='boms'?doc.data.parentSkuId:doc.data.skuId);
-            const slotKey=[kind,str(doc.data.siteId)||'ORG',skuId,
-                ...(kind==='boms'?[bomReleaseSlotGroup(doc.data),bomAlternative(doc.data.alternativeCode)]:
-                    kind==='routings'&&doc.data.routingModelVersion===2?[bomAlternative(doc.data.alternativeCode)]:[]),
-                str(doc.data.effectiveFrom)||'BASE'].join('__');
-            const slotPath='organizations/'+ctx.orgId+'/mfg_release_slots/'+slotKey;
+            const skuIds=kind==='routings'?routingSkuIds(doc.data):[str(doc.data.parentSkuId)];
+            const slots=skuIds.map(skuId=>{
+                const slotKey=[kind,str(doc.data.siteId)||'ORG',skuId,
+                    ...(kind==='boms'?[bomReleaseSlotGroup(doc.data),bomAlternative(doc.data.alternativeCode)]:
+                        kind==='routings'&&doc.data.routingModelVersion===2?[bomAlternative(doc.data.alternativeCode)]:[]),
+                    str(doc.data.effectiveFrom)||'BASE'].join('__');
+                const slotPath='organizations/'+ctx.orgId+'/mfg_release_slots/'+slotKey;
+                return {skuId,slotPath};
+            });
             const saved=await commitChecked([
                 {path,data,precondition:{updateTime:doc.updateTime}},
                 {path:path+'/release_events/'+randomId(10),data:{action:decision,kind,revision:doc.data.revision,by:ctx.uid,at,note},precondition:{exists:false}},
-                ...(status==='active'?[{path:slotPath,data:{kind,skuId,siteId:str(doc.data.siteId),effectiveFrom:str(doc.data.effectiveFrom),
+                ...(status==='active'?slots.map(({skuId,slotPath})=>({path:slotPath,data:{
+                    kind,skuId,siteId:str(doc.data.siteId),effectiveFrom:str(doc.data.effectiveFrom),
                     ...(kind==='boms'?{classificationCode:bomClassificationCode(doc.data),alternativeCode:bomAlternative(doc.data.alternativeCode)}:
                         kind==='routings'?{alternativeCode:bomAlternative(doc.data.alternativeCode)}:{}),
-                    masterId:id,activatedAt:at,activatedBy:ctx.uid},precondition:{exists:false}}]:[]),
+                    masterId:id,activatedAt:at,activatedBy:ctx.uid},precondition:{exists:false}})):[]),
             ]);
             if(!saved)throw new HttpError(409,'This release changed. Refresh and decide again.');
             await auditAction(ctx,'mfg.release.'+decision,kind+':'+id,note||'Technical manufacturing release decision');
