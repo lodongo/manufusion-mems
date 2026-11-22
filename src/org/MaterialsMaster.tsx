@@ -27,7 +27,7 @@ const itemApi = '/api/org/procurement/catalog/item';
 const endpoint = '/api/org/procurement/materials';
 type WarehouseClusterOption={code:string;name:string;locationCode:string;locationName:string;
     subcategoryCodes:string[];restrictionCodes:string[];restrictionLabels:string[];storageTypeCode:string;
-    compatible:boolean;reason:string};
+    compatible:boolean;reason:string;adoptable:boolean;requiresSubcategoryExtension:boolean};
 
 /** Readable value of an attribute: option labels instead of codes (short form for the short text). */
 function shownValue(a: AttrDef, raw: string | undefined, short = false): string {
@@ -57,6 +57,7 @@ export default function MaterialsMaster() {
     const [restrictionCodes,setRestrictionCodes]=useState<string[]>([]);
     const [clusterOptions,setClusterOptions]=useState<WarehouseClusterOption[]>([]);
     const [clustersLoading,setClustersLoading]=useState(false);
+    const [applyingCluster,setApplyingCluster]=useState('');
     const [clustersError,setClustersError]=useState('');
     const [showAllClusters,setShowAllClusters]=useState(false);
     const [category, setCategory] = useState('');
@@ -176,9 +177,36 @@ export default function MaterialsMaster() {
         setRegistration(p=>({...p,warehouseRestriction:next[0]||'',clusterCode:''}));
         setReviewAgreed(false);setDuplicateConfirmed(false);
     };
-    const selectCluster=(cluster:WarehouseClusterOption)=>{
-        setRestrictionCodes([...cluster.restrictionCodes]);
-        setRegistration(p=>({...p,clusterCode:cluster.code,warehouseRestriction:cluster.restrictionCodes[0]||''}));
+    const selectCluster=async(cluster:WarehouseClusterOption)=>{
+        if(!cluster.adoptable||applyingCluster)return;
+        setError('');
+        let adoptedRestrictions=cluster.restrictionCodes;
+        if(cluster.requiresSubcategoryExtension){
+            if(!(await appConfirm(
+                'Add material subcategory '+subcategory+' to cluster '+cluster.code+' ('+cluster.name+') and adopt its restrictions ('+
+                cluster.restrictionCodes.join(', ')+')? This updates the shared cluster and storage-location subcategory mapping, without moving stock.'
+            )))return;
+            setApplyingCluster(cluster.code);
+            try{
+                const adopted=await callBackend<{ok:boolean;restrictionCodes:string[];subcategoryCodes:string[]}>(
+                    '/api/org/warehouse/cluster/adopt-subcategory',{
+                        costCenterId:registration.warehouseId,code:cluster.code,categoryCode:category,
+                        subcategoryCode:subcategory,confirm:true,
+                    });
+                adoptedRestrictions=adopted.restrictionCodes;
+                setClusterOptions(all=>all.map(c=>c.code===cluster.code?{
+                    ...c,subcategoryCodes:adopted.subcategoryCodes,restrictionCodes:adoptedRestrictions,
+                    compatible:true,adoptable:true,requiresSubcategoryExtension:false,reason:'',
+                }:c));
+            }catch(e){
+                setError(e instanceof Error?e.message:'Unable to adopt this warehouse cluster.');
+                return;
+            }finally{setApplyingCluster('');}
+        }
+        // The selected cluster is the source of truth for material restrictions.
+        // The existing autosave persists clusterCode and the adopted restrictions.
+        setRestrictionCodes([...adoptedRestrictions]);
+        setRegistration(p=>({...p,clusterCode:cluster.code,warehouseRestriction:adoptedRestrictions[0]||''}));
         setReviewAgreed(false);setDuplicateConfirmed(false);
     };
     const duplicateBlocked=hardDuplicates.length>0;
@@ -486,23 +514,27 @@ export default function MaterialsMaster() {
                 </div>
                 {clustersLoading?<p className='text-xs text-soft'>Checking cluster compatibility…</p>:
                     clustersError?<Alert tone='error'>{clustersError}</Alert>:
-                    matchingClusters.length===0?<Alert tone='warn'>No matching clusters in this warehouse for the selected subcategory and restrictions.</Alert>:
+                    matchingClusters.length===0?<Alert tone='warn'>No exact matches. Select an eligible cluster below to adopt its restrictions, or create another cluster.</Alert>:
                     <p className='text-xs text-soft'>{matchingClusters.length} compatible cluster(s) found.</p>}
-                {clusterOptions.filter(c=>showAllClusters||c.compatible||c.code===registration.clusterCode)
-                    .map(c=><div key={c.code} className='rounded-xl border border-line bg-panel p-3'>
-                        <p className='font-semibold text-ink'>{c.code} · {c.name}</p>
-                        <p className='text-xs text-soft'>{c.locationName} · Material subcategories: {c.subcategoryCodes.join(', ')||'None'}</p>
-                        <p className='mt-1 text-xs text-soft'>Existing restrictions: {c.restrictionCodes.map((v,i)=>c.restrictionLabels[i]+' ('+v+')').join(' · ')||'None'}</p>
-                        {!c.compatible&&<p className='mt-1 text-xs text-amber-700'>{c.reason}</p>}
-                        {(c.compatible||c.reason==='Not all selected restrictions are allowed')&&
-                            <button type='button' className='mt-2 min-h-10 rounded-lg border border-line px-3 text-sm font-semibold text-ink'
-                                onClick={()=>selectCluster(c)} disabled={!c.restrictionCodes.length}>
-                                {registration.clusterCode===c.code?'Selected — saves with material draft':
-                                    c.compatible?'Use this cluster':'Use cluster and adopt its restrictions'}
-                            </button>}
-                    </div>)}
+                {clusterOptions.filter(c=>showAllClusters||c.adoptable||c.code===registration.clusterCode)
+                    .map(c=><button type='button' key={c.code}
+                        aria-pressed={registration.clusterCode===c.code}
+                        disabled={!c.adoptable||!!applyingCluster||saving}
+                        className={`block w-full rounded-xl border p-3 text-left disabled:cursor-not-allowed disabled:opacity-70 ${registration.clusterCode===c.code?'border-emerald-600 bg-emerald-50/50':'border-line bg-panel'}`}
+                        onClick={()=>void selectCluster(c)}>
+                        <span className='block font-semibold text-ink'>{c.code} · {c.name}</span>
+                        <span className='block text-xs text-soft'>{c.locationName} · Material subcategories: {c.subcategoryCodes.join(', ')||'None'}</span>
+                        <span className='mt-1 block text-xs text-soft'>Existing restrictions: {c.restrictionCodes.map((v,i)=>c.restrictionLabels[i]+' ('+v+')').join(' · ')||'None'}</span>
+                        {!c.compatible&&<span className='mt-1 block text-xs text-amber-700'>{c.reason}</span>}
+                        <span className='mt-2 block text-sm font-semibold text-ink'>
+                            {applyingCluster===c.code?'Applying cluster…':registration.clusterCode===c.code?'Selected — saves with material draft':
+                                !c.adoptable?'Not eligible for this material':
+                                c.requiresSubcategoryExtension?'Tap to add this subcategory, adopt restrictions and apply cluster':
+                                'Tap to adopt restrictions and apply cluster'}
+                        </span>
+                    </button>)}
                 {registration.clusterCode&&<p className='text-xs text-soft'>Material will be associated with cluster {registration.clusterCode} when the draft is saved. Physical stock and bin allocation still require material approval.</p>}
-                {!registration.clusterCode&&restrictionCodes.length>0&&!clustersLoading&&
+                {!registration.clusterCode&&restrictionCodes.length>0&&!clustersLoading&&!clusterOptions.some(c=>c.adoptable)&&
                     <div className='rounded-xl border border-dashed border-line p-3'>
                         <p className='text-sm font-semibold text-ink'>Create a matching cluster?</p>
                         <p className='text-xs text-soft'>{matchingClusters.length?'Existing matches are available above, but you may create a separate cluster. ':'No matching cluster is configured. '}Save this material as a draft and open cluster configuration with the subcategory and restrictions prefilled.</p>
