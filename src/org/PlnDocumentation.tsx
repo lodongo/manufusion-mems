@@ -37,7 +37,16 @@ const guide:Chapter[]=[
    'Disable, rather than delete, classifications already referenced by saved BOMs.',
   ]},
  ]},
- {id:'product',title:'2. Product identity and production form',phase:'Foundation',summary:'Define product identity, manufacturing-process groups and production units.',screen:'Product Configuration',topics:[
+ {id:'product',title:'2. Product identity and production form',phase:'Foundation',summary:'Distinguish what a product is, how it is produced and the production units that become a specific SKU.',screen:'Product Configuration',topics:[
+  {title:'Product/Variant, production form and SKU: what is the difference?',purpose:'Learn how reusable definitions become one specific product master record.',steps:[
+   'Product/Variant is what the product or grade is: its reusable name and business code. Multiple sizes and packs can use one identity.',
+   'Manufacturing Process Classification is how the product is made. It groups SKUs to compatible routings and does not mean flavour or recipe.',
+   'Production Form describes its physical output form and measurement basis, such as liquid in litres, solids in kilograms or fabric in square metres.',
+   'An SKU is the particular manufactured product or intermediate record with a separate SKU_ master ID. Containment and packaging, when required, distinguish otherwise similar finished SKUs.',
+   'The same Product/Variant, Production Form and process group can belong to more than one SKU, while SKU BOMs and permitted production-resource mappings remain individually configured.',
+   'In Materials & Products → Add SKU, select the process group and relevant Product/Variant and Production Form. Intermediate/WIP can use its own entered name; Production Form is required when its physical SKU composition and conversions are configured.',
+  ],example:'Illustrative: Cola Original, Liquid (L) and a PET carbonated process are shared by a 500 mL PET 24-pack SKU and a different 1 L PET 12-pack SKU. Nothing here is an industry preset.'},
+
   {title:'Manufacturing process classifications',purpose:'Group different SKUs by their shared manufacturing method, not their product variant or recipe.',steps:[
    'Open Product Configuration → Manufacturing Process Classifications and create the process groups relevant to your organization.',
    'Name each classification, enter a unique readable business code and describe its manufacturing method. The generated PRC identifier remains separate. No industry list is hard-coded.',
@@ -50,7 +59,7 @@ const guide:Chapter[]=[
    'Save the active identity and return to the main configuration menu.',
   ],example:'Fictional: DEMO-ORANGE / Demo Orange Beverage. No commercial or financial record is created.'},
   {title:'Production forms',purpose:'Choose the dimensional output represented by each SKU.',steps:[
-   'Open Production Forms and select the form or create one.',
+   'Open Production Forms and select the form or create one. This represents a material quantity, not its bottle, package or pallet.',
    'Select a published MEMS unit such as L for liquid, kg for bulk solids, m for wire, or m² for sheet material.',
    'Ensure the physical-container size can be converted into this dimension.',
   ],example:'A 400 mL bottle can be related to beverage production form L. A coil measured in metres must have an approved length-based size.'},
