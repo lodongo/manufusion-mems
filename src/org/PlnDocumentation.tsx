@@ -40,7 +40,7 @@ const guide:Chapter[]=[
  {id:'product',title:'2. Product identity and production form',phase:'Foundation',summary:'Define product identity, manufacturing-process groups and production units.',screen:'Product Configuration',topics:[
   {title:'Manufacturing process classifications',purpose:'Group different SKUs by their shared manufacturing method, not their product variant or recipe.',steps:[
    'Open Product Configuration → Manufacturing Process Classifications and create the process groups relevant to your organization.',
-   'Name each classification and describe the common manufacturing method it represents. No industry list is hard-coded.',
+   'Name each classification, enter a unique readable business code and describe its manufacturing method. The generated PRC identifier remains separate. No industry list is hard-coded.',
    'Assign the classification when creating an SKU. For an existing approved SKU, use Classify manufacturing process on its card to change only classification metadata without changing its SKU code, BOM, site allocation or commissioned speeds.',
    'One process classification can offer different approved routing alternatives when a production method or equipment changes.',
   ],example:'Possible user-defined groups include continuous extrusion, batch blending, precision machining, textile weaving, industrial assembly and thermal processing. None are predefined classifications.'},
@@ -96,10 +96,10 @@ const guide:Chapter[]=[
  {id:'naming',title:'5. SKU Naming Sequence',phase:'Foundation',summary:'Configure naming independently of Product Identity.',screen:'Product Configuration → SKU Naming Sequence',topics:[
   {title:'Sequence rules',purpose:'Set the displayed manufactured-SKU name order without replacing internal generated codes.',steps:[
    'Open the standalone SKU Naming Sequence section.',
-   'Add and order the required fields and separators.',
-   'Review the example name and save the naming sequence.',
+   'Add and order the required fields and separators. Choose Manufacturing process classification → Code to include its business code, or Name to include the classification name.',
+   'Review the example name and save the naming sequence. Existing process classifications without a business code must be edited to supply one before it can appear in generated SKU names.',
    'Existing SKU names remain unchanged unless explicitly regenerated through their authorized edit process.',
-  ],example:'Fictional: DEMO_ORANGE_400mL_PET_12PACK. Internal SKU_######### remains database-generated.'},
+  ],example:'Fictional: PROCESS_A_PRODUCT_400mL_12PACK, where PROCESS_A is an organization-defined manufacturing process classification code. The internal SKU_######### remains database-generated.'},
  ]},
  {id:'skus',title:'6. Materials & Products',phase:'Master data',summary:'Create manufactured, continuous, bulk and sourced materials without losing existing site allocations.',screen:'Materials & Products',topics:[
   {title:'Continuous and multi-source supply configuration',purpose:'Use one material identity for equivalent material from different sources, with separate source costs.',steps:[
