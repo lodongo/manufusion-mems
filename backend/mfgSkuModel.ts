@@ -12,7 +12,7 @@ import {throughputOutput} from '../src/shared/throughputOutput';
 import {BULK_STORAGE_CONTAINER_CATEGORY,skuContainmentNeeds,type SkuContainmentScope} from '../src/shared/skuContainmentPolicy';
 
 export const SKU_PARAMETERS={
-    productNames:'NME', productionForms:'FRM', containers:'CNT',
+    productNames:'NME', processClasses:'PRC', productionForms:'FRM', containers:'CNT',
     containerSizes:'SIZ', packages:'PKG', transportPackages:'TLP', packagingSizes:'PSZ', 
     packageCounts:'PCT', // retained for existing organization records, hidden from new configuration
     normalizationUnits:'NRM',
@@ -333,6 +333,11 @@ export function normalizeSkuParameter(kind:SkuParameterKind,raw:Record<string,un
     if(!name||name.length>120)throw new HttpError(400,'A parameter name of up to 120 characters is required.');
     const description=str(raw.description).trim().slice(0,300);
     const base={kind,name,description,enabled:raw.enabled!==false};
+    if(kind==='processClasses'){
+        // No industry list or flavor taxonomy is built into the platform.
+        // Organizations define reusable manufacturing-process families themselves.
+        return base;
+    }
     if(kind==='productNames'){
         const productCode=str(raw.productCode).trim().toUpperCase();
         if(!/^[A-Z0-9][A-Z0-9_.-]{1,29}$/.test(productCode))
