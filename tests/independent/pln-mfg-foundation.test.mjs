@@ -692,7 +692,7 @@ test('reference production form must exist, be active and share compatible dimen
  assert.ok(ui.includes('Normalized unit cases per commercial package'));
  const api=read('backend/mfgSkuConfiguration.ts');
  assert.ok(api.includes("kind==='normalizationUnits'"));
- assert.ok(api.includes("input.baseUom=refForm.uom"));
+ assert.ok(api.includes("input.baseUom=str(refForm.uom)"));
  assert.ok(api.includes('Select a production form to define the normalized case reference'));
 });
 
