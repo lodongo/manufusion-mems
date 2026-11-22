@@ -215,6 +215,7 @@ export function normalizeMaster(kind:MasterKind, raw:unknown): Obj {
     // A shared route keeps one master process while SKU-specific records supply
     // their own BOM/output identities and optional stage timings.
     const mappings=ARR(raw.skuMappings);
+    if(!advanced&&mappings.length)throw new HttpError(400,'Shared SKU routing requires the current stage-based routing model.');
     if(mappings.length>100)throw new HttpError(400,'A routing may be assigned to at most 100 additional SKUs.');
     const mapped=new Set<string>(),stageCodes=new Set(steps.map(o=>str(o.code)));
     const skuMappings=mappings.map((mapping,i)=>{
