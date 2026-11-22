@@ -7,7 +7,7 @@ import type {FlowAnalysis} from '../shared/mfgFlowCapacity';
 type Site={id:string;name:string;code?:string};
 type Variant={skuId:string;ready:boolean;issueCount:number;flowAnalysis:FlowAnalysis;
  stages:Array<{code:string;name:string;dependsOn:string[];
- capacity:{quantity:number;unit:string;source:string}|null}>};
+ capacity:{quantity:number;unit:string;unitCode?:string;source:string}|null}>};
 type Flow={id:string;name:string;siteId:string;processClassId:string;
  alternativeCode:string;status:string;revision:number;mappedSkus:string[];skuReviews:Variant[]};
 type Page={total:number;offset:number;limit:number;hasMore:boolean;flows:Flow[]};
