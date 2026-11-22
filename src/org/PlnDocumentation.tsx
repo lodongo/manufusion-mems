@@ -134,6 +134,16 @@ const guide:Chapter[]=[
   ]},
  ]},
  {id:'bom',title:'7. Bills of Materials / Recipes',phase:'Master data',summary:'Connect products to quantities consumed by each stage.',screen:'Bills of Materials',topics:[
+  {title:'Process supply: inline, continuous and buffered inputs',purpose:'Describe water, gases, steam and other bulk or metered material supplies without artificial stock transactions.',steps:[
+   'Open Bills of Materials, choose the produced SKU and Add material → Material source → Process supply · continuous, metered, inline or bulk.',
+   'Link an existing manufactured/raw material SKU, registered equipment utility, or approved direct Procurement material. Create the underlying master first if it does not exist.',
+   'Choose inline/on-demand, buffered, bulk storage or cylinder/canister delivery. The supply method never changes the identity of the consumed material.',
+   'Choose fixed/recipe, metered continuous or as-required quantity method. Each requires a positive planned material quantity for this BOM output so MRP has a traceable basis.',
+   'Optionally enter a required rate per hour, measured in the same material UoM. The rate is a planning target, not a substitute for BOM consumption or a live meter reading.',
+   'For buffered or bulk storage enter physical capacity and, when known, usable quantity. A tank size is not an ingredient quantity or stock receipt.',
+   'Cost tariffs, meter readings, purchases, warehouse issues and actual buffer readings belong to their owning modules; saving a BOM posts none of them.',
+  ],example:'Illustrative: 1,000 L treated water is required per 1,000 L recipe output; planned inline demand is 30,000 L/h and a 20,000 L tank is configured separately. Ozone can reference an inline utility; bulk CO₂ may use a direct approved Procurement material.'},
+
   {title:'Build the material structure',purpose:'Define valid production quantities and exact component UOMs.',steps:[
    'Open Bills of Materials and choose the produced SKU.',
    'Set the output quantity and output unit.',
