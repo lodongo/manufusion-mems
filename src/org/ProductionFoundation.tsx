@@ -132,7 +132,13 @@ function BomEditor({draft,onChange,items,refs,skuSetup,materialPolicy}:{
 }){
  const output=items.find(i=>i.id===str(draft.parentSkuId));
  const [sectionTab,setSectionTab]=useState<'output'|'materials'|'settings'>('output');
- useEffect(()=>{setSectionTab('output');},[draft.id]);
+ const [materialsView,setMaterialsView]=useState<'list'|'edit'>('list');
+ const [selectedMaterialIndex,setSelectedMaterialIndex]=useState<number|null>(null);
+ useEffect(()=>{
+    setSectionTab('output');
+    setMaterialsView('list');
+    setSelectedMaterialIndex(null);
+ },[draft.id]);
  const [costSupplies,setCostSupplies]=useState<CostCenterSupplyOption[]>([]);
  const [costSupplyError,setCostSupplyError]=useState('');
  const includesProcess=asComponents(draft.components).some(c=>c.source==='PROCESS_SUPPLY');
@@ -149,6 +155,42 @@ function BomEditor({draft,onChange,items,refs,skuSetup,materialPolicy}:{
  const update=(key:string,value:unknown)=>onChange({...draft,[key]:value});
  const updateComponent=(i:number,patch:Partial<Component>)=>
    update('components',components.map((c,j)=>i===j?{...c,...patch}:c));
+ const beginAddMaterial=()=>{
+    if(!output||components.length>=150)return;
+    update('components',[...components,{
+        source:'INTERMEDIATE',skuId:'',warehouseId:'',materialId:'',quantity:1,uom:'',scrapPct:0,
+    }]);
+    setSelectedMaterialIndex(components.length);
+    setMaterialsView('edit');
+ };
+ const removeMaterial=(index:number)=>{
+    update('components',components.filter((_,i)=>i!==index));
+    setSelectedMaterialIndex(null);
+    setMaterialsView('list');
+ };
+ const describeMaterial=(component:Component)=>{
+    const fromWarehouse=component.source==='WAREHOUSE';
+    const processSupply=component.source==='PROCESS_SUPPLY';
+    const kind=component.processSupplyKind||'SKU';
+    const sku=items.find(item=>item.id===component.skuId);
+    const warehouseMaterial=refs.warehouseMaterials.find(
+        item=>item.warehouseId===component.warehouseId&&item.id===component.materialId);
+    const purchased=refs.materials.find(item=>item.id===component.materialId);
+    const utility=costSupplies.find(
+        item=>item.costCenterId===component.supplyCostCenterId&&item.code===component.supplyUtilityCode);
+    const legacyUtility=refs.utilities.find(
+        item=>item.workCenterId===component.utilityWorkCenterId&&item.code===component.utilityCode);
+    const name=fromWarehouse?
+        (warehouseMaterial?.name||purchased?.name||'Select warehouse material'):
+        processSupply&&kind==='UTILITY'?
+            (utility?.label||legacyUtility?.name||'Select process utility'):
+        processSupply&&kind==='PROCUREMENT'?
+            (purchased?.name||'Select purchased material'):
+            (sku?.name||'Select manufactured material');
+    const source=fromWarehouse?'Warehouse · Procurement':
+        processSupply?'Process supply':'Manufactured intermediate / WIP';
+    return {name,source};
+ };
  const outputChoices:Array<[string,string]>=[['','Choose what you want to produce'],...items.map(i=>[i.id,i.name+' · '+str(i.category)] as [string,string])];
  const componentChoices:Array<[string,string]>=[['','Choose an intermediate/WIP material'],
     ...items.filter(i=>i.id!==str(output?.id)&&
@@ -209,7 +251,13 @@ function BomEditor({draft,onChange,items,refs,skuSetup,materialPolicy}:{
         {sectionTabs.map(section=>
             <button key={section.key} id={'bom-tab-'+section.key} type='button' role='tab'
                 aria-selected={sectionTab===section.key} aria-controls={'bom-panel-'+section.key}
-                onClick={()=>setSectionTab(section.key)}
+                onClick={()=>{
+                    setSectionTab(section.key);
+                    if(section.key==='materials'){
+                        setMaterialsView('list');
+                        setSelectedMaterialIndex(null);
+                    }
+                }}
                 className={'min-w-0 min-h-11 rounded-lg px-1.5 py-2 text-center text-xs font-semibold sm:px-3 sm:text-sm '+
                     (sectionTab===section.key?'bg-brand text-onbrand':'text-soft hover:bg-panel')}>
                 {section.title}
@@ -224,6 +272,8 @@ function BomEditor({draft,onChange,items,refs,skuSetup,materialPolicy}:{
                 onChange({...draft,parentSkuId:v,outputUom:str(selected?.uom)||'EA',
                     siteId:str(draft.siteId),productVariantId:'',routingId:'',
                     components:components.filter(c=>c.skuId!==v)});
+                setMaterialsView('list');
+                setSelectedMaterialIndex(null);
             }}/>
         {output?<p className='text-sm text-soft'>Material classification: {str(output.category)} · Base unit: {bomUomName(str(output.uom),skuSetup.units)}</p>:
             <p className='text-xs text-muted'>Not listed? Create the material first in Materials & Products.</p>}
@@ -238,17 +288,63 @@ function BomEditor({draft,onChange,items,refs,skuSetup,materialPolicy}:{
     </section>
     <section id='bom-panel-materials' role='tabpanel' aria-labelledby='bom-tab-materials'
         className={'space-y-3 rounded-xl border border-line p-3'+(sectionTab==='materials'?'':' hidden')}>
-        <div className='flex items-start justify-between gap-2'>
-            <div>
-                <h3 className='font-semibold'>2. What materials are needed?</h3>
-                <p className='mt-1 text-xs text-muted'>Quantities for {quantity} {bomUomName(outputUom,skuSetup.units)} of the output.</p>
-            </div>
-            <Button type='button' variant='secondary' disabled={!output||components.length>=150}
-                onClick={()=>update('components',[...components,{source:'INTERMEDIATE',skuId:'',warehouseId:'',materialId:'',quantity:1,uom:'',scrapPct:0}])}>Add material</Button>
+        <div>
+            <h3 className='font-semibold'>2. What materials are needed?</h3>
+            <p className='mt-1 text-xs text-muted'>Quantities for {quantity} {bomUomName(outputUom,skuSetup.units)} of the output.</p>
+        </div>
+        <div role='tablist' aria-label='BOM materials' className='grid grid-cols-2 gap-1 rounded-xl border border-line bg-page p-1'>
+            <button type='button' role='tab' id='bom-added-materials-tab' aria-controls='bom-added-materials-panel'
+                aria-selected={materialsView==='list'}
+                className={'min-h-11 min-w-0 rounded-lg px-2 py-2 text-center text-xs font-semibold sm:text-sm '+
+                    (materialsView==='list'?'bg-brand text-onbrand':'text-soft hover:bg-panel')}
+                onClick={()=>{setMaterialsView('list');setSelectedMaterialIndex(null);}}>
+                Added materials ({components.length})
+            </button>
+            <button type='button' role='tab' id='bom-add-material-tab' aria-controls='bom-add-material-panel'
+                aria-selected={materialsView==='edit'}
+                disabled={!output||(components.length>=150&&materialsView==='list')}
+                className={'min-h-11 min-w-0 rounded-lg px-2 py-2 text-center text-xs font-semibold disabled:opacity-50 sm:text-sm '+
+                    (materialsView==='edit'?'bg-brand text-onbrand':'text-soft hover:bg-panel')}
+                onClick={()=>{if(materialsView==='list')beginAddMaterial();}}>
+                Add material
+            </button>
         </div>
         {!output?<p className='text-sm text-muted'>Choose the output in the Output tab first.</p>:
-            <div className='space-y-3'>
+            materialsView==='list'?
+            <div id='bom-added-materials-panel' role='tabpanel' aria-labelledby='bom-added-materials-tab' className='space-y-2'>
+                {components.map((component,index)=>{
+                    const description=describeMaterial(component);
+                    return <div key={index} className='flex min-w-0 flex-wrap items-center justify-between gap-2 rounded-lg border border-line bg-page p-3'>
+                        <div className='min-w-0 flex-1'>
+                            <p className='break-words text-sm font-semibold'>{index+1}. {description.name}</p>
+                            <p className='mt-1 text-xs text-muted'>{description.source}</p>
+                            <p className='mt-1 text-xs text-soft'>
+                                {Number.isFinite(component.quantity)?component.quantity.toLocaleString():'—'}
+                                {' '}{bomUomName(component.uom,skuSetup.units)||'Unit not selected'}
+                            </p>
+                        </div>
+                        <div className='flex shrink-0 items-center gap-2'>
+                            <Button type='button' variant='secondary' onClick={()=>{
+                                setSelectedMaterialIndex(index);
+                                setMaterialsView('edit');
+                            }}>Edit</Button>
+                            <Button type='button' variant='secondary' onClick={()=>removeMaterial(index)}>Remove</Button>
+                        </div>
+                    </div>;
+                })}
+                {!components.length&&<p className='rounded-lg bg-page p-3 text-sm text-muted'>
+                    No materials added. Open the Add material tab to enter the first material.
+                </p>}
+            </div>:
+            <div id='bom-add-material-panel' role='tabpanel' aria-labelledby='bom-add-material-tab' className='space-y-3'>
+                <div className='flex items-center justify-between gap-2'>
+                    <h4 className='text-sm font-semibold'>Material {selectedMaterialIndex===null?'':selectedMaterialIndex+1}</h4>
+                    <Button type='button' variant='secondary' onClick={()=>{
+                        setMaterialsView('list');setSelectedMaterialIndex(null);
+                    }}>View added</Button>
+                </div>
                 {components.map((c,i)=>{
+                    if(i!==selectedMaterialIndex)return null;
                     const fromWarehouse=c.source==='WAREHOUSE';
                     const processSupply=c.source==='PROCESS_SUPPLY';
                     const supplyRef=c.processSupplyKind||'SKU';
@@ -267,7 +363,7 @@ function BomEditor({draft,onChange,items,refs,skuSetup,materialPolicy}:{
                         <div className='flex flex-wrap items-center justify-between gap-2'>
                             <span className='text-sm font-semibold'>Required material {i+1}</span>
                             <button type='button' className='min-h-10 rounded-lg border border-line px-3 text-xs text-ink'
-                                onClick={()=>update('components',components.filter((_,j)=>j!==i))}>Remove</button>
+                                onClick={()=>removeMaterial(i)}>Remove</button>
                         </div>
                         <Choice title='Material source' value={c.source==='PROCESS_SUPPLY'?'PROCESS_SUPPLY':fromWarehouse?'WAREHOUSE':'INTERMEDIATE'}
                             options={[
@@ -449,7 +545,14 @@ function BomEditor({draft,onChange,items,refs,skuSetup,materialPolicy}:{
                         </details>}
                     </div>;
                 })}
-                {!components.length&&<p className='text-sm text-muted'>No inputs yet. Choose Add to include a component, ingredient or packaging material.</p>}
+                {selectedMaterialIndex!==null&&components[selectedMaterialIndex]&&
+                    <div className='flex flex-wrap justify-end gap-2'>
+                        <Button type='button' variant='secondary' onClick={()=>{
+                            setMaterialsView('list');setSelectedMaterialIndex(null);
+                        }}>Done · View added materials</Button>
+                        <Button type='button' variant='secondary' disabled={components.length>=150}
+                            onClick={beginAddMaterial}>Add another</Button>
+                    </div>}
             </div>}
     </section>
     <section id='bom-panel-settings' role='tabpanel' aria-labelledby='bom-tab-settings'
