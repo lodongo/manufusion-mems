@@ -3,7 +3,7 @@ import {callBackend} from '../lib/backend';
 import {Alert,Field,SelectField} from '../components/ui';
 import {Button,Card,Spinner,useLoad} from '../admin/kit';
 type Determinant={key:string;label:string;unit:string};
-export type SupplySummary={code:string;label:string;determinant:Determinant|null;capacity:number|null;rating:unknown;total:number;ownDemand:number;unknown:number;count:number;percent:number|null;status:string;consumers?:{name:string;code?:string;demand:number|null}[]};
+export type SupplySummary={code:string;label:string;determinant:Determinant|null;capacity:number|null;rating:unknown;total:number;ownDemand:number;unknown:number;count:number;percent:number|null;status:string;consumers?:{name:string;code?:string;demand:number|null}[];costCentreAllocations?:{costCenterId:string;code:string;allocatedCapacity:number}[];allocatedToCostCentres?:number};
 export type SourceOption=SupplySummary&{tag:string;name:string;className:string;assetStatus:string;canRate:boolean};
 const fmt=(n:number)=>n.toLocaleString(undefined,{maximumFractionDigits:2});
 export function CapacityLine({supply,projected}:{supply:SupplySummary;projected?:number}){
@@ -25,7 +25,15 @@ export default function AssetUtilitySupplies({assetTag}:{assetTag:string}){
     return <Card className='space-y-3'><h2 className='font-semibold text-ink'>Utilities supplied · capacity & connected equipment</h2>
     {loading&&<Spinner/>}{error&&<Alert tone='error'>{error} <Button variant='secondary' onClick={reload}>Retry</Button></Alert>}
     {data&&!data.supplies.length&&<p className='text-xs text-muted'>No supply ratings or equipment connections recorded.</p>}
-    {data?.supplies.map(s=><div key={s.code} className='space-y-2 rounded-xl border border-line p-3'><div className='flex items-center justify-between gap-2'><span className='font-semibold'>{s.label}</span>{data.canEdit&&data.catalogue.some(d=>d.code===s.code)&&<Button variant='secondary' onClick={()=>select(s.code)}>Edit capacity</Button>}</div><CapacityLine supply={s}/>{s.consumers?.map((c,i)=><div className='flex justify-between gap-2 text-xs text-muted' key={i}><span>{c.code?c.code+' · ':''}{c.name}</span><span>{c.demand===null?'—':fmt(c.demand)+' '+(s.determinant?.unit??'')}</span></div>)}</div>)}
+    {data?.supplies.map(s=><div key={s.code} className='space-y-2 rounded-xl border border-line p-3'><div className='flex items-center justify-between gap-2'><span className='font-semibold'>{s.label}</span>{data.canEdit&&data.catalogue.some(d=>d.code===s.code)&&<Button variant='secondary' onClick={()=>select(s.code)}>Edit capacity</Button>}</div><CapacityLine supply={s}/>
+    {s.costCentreAllocations&&s.costCentreAllocations.length>0&&<div className='space-y-1 rounded-lg border border-line bg-page p-2 text-xs'>
+     <p className='font-semibold'>Cost-centre utility distribution · {fmt(s.allocatedToCostCentres||0)} {s.determinant?.unit||''} allocated</p>
+     <p className='text-muted'>Each cost centre checks the combined load of its own equipment. Source asset allocations must not exceed this asset's rating.</p>
+     {s.costCentreAllocations.map((a,i)=><div key={i} className='flex justify-between gap-2'>
+      <span>{a.costCenterId}</span><span>{fmt(a.allocatedCapacity)} {s.determinant?.unit||''}</span>
+     </div>)}
+    </div>}
+    {s.consumers?.map((c,i)=><div className='flex justify-between gap-2 text-xs text-muted' key={i}><span>{c.code?c.code+' · ':''}{c.name}</span><span>{c.demand===null?'—':fmt(c.demand)+' '+(s.determinant?.unit??'')}</span></div>)}</div>)}
     {data?.canEdit&&<div className='space-y-2'><SelectField id='asset-supplied-utility' label='Configure a supplied utility' value={code} onChange={e=>select(e.target.value)}><option value=''>Select…</option>{data.catalogue.map(d=><option key={d.code} value={d.code}>{d.label}</option>)}</SelectField>
     {def?.determinant&&<Field id='asset-supply-capacity' label={'Usable capacity · '+def.determinant.label+' ('+def.determinant.unit+')'} inputMode='decimal' value={rating} onChange={e=>setRating(e.target.value)}/>}
     {def&&<Button busy={busy} disabled={!!def.determinant&&(!(Number(rating)>0)||!Number.isFinite(Number(rating)))} onClick={()=>void save()}>Save supplied utility</Button>}{problem&&<Alert tone='error'>{problem}</Alert>}</div>}
