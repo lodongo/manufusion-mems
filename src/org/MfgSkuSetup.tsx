@@ -408,7 +408,14 @@ export function SkuConfigurationFields({value,onChange,setup,variantLabel='Produ
             </>}
         </div>}
         <div className='rounded-xl border border-line bg-page p-3 text-sm' aria-live='polite'>
-            <p className='font-medium text-ink'>{title}</p>
+            <p className='text-xs font-semibold text-muted'>Your SKU composition preview</p>
+            <p className='mt-1 font-medium text-ink'>{title}</p>
+            <div className='mt-2 space-y-1 text-xs text-muted'>
+                <p>Product/Variant: {productRecord?.name||'Not selected (optional for certain intermediate SKUs)'}</p>
+                <p>Production Form: {form?form.name+' · '+(pickUnit(setup,form.uom)?.symbol||form.uom):'Not selected'}</p>
+                <p>Manufacturing process: {processRecord?.name||'Select a process classification above'}</p>
+            </div>
+            <p className='mt-2 text-xs text-muted'>These are reusable catalogue records. This SKU will have its own database-generated ID, BOM/recipe and permitted site/resource mappings.</p>
             {contentPerContainer!==null&&<p className='mt-1 text-muted'>Per container: {pretty(contentPerContainer)} {pickUnit(setup,form?.uom)?.symbol||form?.uom}</p>}
             {packageRecord?.packagingTypeCode&&packageRecord.containersPerLayer&&packageRecord.numberOfLayers&&<p className='mt-1 text-muted'>
                 {packageRecord.containersPerLayer} {packageRecord.containedUnit==='PACKAGING'?'packages':'containers'} per layer × {packageRecord.numberOfLayers} layers
