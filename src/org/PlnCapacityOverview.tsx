@@ -14,8 +14,9 @@ type Page={total:number;offset:number;limit:number;hasMore:boolean;flows:Flow[]}
 const fmt=(n:number)=>new Intl.NumberFormat(undefined,{maximumFractionDigits:2}).format(n);
 
 /** Read-only analysis; does not issue inventory, start production or submit approvals. */
-export default function PlnCapacityOverview({sites,processClasses,items}:{
+export default function PlnCapacityOverview({sites,processClasses,items,units}:{
  sites:Site[];processClasses:Array<{id:string;name:string}>;items:Array<{id:string;name:string}>;
+ units:Array<{code:string;label?:string;symbol?:string}>;
 }){
  const [siteId,setSiteId]=useState('');
  const [offset,setOffset]=useState(0);
@@ -79,7 +80,7 @@ export default function PlnCapacityOverview({sites,processClasses,items}:{
       (items.find(x=>x.id===sku.skuId)?.name||sku.skuId):'Preliminary flow · SKU mapping incomplete'}</h4>
      <span className='text-xs text-muted'>{sku.issueCount} readiness issue(s)</span>
     </div>
-    <PlnFlowOpportunities analysis={sku.flowAnalysis}
+    <PlnFlowOpportunities analysis={sku.flowAnalysis} units={units}
      heading='Upstream and downstream flow balance'/>
     {sku.stages.length>0&&<details className='rounded-lg border border-line p-3'>
      <summary className='cursor-pointer text-xs font-semibold'>View stage-by-stage capacity ({sku.stages.length})</summary>
@@ -87,7 +88,7 @@ export default function PlnCapacityOverview({sites,processClasses,items}:{
       {sku.stages.map(stage=><div key={stage.code} className='rounded-lg bg-page p-2 text-xs'>
        <p className='font-semibold'>{stage.name||stage.code}</p>
        <p className='mt-1'>{stage.capacity?
-        fmt(stage.capacity.quantity)+' '+stage.capacity.unit:'Rate not configured or comparable'}</p>
+        fmt(stage.capacity.quantity)+' '+(units.find(u=>u.code===stage.capacity?.unitCode)?.symbol||stage.capacity.unit):'Rate not configured or comparable'}</p>
        <p className='text-muted'>Depends on: {stage.dependsOn.length?stage.dependsOn.join(', '):'No predecessors'} ·
         {' '+(stage.capacity?.source||'Missing master-data basis')}</p>
       </div>)}
