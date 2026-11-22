@@ -231,13 +231,14 @@ export default function PlnProcessRoutingEditor({value,onChange,items,boms,resou
     <Choice label='Manufacturing process classification' value={value.processClassId||''}
      options={[['','No classification assigned'],...classOptions.map(x=>[x.id,x.name] as [string,string])]}
      onChange={processClassId=>{
-      // Switching the process group clears incompatible SKU/BOM assignments,
-      // but preserves the process stage graph and its resources.
-      onChange({...value,processClassId,skuId:'',skuMappings:[],
-       operations:ops.map(step=>({...step,producesSkuId:'',bomId:''}))});
+      // Process classification never silently deletes a previously entered BOM,
+      // stage or SKU allocation. Mismatches are shown for explicit correction.
+      onChange({...value,processClassId});
       setSkuToAdd('');setReview(null);
      }}/>
     <p className='sm:col-span-2 text-xs text-muted'>Select the process family configured under Product Configuration. SKUs in the same family can share this route even when their recipes differ. Classifications are organization-managed, not limited to any particular industry.</p>
+    {value.skuId&&str(items.find(x=>x.id===value.skuId)?.processClassId)!==str(value.processClassId)&&
+     <p role='alert' className='sm:col-span-2 text-xs text-amber-700'>This primary SKU belongs to a different process classification. Choose a matching SKU or update its classification in Materials & Products. Its saved records have not been changed.</p>}
     <Choice label='Primary manufactured SKU' value={value.skuId||''}
      options={[['','Select an SKU in this process classification'],
       ...routeSkuChoices.map(x=>[x.id,x.name] as [string,string])]}
