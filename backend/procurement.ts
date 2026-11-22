@@ -1092,7 +1092,8 @@ export function materialSourcingPolicy(data:Obj):Obj{
         generalPartNumber:'',model:'',versionNumber:'',
         proprietaryPartNumber:str(data.proprietaryPartNumber).trim(),
         costCenterId:'',assetId:'',assemblyId:'',assemblyIds:[]};
-    if(relationship!=='BIDDED'&&relationship!=='GENERAL')return data;
+    if(relationship!=='BIDDED'&&relationship!=='GENERAL')
+        return {...data,proprietaryPartNumber:''};
     return {...data,supplyType:'BIDDED',partyEntryMode:'none',vendorId:'',partyName:'',generalPartNumber:'',proprietaryPartNumber:''};
 }
 
