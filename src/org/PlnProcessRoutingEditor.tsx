@@ -1,18 +1,22 @@
 import {useEffect,useId,useMemo,useState,type ReactNode} from 'react';
 import {callBackend} from '../lib/backend';
 import {Field,SelectField} from '../components/ui';
+import {analyzeFlowCapacity,type CapacityUnit,type FlowAnalysis} from '../shared/mfgFlowCapacity';
+import PlnFlowOpportunities from './PlnFlowOpportunities';
 
 type Row={id:string;name:string;[key:string]:unknown};
 export type RoutingStep={
  code:string;name:string;resourceId:string;producesSkuId?:string;dependsOn?:string[];
  setupMinutes:number;runMinutesPerUnit:number;costCenterId?:string;bomId?:string;
  processClass?:string;stageType?:'PRODUCE'|'INSPECT'|'TRANSFER'|'OTHER';
- capacityBasis?:'PHYSICAL_CONTAINER'|'RESOURCE_RATE'|'BATCH_CYCLE'|'TIME_PER_UNIT';
- batchSize?:number;cycleMinutes?:number;
+ capacityBasis?:'PHYSICAL_CONTAINER'|'RESOURCE_RATE'|'BATCH_CYCLE'|'TIME_PER_UNIT'|'CONTINUOUS_FLOW';
+ batchSize?:number;cycleMinutes?:number;flowRatePerHour?:number;flowRateUom?:string;
+ flowInputFactor?:number;flowBufferAvailable?:number|null;
 };
 type MappedStage={code:string;producesSkuId?:string;bomId?:string;
  setupMinutes?:number;runMinutesPerUnit?:number;batchSize?:number;cycleMinutes?:number;
- capacityBasis?:RoutingStep['capacityBasis']};
+ capacityBasis?:RoutingStep['capacityBasis'];flowRatePerHour?:number;flowRateUom?:string;
+ flowInputFactor?:number;flowBufferAvailable?:number|null};
 type SkuMapping={skuId:string;stages:MappedStage[]};
 type RoutingRecord=Row&{skuId?:string;siteId?:string;processClassId?:string;alternativeCode?:string;
  effectiveFrom?:string;routingModelVersion?:number;operations?:RoutingStep[];
@@ -22,11 +26,12 @@ type Diagnostic={stageCode:string;field:string;message:string};
 type StagePreview={code:string;name:string;stageType:string;producesSkuId:string;costCenterId:string;
  resourceId:string;bomId:string;capacityBasis:string;dependsOn:string[];
  setupMinutes:number;runMinutesPerUnit:number;bomComponentCount:number;
- capacity:{quantity:number;unit:string;source:string;revision?:number}|null};
+ capacity:{quantity:number;unit:string;unitCode?:string;source:string;revision?:number}|null};
 type Review={ready:boolean;issues:Diagnostic[];stages:StagePreview[];
  bottlenecks:Array<{outputSkuId:string;limitingStageCode:string;physicalContainersPerHour:number;
  comparableStageCodes:string[]}>;comparisonNote:string;
- skuReviews?:Array<{skuId:string;ready:boolean;issues:Diagnostic[];stages:StagePreview[]}>};
+ flowAnalysis:FlowAnalysis;
+ skuReviews?:Array<{skuId:string;ready:boolean;issues:Diagnostic[];stages:StagePreview[];flowAnalysis:FlowAnalysis}>};
 const forms='w-full min-h-11 min-w-0 rounded-xl border border-line bg-panel px-3 py-2 text-sm text-ink';
 const fmt=(n:number)=>new Intl.NumberFormat(undefined,{maximumFractionDigits:2}).format(n);
 const str=(x:unknown)=>typeof x==='string'?x:'';
@@ -60,17 +65,20 @@ const capacityBases:Array<[RoutingStep['capacityBasis'],string]>=[
  ['RESOURCE_RATE','Manufacturing resource rate'],
  ['BATCH_CYCLE','One batch: quantity and time'],
  ['TIME_PER_UNIT','Run minutes per output unit'],
+ ['CONTINUOUS_FLOW','Continuous flow (quantity per hour)'],
 ];
 const freshStage=(code:string):RoutingStep=>({
  code,name:'',resourceId:'',producesSkuId:'',dependsOn:[],setupMinutes:0,runMinutesPerUnit:0,
  costCenterId:'',bomId:'',processClass:'GENERAL',stageType:'PRODUCE',
- capacityBasis:'PHYSICAL_CONTAINER',batchSize:0,cycleMinutes:0,
+ capacityBasis:'PHYSICAL_CONTAINER',batchSize:0,cycleMinutes:0,flowRatePerHour:0,
+ flowRateUom:'',flowInputFactor:1,flowBufferAvailable:null,
 });
 const stageList=(input:unknown):RoutingStep[]=>Array.isArray(input)?input as RoutingStep[]:[];
 /** Stage editor does not write to resources, BOMs or equipment; it only saves routing references. */
-export default function PlnProcessRoutingEditor({value,onChange,items,boms,resources,sites,processClasses}:{
+export default function PlnProcessRoutingEditor({value,onChange,items,boms,resources,sites,processClasses,measureUnits}:{
  value:RoutingRecord;onChange:(next:RoutingRecord)=>void;items:Row[];boms:Row[];resources:Row[];
- sites:Array<{id:string;name:string;code:string}>;processClasses:Array<{id:string;name:string;enabled?:boolean}>}){
+ sites:Array<{id:string;name:string;code:string}>;processClasses:Array<{id:string;name:string;enabled?:boolean}>;
+ measureUnits:CapacityUnit[]}){
  const [centers,setCenters]=useState<CostCenter[]>([]);
  const [loadError,setLoadError]=useState('');
  const [section,setSection]=useState<'setup'|'stages'|'skus'|'review'>('setup');
@@ -85,6 +93,22 @@ export default function PlnProcessRoutingEditor({value,onChange,items,boms,resou
  const legacy=value.routingModelVersion!==2;
  const ops=stageList(value.operations);
  const skuMappings=Array.isArray(value.skuMappings)?value.skuMappings:[];
+ const liveFlow=analyzeFlowCapacity(ops.map(stage=>{
+  const output=items.find(x=>x.id===stage.producesSkuId);
+  const resource=resources.find(x=>x.id===stage.resourceId);
+  const basis=stage.capacityBasis;
+  const rate=basis==='CONTINUOUS_FLOW'?num(stage.flowRatePerHour):
+   basis==='RESOURCE_RATE'?num(resource?.rate):
+   basis==='BATCH_CYCLE'&&num(stage.cycleMinutes)>0?
+    num(stage.batchSize)*60/num(stage.cycleMinutes):
+   basis==='TIME_PER_UNIT'&&num(stage.runMinutesPerUnit)>0?
+    60/num(stage.runMinutesPerUnit):0;
+  return {code:stage.code,name:stage.name,dependsOn:stage.dependsOn,ratePerHour:rate,
+   unitCode:basis==='CONTINUOUS_FLOW'?stage.flowRateUom:
+    basis==='RESOURCE_RATE'?str(resource?.rateUom):str(output?.uom),
+   inputFactor:stage.flowInputFactor||1,
+   bufferAvailable:stage.flowBufferAvailable??undefined};
+ }),measureUnits);
  const selected=ops.find(s=>s.code===openStep);
  const selectedOutput=items.find(x=>x.id===selected?.producesSkuId);
  const update=(field:string,input:unknown)=>{
@@ -356,11 +380,13 @@ export default function PlnProcessRoutingEditor({value,onChange,items,boms,resou
           'Use this if you know how many minutes it takes to make one item.':
           stage.capacityBasis==='RESOURCE_RATE'?
           'Use this when the selected machine already has an hourly rate saved in Manufacturing Resources.':
+          stage.capacityBasis==='CONTINUOUS_FLOW'?
+          'Use this for inline continuous output measured per hour. No batch size is needed.':
           'Use this for a finished product with a saved commissioned line speed, such as bottles per hour.'}
         </p>
         <details className='mt-2'>
          <summary className='cursor-pointer font-medium text-brand'>Help me choose a method</summary>
-         <p className='mt-2 text-muted'>Bottling line with a recorded speed? Use commissioned physical-container speed. Machine with a known hourly rate? Use manufacturing resource rate. Mixing one tank at a time? Use batch quantity and time. One item takes a known number of minutes? Use time per unit.</p>
+         <p className='mt-2 text-muted'>Use commissioned machine speed, continuous rate per hour, batch size and cycle, or minutes per unit depending on the process. Only compare equivalent material quantity units.</p>
         </details>
        </div>
        <div>
@@ -368,6 +394,15 @@ export default function PlnProcessRoutingEditor({value,onChange,items,boms,resou
          value={num(stage.setupMinutes)} onChange={v=>updateStep(stage.code,{setupMinutes:Number(v)})}/>
         <p className='mt-1 text-xs text-muted'>Minutes to get ready before production, e.g. cleaning, adjusting settings or changing tools. Enter 0 if none.</p>
        </div>
+       {stage.capacityBasis==='CONTINUOUS_FLOW'&&<>
+        <TextField label='Continuous output per hour' type='number' min='0'
+         value={stage.flowRatePerHour??0}
+         onChange={v=>updateStep(stage.code,{flowRatePerHour:Number(v)})}/>
+        <Choice label='Output measurement unit' value={stage.flowRateUom||''}
+         options={[['','Choose MEMS unit'],...measureUnits.map(x=>[x.code,x.code] as [string,string])]}
+         onChange={flowRateUom=>updateStep(stage.code,{flowRateUom})}/>
+        <p className='sm:col-span-2 text-xs text-muted'>This is a configured sustainable rate, not a live measurement. No fictitious batch size is required.</p>
+       </>}
        {stage.capacityBasis==='TIME_PER_UNIT'&&<div>
         <TextField label='Time to make one unit (minutes)' type='number' min='0'
          value={num(stage.runMinutesPerUnit)}
@@ -392,6 +427,20 @@ export default function PlnProcessRoutingEditor({value,onChange,items,boms,resou
          <p>First batch with one preparation: <strong>{fmt(num(stage.setupMinutes)+num(stage.cycleMinutes))} minutes</strong> ({fmt(num(stage.setupMinutes))} preparation + {fmt(num(stage.cycleMinutes))} production).</p>
          <p className='text-muted'>The output unit comes from the selected stage SKU. This preview does not change calculations: the app tracks preparation separately from the hourly production rate. Repeat setup only when it really happens.</p>
         </div>}
+       </>}
+       {stage.capacityBasis!=='PHYSICAL_CONTAINER'&&<>
+        <div>
+         <TextField label='Upstream input per output unit (yield ratio)' type='number' min='0'
+          value={stage.flowInputFactor??1}
+          onChange={v=>updateStep(stage.code,{flowInputFactor:Number(v)})}/>
+         <p className='mt-1 text-xs text-muted'>1 means equal upstream and downstream quantities. Use the actual recipe ratio if different.</p>
+        </div>
+        <div>
+         <TextField label='Usable buffer after this stage (optional)' type='number' min='0'
+          value={stage.flowBufferAvailable??''}
+          onChange={v=>updateStep(stage.code,{flowBufferAvailable:v===''?null:Number(v)})}/>
+         <p className='mt-1 text-xs text-muted'>Usable material above minimum level in this stage's flow unit. Blank = unknown; zero = no buffer. Not a live tank level.</p>
+        </div>
        </>}
       </div>
       <div className='rounded-lg bg-page p-3 text-xs'>
@@ -443,6 +492,8 @@ export default function PlnProcessRoutingEditor({value,onChange,items,boms,resou
     <Action onClick={()=>setSection('skus')} primary>Next: map SKUs</Action>
    </div>
   </div>}
+  {!legacy&&section==='stages'&&<PlnFlowOpportunities analysis={liveFlow}
+   heading='Live capacity opportunities · draft configuration' showUnresolved={false}/>}
   {!legacy&&section==='skus'&&<div className='space-y-3'>
    <div className='rounded-xl border border-line bg-page p-3'>
     <h3 className='text-sm font-semibold'>Which SKUs follow this manufacturing route?</h3>
@@ -533,6 +584,11 @@ export default function PlnProcessRoutingEditor({value,onChange,items,boms,resou
       <strong>{issue.stageCode} · {issue.field}: </strong>{issue.message}
      </p>)}
     </div>}
+    <PlnFlowOpportunities analysis={review.flowAnalysis}
+     heading='Capacity opportunities · verified source rates'/>
+    {review.skuReviews&&review.skuReviews.length>1&&review.skuReviews.map(x=>
+     <PlnFlowOpportunities key={x.skuId} analysis={x.flowAnalysis}
+      heading={'SKU analysis · '+(items.find(item=>item.id===x.skuId)?.name||x.skuId)} showUnresolved={false}/>)}
     <h4 className='font-semibold'>Stage throughput — read-only sources</h4>
     <div className='grid gap-2 sm:grid-cols-2'>
      {review.stages.map(s=><div key={s.code} className='min-w-0 rounded-lg border border-line p-3'>
