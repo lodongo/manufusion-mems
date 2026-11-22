@@ -139,9 +139,6 @@ export default function PlnProcessRoutingEditor({value,onChange,items,boms,resou
  const availableOutputs=useMemo(()=>items.filter(x=>
   ['FINISHED','INTERMEDIATE'].includes(str(x.category))),[items]);
  // A process class groups final SKUs, not component and intermediate stage outputs.
- const routeSkuChoices=availableOutputs.filter(x=>
-  str(x.processClassId)===str(value.processClassId)||x.id===value.skuId||
-  skuMappings.some(m=>m.skuId===x.id));
  const classOptions=[...processClasses.filter(x=>x.enabled!==false),
   ...processClasses.filter(x=>x.id===value.processClassId&&x.enabled===false)];
 
@@ -208,9 +205,9 @@ export default function PlnProcessRoutingEditor({value,onChange,items,boms,resou
  };
  return <div className='min-w-0 space-y-4'>
   {legacy&&<div className='space-y-2 rounded-xl border border-amber-500/50 p-3 text-sm'>
-   <p className='font-semibold'>Legacy routing structure</p>
-   <p className='text-xs text-muted'>Existing route data remains unchanged. Adopt the new stage-level cost centre, BOM and capacity model explicitly.</p>
-   <Action onClick={upgrade}>Upgrade draft routing structure</Action>
+   <p className='font-semibold'>Existing routing stage configuration</p>
+   <p className='text-xs text-muted'>Existing route data remains intact. Complete the stage-level resource, BOM and capacity configuration in a revised route.</p>
+   <Action onClick={upgrade}>Open stage-based editor</Action>
   </div>}
   {!legacy&&<div className='grid grid-cols-4 gap-1 rounded-xl border border-line bg-page p-1' role='group' aria-label='Routing configuration sections'>
    {([
@@ -226,8 +223,7 @@ export default function PlnProcessRoutingEditor({value,onChange,items,boms,resou
    <div className='grid gap-3 sm:grid-cols-2'>
     <Choice label='Production site' value={value.siteId||''}
      options={[['','Select site'],...sites.map(s=>[s.id,s.name+' · '+s.code] as [string,string])]}
-     onChange={siteId=>{setReview(null);onChange({...value,siteId,
-      operations:ops.map(s=>({...s,costCenterId:'',resourceId:'',bomId:''}))});}}/>
+     onChange={siteId=>{setReview(null);onChange({...value,siteId});}}/>
     <Choice label='Manufacturing process classification' value={value.processClassId||''}
      options={[['','No classification assigned'],...classOptions.map(x=>[x.id,x.name] as [string,string])]}
      onChange={processClassId=>{
@@ -237,15 +233,12 @@ export default function PlnProcessRoutingEditor({value,onChange,items,boms,resou
       setSkuToAdd('');setReview(null);
      }}/>
     <p className='sm:col-span-2 text-xs text-muted'>Select the process family configured under Product Configuration. SKUs in the same family can share this route even when their recipes differ. Classifications are organization-managed, not limited to any particular industry.</p>
-    {value.skuId&&str(items.find(x=>x.id===value.skuId)?.processClassId)!==str(value.processClassId)&&
-     <p role='alert' className='sm:col-span-2 text-xs text-amber-700'>This primary SKU belongs to a different process classification. Choose a matching SKU or update its classification in Materials & Products. Its saved records have not been changed.</p>}
-    <Choice label='Primary manufactured SKU' value={value.skuId||''}
-     options={[['','Select an SKU in this process classification'],
-      ...routeSkuChoices.map(x=>[x.id,x.name] as [string,string])]}
-     onChange={skuId=>{if(skuMappings.some(x=>x.skuId===skuId))return;
-      const chosen=items.find(x=>x.id===skuId);
-      onChange({...value,skuId,processClassId:str(chosen?.processClassId)||str(value.processClassId),
-       name:str(value.name)||((chosen?.name||'New SKU')+' · Routing'),routingModelVersion:2});}}/>
+    {value.skuId&&<div className='sm:col-span-2 rounded-xl border border-line p-3 text-xs'>
+     <p><strong>Already included SKU:</strong> {items.find(x=>x.id===value.skuId)?.name||value.skuId}</p>
+     <p className='mt-1 text-muted'>This saved route includes the displayed SKU. Other SKUs are managed in the SKU allocation section.</p>
+     {str(items.find(x=>x.id===value.skuId)?.processClassId)!==str(value.processClassId)&&
+      <p role='alert' className='mt-1 text-amber-700'>The existing SKU and routing have different manufacturing process classifications. Reclassify deliberately; no SKU or BOM is changed automatically.</p>}
+    </div>}
     <TextField label='Routing name' value={value.name} onChange={name=>update('name',name)}/>
     <div>
      <TextField label='Route alternative code' value={str(value.alternativeCode)}
@@ -441,7 +434,9 @@ export default function PlnProcessRoutingEditor({value,onChange,items,boms,resou
    <div className='rounded-xl border border-line bg-page p-3'>
     <h3 className='text-sm font-semibold'>Which SKUs follow this manufacturing route?</h3>
     <p className='mt-1 text-xs text-muted'>Same site, same sequence and resources? Use this route for more SKUs, even when the recipes are different. Choose a separate alternative route if the manufacturing process changes.</p>
-    <p className='mt-2 text-sm'><strong>Primary SKU:</strong> {items.find(x=>x.id===value.skuId)?.name||'Select a SKU in Setup'}</p>
+    <p className='mt-2 text-sm'><strong>Process classification:</strong> {classOptions.find(x=>x.id===value.processClassId)?.name||'Not selected'}</p>
+    {value.skuId&&<p className='mt-1 text-sm'><strong>Already included SKU:</strong> {items.find(x=>x.id===value.skuId)?.name||value.skuId}</p>}
+    <p className='mt-1 text-xs text-muted'>Assign the SKUs and their specific stage BOMs below. Existing site and cost-centre allocations are not changed.</p>
    </div>
    <div className='flex flex-col gap-2 sm:flex-row sm:items-end'>
     <div className='min-w-0 flex-1'>
@@ -450,7 +445,7 @@ export default function PlnProcessRoutingEditor({value,onChange,items,boms,resou
        x.id!==value.skuId&&str(x.processClassId)===str(value.processClassId)&&!skuMappings.some(m=>m.skuId===x.id)).map(x=>[x.id,x.name] as [string,string])]}
       onChange={setSkuToAdd}/>
     </div>
-    <Action primary disabled={!skuToAdd||!value.skuId||skuMappings.length>=100||!ops.length} onClick={addSkuMapping}>Map SKU</Action>
+    <Action primary disabled={!skuToAdd||!value.processClassId||skuMappings.length>=100||!ops.length} onClick={addSkuMapping}>Map SKU</Action>
    </div>
    {skuMappings.map(mapping=><section key={mapping.skuId} className='space-y-3 rounded-xl border border-line bg-panel p-3'>
     <div className='flex flex-wrap items-start justify-between gap-2'>
@@ -492,7 +487,7 @@ export default function PlnProcessRoutingEditor({value,onChange,items,boms,resou
      </div>;
     })}
    </section>)}
-   {!skuMappings.length&&<p className='text-xs text-muted'>Only the primary SKU is assigned. You can add more products without duplicating the routing stages.</p>}
+   {!skuMappings.length&&<p className='text-xs text-muted'>{value.skuId?'The previously included SKU is assigned. Map others if needed.':'No SKUs mapped yet. Map at least one product and its stage BOMs before submitting this route for approval.'}</p>}
    <div className='flex flex-wrap justify-between gap-2'>
     <Action onClick={()=>setSection('stages')}>Back to stages</Action>
     <Action primary onClick={()=>void check()}>Review all mapped SKUs</Action>
