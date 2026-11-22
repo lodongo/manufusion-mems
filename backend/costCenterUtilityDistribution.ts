@@ -95,6 +95,24 @@ async function capability(org:string,ccId:string,item:Obj,def:Obj,
  const sources=sourceList(item);
  const capacity=sources.length&&sources.every(s=>s.allocatedCapacity!==null)?
   sources.reduce((n,s)=>n+(s.allocatedCapacity||0),0):null;
+ const centreNode=await getDoc(structure(org,ccId));
+ const siteId=centreNode?await location(org,centreNode):'';
+ const determinant=reviewUtilityDistribution(def as UtilityDefinition,{},null,[]).determinant;
+ const sourceIssues=(await Promise.all(sources.map(async source=>{
+  const asset=source.assetTag&&ASSET.test(source.assetTag)?
+   await getDoc(assetsRoot(org)+'/'+source.assetTag):null;
+  if(!asset)return 'Supplying asset '+source.assetTag+' was not found. Add or reassign it.';
+  if(str(asset.data.siteId)!==siteId)return 'Source asset '+source.assetTag+' is no longer in this production site.';
+  if(str(asset.data.status)!=='active')return 'Source asset '+source.assetTag+
+   ' must be approved and active before its utility can supply production.';
+  const ratings=isObj(asset.data.utilitySupplyRatings)?asset.data.utilitySupplyRatings:{};
+  const rated=ratings[str(item.code)];
+  if(determinant&&(!isObj(rated)||str(rated.key)!==determinant.key||
+   str(rated.unit)!==determinant.unit||!positive(rated.capacity)||
+   (source.allocatedCapacity||0)>Number(rated.capacity)+1e-8))
+   return 'The allocated capacity of source asset '+source.assetTag+' exceeds its current valid utility rating.';
+  return '';
+ }))).filter(Boolean);
  const equipment=await consumers(org,ccId,str(item.code),replace);
  const review=reviewUtilityDistribution(def as UtilityDefinition,isObj(item.values)?item.values:{},
   capacity,equipment);
@@ -106,11 +124,11 @@ async function capability(org:string,ccId:string,item:Obj,def:Obj,
    supplyValues[str(attr.key)]===null||supplyValues[str(attr.key)]==='');
  const ready=sources.length>0&&sources.every(s=>s.assetTag&&
   (!review.determinant||s.allocatedCapacity!==null))&&
-  !missingRequired.length&&!review.unknown&&
+  !sourceIssues.length&&!missingRequired.length&&!review.unknown&&
   review.status!=='overload'&&review.status!=='incompatible'&&
   (!review.determinant||capacity!==null);
  return {code:str(item.code),label:str(item.label)||str(def.label),values:isObj(item.values)?item.values:{},
-  sources,capacity,ready,review};
+  sources,sourceIssues,capacity,ready,review};
 }
 export async function getCostCenterUtilityCapability(org:string,ccId:string,code:string,
  replace?:{workCenterId:string;values:Record<string,unknown>}){
