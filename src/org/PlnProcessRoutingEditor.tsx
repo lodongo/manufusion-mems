@@ -416,6 +416,67 @@ export default function PlnProcessRoutingEditor({value,onChange,items,boms,resou
     <Action onClick={()=>setSection('skus')} primary>Next: map SKUs</Action>
    </div>
   </div>}
+  {!legacy&&section==='skus'&&<div className='space-y-3'>
+   <div className='rounded-xl border border-line bg-page p-3'>
+    <h3 className='text-sm font-semibold'>Which SKUs follow this manufacturing route?</h3>
+    <p className='mt-1 text-xs text-muted'>Same site, same sequence and resources? Use this route for more SKUs, even when the recipes are different. Choose a separate alternative route if the manufacturing process changes.</p>
+    <p className='mt-2 text-sm'><strong>Primary SKU:</strong> {items.find(x=>x.id===value.skuId)?.name||'Select a SKU in Setup'}</p>
+   </div>
+   <div className='flex flex-col gap-2 sm:flex-row sm:items-end'>
+    <div className='min-w-0 flex-1'>
+     <Choice label='Add another SKU to the shared route' value={skuToAdd}
+      options={[['','Choose manufactured SKU'],...availableOutputs.filter(x=>
+       x.id!==value.skuId&&!skuMappings.some(m=>m.skuId===x.id)).map(x=>[x.id,x.name] as [string,string])]}
+      onChange={setSkuToAdd}/>
+    </div>
+    <Action primary disabled={!skuToAdd||!value.skuId||skuMappings.length>=100||!ops.length} onClick={addSkuMapping}>Map SKU</Action>
+   </div>
+   {skuMappings.map(mapping=><section key={mapping.skuId} className='space-y-3 rounded-xl border border-line bg-panel p-3'>
+    <div className='flex flex-wrap items-start justify-between gap-2'>
+     <div>
+      <h4 className='text-sm font-semibold'>{items.find(x=>x.id===mapping.skuId)?.name||mapping.skuId}</h4>
+      <p className='text-xs text-muted'>Same route; different SKU-specific recipe and output settings</p>
+     </div>
+     <Action onClick={()=>update('skuMappings',skuMappings.filter(x=>x.skuId!==mapping.skuId))}>Remove SKU</Action>
+    </div>
+    {ops.filter(stage=>(stage.stageType||'PRODUCE')==='PRODUCE').map(stage=>{
+     const override=mapping.stages.find(x=>x.code===stage.code);
+     const outputSkuId=override?.producesSkuId??stage.producesSkuId??'';
+     const selectedBom=override?.bomId??stage.bomId??'';
+     const choices=boms.filter(b=>str(b.parentSkuId)===outputSkuId&&(!str(b.siteId)||str(b.siteId)===value.siteId));
+     return <div key={stage.code} className='space-y-3 rounded-lg border border-line p-3'>
+      <p className='text-xs font-semibold'>{stage.name||stage.code}</p>
+      <Choice label='Output made at this stage' value={outputSkuId}
+       options={[['','Choose stage output'],...availableOutputs.map(x=>[x.id,x.name] as [string,string])]}
+       onChange={producesSkuId=>updateSkuStage(mapping.skuId,stage.code,{producesSkuId,bomId:''})}/>
+      <Choice label='Recipe / BOM used by this SKU' value={selectedBom}
+       options={[['','Select BOM for this output'],...choices.map(x=>[x.id,x.name+' · '+(str(x.status)||'draft')] as [string,string])]}
+       onChange={bomId=>updateSkuStage(mapping.skuId,stage.code,{bomId})}/>
+      <details className='text-xs'>
+       <summary className='cursor-pointer font-semibold text-brand'>Different batch size or processing time? (optional)</summary>
+       <div className='mt-2 grid gap-2 sm:grid-cols-2'>
+        {([
+         ['setupMinutes','Preparation minutes'],
+         ['batchSize','Batch quantity'],
+         ['cycleMinutes','Batch cycle minutes'],
+         ['runMinutesPerUnit','Minutes per output unit'],
+        ] as const).map(([field,label])=><div key={field}>
+         <TextField label={label} type='number' min='0'
+          value={override?.[field]??(stage[field]||0)}
+          onChange={v=>updateSkuStage(mapping.skuId,stage.code,{[field]:Number(v)})}/>
+        </div>)}
+       </div>
+       <p className='mt-1 text-muted'>Keep these unchanged to inherit the shared stage values. Commissioned SKU-specific speeds come automatically from the common manufacturing resource master.</p>
+      </details>
+     </div>;
+    })}
+   </section>)}
+   {!skuMappings.length&&<p className='text-xs text-muted'>Only the primary SKU is assigned. You can add more products without duplicating the routing stages.</p>}
+   <div className='flex flex-wrap justify-between gap-2'>
+    <Action onClick={()=>setSection('stages')}>Back to stages</Action>
+    <Action primary onClick={()=>void check()}>Review all mapped SKUs</Action>
+   </div>
+  </div>}
   {!legacy&&section==='review'&&<div className='space-y-3'>
    <div className='flex flex-wrap items-center justify-between gap-2'>
     <h3 className='text-sm font-semibold'>Routing readiness & capacity review</h3>
@@ -427,6 +488,13 @@ export default function PlnProcessRoutingEditor({value,onChange,items,boms,resou
     Validate the draft to check stage dependencies, approved BOMs, configured cost centres and rate compatibility.
    </p>}
    {review&&<>
+    {review.skuReviews&&review.skuReviews.length>1&&<div className='space-y-2 rounded-lg border border-line p-3'>
+     <h4 className='text-sm font-semibold'>Mapped SKU readiness</h4>
+     {review.skuReviews.map(r=><p key={r.skuId} className='text-xs'>
+      <strong>{items.find(x=>x.id===r.skuId)?.name||r.skuId}</strong>
+      {' · '+(r.ready?'Ready':r.issues.length+' issue(s) to correct')}
+     </p>)}
+    </div>}
     <p role='status' className='rounded-lg border border-line p-3 text-sm font-semibold'>
      {review.ready?'Routing is ready for approval submission.':
       review.issues.length+' readiness issue(s) require correction before submission.'}
