@@ -134,8 +134,10 @@ export function normalizeMaster(kind:MasterKind, raw:unknown): Obj {
             throw new HttpError(400,'A metered utility input cannot simultaneously be an Inventory issue. Select one source.');
         if(category==='INTERMEDIATE'&&stockPolicy==='STOCKED'&&!inventoryMaterialId)
             throw new HttpError(400,'A stock-managed intermediate needs an Inventory material reference.');
+        const processClassId=str(raw.processClassId).trim();
+        if(processClassId)VALID_ID(processClassId,'Manufacturing process classification');
         return {...base,category,sourceMode,stockPolicy,utilityCode,utilityWorkCenterId,
-            family:str(raw.family).slice(0,100),uom:UOM(raw.uom),inventoryMaterialId,
+            processClassId,family:str(raw.family).slice(0,100),uom:UOM(raw.uom),inventoryMaterialId,
             packQty:POSITIVE(raw.packQty??1,'Pack quantity'),skuComponents:isObj(raw.skuComponents)?raw.skuComponents:{},
             skuConversion:isObj(raw.skuConversion)?raw.skuConversion:{},skuNamingSnapshot:isObj(raw.skuNamingSnapshot)?raw.skuNamingSnapshot:{}};
     }
@@ -178,6 +180,8 @@ export function normalizeMaster(kind:MasterKind, raw:unknown): Obj {
         return {...base,classificationCode,productVariantId,alternativeCode,routingId,parentSkuId,outputQty:POSITIVE(raw.outputQty??1,'Output basis'),outputUom:UOM(raw.outputUom),components:lines as unknown as Plain,effectiveFrom:effectiveDate(raw.effectiveFrom),versionNote:str(raw.versionNote).slice(0,300)};
     }
     const skuId=VALID_ID(raw.skuId,'Primary routed SKU');
+    const processClassId=str(raw.processClassId).trim();
+    if(processClassId)VALID_ID(processClassId,'Manufacturing process classification');
     const routingModelVersion=raw.routingModelVersion===2?2:1;
     const advanced=routingModelVersion===2;
     const operations=ARR(raw.operations);
@@ -254,7 +258,7 @@ export function normalizeMaster(kind:MasterKind, raw:unknown): Obj {
         });
         return {skuId:mappedSkuId,stages};
     });
-    return {...base,skuId,skuMappings:skuMappings as unknown as Plain,operations:steps as unknown as Plain,
+    return {...base,skuId,processClassId,skuMappings:skuMappings as unknown as Plain,operations:steps as unknown as Plain,
         routingModelVersion,alternativeCode:advanced?bomAlternative(raw.alternativeCode):'STANDARD',
         effectiveFrom:effectiveDate(raw.effectiveFrom)};
 }
