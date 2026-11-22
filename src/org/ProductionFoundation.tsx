@@ -1017,11 +1017,7 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
                 body.name=(group?.name||'Manufacturing')+' · Process route';
             }
             const result=await callBackend<{record:Row;generatedCode?:string}>('/api/org/pln-mfg/foundation/save',{kind:recordKind(active),record:body,expectedRevision:body.revision??0});
-            const incompleteUtility=active==='boms'&&asComponents(body.components).some(c=>
-                c.source==='PROCESS_SUPPLY'&&!!c.supplyCostCenterId&&!!c.supplyUtilityCode&&
-                costSupplies.some(s=>s.costCenterId===c.supplyCostCenterId&&s.code===c.supplyUtilityCode&&!s.ready));
-            await load();setDraft(null);setNotice('Saved '+(result.generatedCode||result.record.id)+' · Revision '+result.record.revision+'. The code is maintained by MEMS.'+
-                (incompleteUtility?' Advisory: completing supplying assets, rated capacity and equipment demand is highly recommended but optional.':''));
+            await load();setDraft(null);setNotice('Saved '+(result.generatedCode||result.record.id)+' · Revision '+result.record.revision+'. The code is maintained by MEMS.');
         }catch(e){setError(e instanceof Error?e.message:'Could not save.');}
         finally{setBusy(false);}
     };
