@@ -13,7 +13,7 @@ import {stockMasterItems,warehouseRestrictionMaster} from './stockMasters';
 import {SEGREGATED_RESTRICTIONS,binningBlock,effectiveRestriction,locationBlock,restrictionCodesOf} from './restrictionRules';
 import {materialPhotos,vendorsForMaterial} from './materialMedia';
 import {unitPricePerStockUnit,convertStockCurrency,inventoryNumericField} from './inventoryValuation';
-import {summarizeInventoryDashboard} from './inventoryDashboardSummary';
+import {summarizeInventoryDashboard, type DashboardStockItem} from './inventoryDashboardSummary';
 // Numeric replenishment strategy parameters and their allowed ranges (material and warehouse, Inventory section).
 const REPLENISHMENT_LIMITS:Record<string,{min:number;max:number;integer?:boolean;message:string}>={
     annualDemand:{min:0,max:1e12,message:'Annual demand must be 0 or more.'},
@@ -1436,7 +1436,7 @@ async function inventoryOnHandSnapshot(ctx: OrgContext) {
         // Firestore stores Unit Price and stock levels as numbers. core.str()
         // returns '' for a number, causing every valid price to look missing.
         const level=inventoryNumericField;
-        const items:Array<Record<string,unknown>>=[];
+        const items:Array<DashboardStockItem & Record<string,unknown>>=[];
         const unique=new Set<string>();
         for(const m of materials){
             if(!['active','approved'].includes(str(m.data.status))||!str(m.data.materialNumber))continue;
