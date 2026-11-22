@@ -23,7 +23,7 @@ export type SkuParameter={id:string;kind:SkuParameterKind;name:string;
     uom?:string;quantity?:number;baseUom?:string;quantityPerUnit?:number;
     referenceProductionFormId?:string;normalizationOperator?:'DIVIDE'|'MULTIPLY';
     categoryCode?:string;unitCode?:string;unitCount?:number;
-    productCode?:string;metadataCode?:string;subcategoryCode?:string;
+    productCode?:string;processCode?:string;metadataCode?:string;subcategoryCode?:string;
     containerAttributes?:Record<string,string>;ratingCountUnitCode?:string;ratingOutputCode?:string;
     packagingTypeCode?:string;level?:string;containedUnit?:string;containedPackagingId?:string;
     containersPerLayer?:number;numberOfLayers?:number;
@@ -334,9 +334,12 @@ export function normalizeSkuParameter(kind:SkuParameterKind,raw:Record<string,un
     const description=str(raw.description).trim().slice(0,300);
     const base={kind,name,description,enabled:raw.enabled!==false};
     if(kind==='processClasses'){
-        // No industry list or flavor taxonomy is built into the platform.
-        // Organizations define reusable manufacturing-process families themselves.
-        return base;
+        // Business-readable, organization-defined process code. Separate from
+        // immutable MEMS PRC_######### ID, product variant, recipe and route ID.
+        const processCode=str(raw.processCode).trim().toUpperCase();
+        if(!/^[A-Z0-9][A-Z0-9_.-]{1,29}$/.test(processCode))
+            throw new HttpError(400,'Enter a unique process classification code (2–30 letters, digits, dots, hyphens or underscores).');
+        return {...base,processCode};
     }
     if(kind==='productNames'){
         const productCode=str(raw.productCode).trim().toUpperCase();
@@ -437,10 +440,11 @@ export function composeConfiguredSkuName(values:SkuComponents,params:SkuParamete
  * Codes prefer meaningful master codes; generated parameter IDs remain an
  * explicit fallback for records without a business code.
  */
-export function skuNamingValues(values:SkuComponents,params:SkuParameter[],converted?:SkuConversion):SkuNameValues {
+export function skuNamingValues(values:SkuComponents,params:SkuParameter[],converted?:SkuConversion,processClassId?:string):SkuNameValues {
     const map=new Map(params.map(p=>[p.id,p]));
     const pick=(id:string|undefined)=>id?map.get(id):undefined;
     const product=pick(values.productNameId),form=pick(values.productionFormId);
+    const process=pick(processClassId);
     const container=pick(values.containerId),size=pick(values.containerSizeId);
     const capacityUnit=PROCUREMENT_UNITS.find(u=>u.code===values.containerCapacityUom);
     const capacityToken=values.containerCapacityQuantity!==undefined
@@ -455,6 +459,7 @@ export function skuNamingValues(values:SkuComponents,params:SkuParameter[],conve
             PROCUREMENT_UNITS.find(u=>u.code===x.uom)?.symbol||x.uom):undefined}:undefined;
     return {
         productName:token(product,product?.productCode),
+        manufacturingProcess:process?{name:process.name,code:process.processCode||''}:undefined,
         productionForm:token(form),
         primaryContainer:token(container,container?.metadataCode),
         containerSize:capacityToken||token(size),
@@ -475,8 +480,8 @@ export function skuNamingValues(values:SkuComponents,params:SkuParameter[],conve
     };
 }
 export function composeSkuNameWithSequence(values:SkuComponents,params:SkuParameter[],
-    sequence:SkuNamingSequence,converted?:SkuConversion):string{
-    const result=composeSkuNameFromSequence(sequence,skuNamingValues(values,params,converted));
+    sequence:SkuNamingSequence,converted?:SkuConversion,processClassId?:string):string{
+    const result=composeSkuNameFromSequence(sequence,skuNamingValues(values,params,converted,processClassId));
     if(!result.trim())throw new HttpError(400,'The SKU naming sequence produced an empty name.');
     return result;
 }
