@@ -931,9 +931,12 @@ export const warehouseRoutes = {
                     .filter(x=>str(x.data.warehouseId)===node.id&&str(x.data.clusterCode)===code&&
                         !['deleted','cancelled'].includes(str(x.data.status)));
                 for(const m of assigned){
-                    const subtype=requestedSubcategory?.code||existing.materialSubcategoryCode||
-                        existing.subcategories[0]?.code||'';
-                    if(str(m.data.subcategoryCode)!==subtype)
+                    const allowedSubcategories=requestedSubcategory
+                        ?[requestedSubcategory.code]
+                        :existing.subcategories.length
+                            ?existing.subcategories.map(x=>x.code)
+                            :[existing.materialSubcategoryCode];
+                    if(!allowedSubcategories.includes(str(m.data.subcategoryCode)))
                         throw new HttpError(409,'Material '+str(m.data.name)+' is assigned to this cluster with a different subcategory. Reassign it first.');
                     const current=restrictionCodesOf(m.data.warehouseRestrictionCodes,m.data.warehouseRestriction);
                     if(!['draft','rejected'].includes(str(m.data.status))&&
