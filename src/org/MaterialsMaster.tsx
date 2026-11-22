@@ -13,11 +13,12 @@ import { materialMasterHierarchy } from './materialMasterHierarchy';
 import { navigate } from '../lib/route';
 import MaterialMasterDashboard from './MaterialMasterDashboard';
 
-/** Plain explanation of the three supply relationships (MRO). */
-const SUPPLY_TYPES: Array<{ code: 'OEM' | 'OCM' | 'BIDDED'; title: string; text: string; part: string }> = [
+/** Supply relationships, including a selection-only confidential proprietary route. */
+const SUPPLY_TYPES: Array<{ code: 'OEM' | 'OCM' | 'BIDDED' | 'PROPRIETARY_SUPPLIER'; title: string; text: string; part: string }> = [
     { code: 'OEM', title: 'OEM — machine maker', text: 'The company that built the machine (e.g. Krones, Tetra Pak, Atlas Copco). Use for parts designed only for that machine: impellers, castings, special boards. Usually the most expensive and the only source.', part: 'OEM part number from the machine parts list or manual' },
     { code: 'OCM', title: 'OCM — component maker', text: 'The company that made the component inside the machine (e.g. SKF bearing in a pump, Siemens motor on a conveyor). Same part, often much cheaper and easier to get than through the OEM.', part: 'Component maker’s part number (printed on the part)' },
     { code: 'BIDDED', title: 'Bidded', text: 'Competitive bidding is required. No supplier is nominated or recommended at material creation; Procurement selects the winning supplier later.', part: '' },
+    { code: 'PROPRIETARY_SUPPLIER', title: 'Proprietary Supplier', text: 'Material supplied through a proprietary source. Select this relationship without disclosing or configuring supplier details.', part: '' },
 ];
 
 type SavedMaterial = {requestId?:string;masterDataId?:string;warehouseRestrictionCodes?:string[];warehouseRestriction?:string;clusterCode?:string; canApprove?:boolean;canEdit?:boolean;canDelete?:boolean;canSubmit?:boolean;workflowStage?:string;workflowCode?:string;createdBy?:string;submittedBy?:string;warehouseId?:string;approvalLevel?:number;uom?:string;oemPartNumber?:string;ocmPartNumber?:string;generalPartNumber?:string; id: string; name: string; shortText: string; categoryCode: string; subcategoryCode: string; familyCode: string; materialCode: string; createdAt: string; status?:string; attributes?:Record<string,string>; assemblyIds?:string[]; supplyType?:string;materialNumber?:string;pushedAt?:string;warehouseIds?:string[] };
@@ -41,7 +42,7 @@ function shownValue(a: AttrDef, raw: string | undefined, short = false): string 
     if (a.options.length) return label(v);
     return v + (a.unit ? ' ' + a.unit : '');
 }
-const SUPPLY_WORD: Record<string, string> = { OEM: 'the machine maker (OEM)', OCM: 'the component maker (OCM)', GENERAL: 'competitive bidding (supplier selected later)', BIDDED: 'competitive bidding (supplier selected later)' };
+const SUPPLY_WORD: Record<string, string> = { OEM: 'the machine maker (OEM)', OCM: 'the component maker (OCM)', GENERAL: 'competitive bidding (supplier selected later)', BIDDED: 'competitive bidding (supplier selected later)', PROPRIETARY_SUPPLIER: 'a proprietary supplier' };
 
 export default function MaterialsMaster() {
     const { data: tree, loading: treeLoading, error: treeError, reload: reloadMaterialMaster } =
@@ -131,7 +132,7 @@ export default function MaterialsMaster() {
     const {categories,subcategories,families,materials}=hierarchy;
     const supplyType=registration.supplyType==='GENERAL'?'BIDDED':registration.supplyType??'BIDDED';
     const selectedVendor=options?.vendors?.find(v=>v.id===registration.vendorId)?.name??'';
-    const partyName=supplyType==='BIDDED'?'':(registration.partyEntryMode??'registered')==='manual'?registration.partyName??'':selectedVendor;
+    const partyName=['BIDDED','PROPRIETARY_SUPPLIER'].includes(supplyType)?'':(registration.partyEntryMode??'registered')==='manual'?registration.partyName??'':selectedVendor;
     const partNumber=supplyType==='OEM'?registration.oemPartNumber??'':supplyType==='OCM'?registration.ocmPartNumber??'':'';
     const shortText=[name.trim(),...((detail?.attributes??[]).filter(a=>a.specific).map(a=>shownValue(a,values[a.code],true)).filter(Boolean)),...(['OEM','OCM'].includes(supplyType)?[partyName.trim(),partNumber.trim()]:[])].filter(Boolean).join('; ').slice(0,120);
     useEffect(() => {
@@ -189,9 +190,10 @@ export default function MaterialsMaster() {
         ...attributeIssues(detail?.attributes??[],values).map(x=>x.a.name+': '+x.msg),
     ].filter(Boolean);
     const supply=registration.supplyType==='GENERAL'?'BIDDED':registration.supplyType??'BIDDED';
-    const mode=supply==='BIDDED'?'none':registration.partyEntryMode??'registered';
+    const supplierless=['BIDDED','PROPRIETARY_SUPPLIER'].includes(supply);
+    const mode=supplierless?'none':registration.partyEntryMode??'registered';
     const partKey=supply==='OEM'?'oemPartNumber':supply==='OCM'?'ocmPartNumber':'generalPartNumber';
-    const stage2Issues=[!uomCategory?'Select a unit category.':'',!(options?.uoms??[]).some(x=>x.code===registration.uom&&(x.category||'Other')===uomCategory)?'Select a valid unit of measure.':'',supply!=='BIDDED'&&!registration[partKey]?.trim()?'Enter the '+supply+' part number.':'',supply!=='BIDDED'&&mode==='manual'&&((registration.partyName??'').trim().length<2)?'Enter a name (at least 2 characters).':'',supply!=='BIDDED'&&mode==='registered'&&!registration.vendorId?'Select a registered vendor or enter a name manually.':'',supply==='OEM'&&!(options?.costCenters??[]).some(x=>x.id===registration.costCenterId)?'Select an accessible cost center.':'',supply==='OEM'&&!(options?.assets??[]).some(x=>x.id===registration.assetId&&x.parentId===registration.costCenterId)?'Select an asset within that cost center.':'',supply==='OEM'&&(registration.assemblyIds??'').split(',').filter(Boolean).some(id=>!(options?.scopedAssemblies??[]).some(x=>x.id===id&&x.parentId===registration.assetId))?'All selected assemblies must belong to the asset.':''].filter(Boolean);
+    const stage2Issues=[!uomCategory?'Select a unit category.':'',!(options?.uoms??[]).some(x=>x.code===registration.uom&&(x.category||'Other')===uomCategory)?'Select a valid unit of measure.':'',!supplierless&&!registration[partKey]?.trim()?'Enter the '+supply+' part number.':'',!supplierless&&mode==='manual'&&((registration.partyName??'').trim().length<2)?'Enter a name (at least 2 characters).':'',!supplierless&&mode==='registered'&&!registration.vendorId?'Select a registered vendor or enter a name manually.':'',supply==='OEM'&&!(options?.costCenters??[]).some(x=>x.id===registration.costCenterId)?'Select an accessible cost center.':'',supply==='OEM'&&!(options?.assets??[]).some(x=>x.id===registration.assetId&&x.parentId===registration.costCenterId)?'Select an asset within that cost center.':'',supply==='OEM'&&(registration.assemblyIds??'').split(',').filter(Boolean).some(id=>!(options?.scopedAssemblies??[]).some(x=>x.id===id&&x.parentId===registration.assetId))?'All selected assemblies must belong to the asset.':''].filter(Boolean);
     const stage3Issues=[!eligibleWarehouses.some(x=>x.id===registration.warehouseId)?'Select a warehouse configured for this material category.':'',
         !restrictionCodes.length?'Choose at least one warehouse restriction.':'',
         restrictionCodes.some(code=>!(options?.restrictions??[]).some(x=>x.code===code))?'One or more warehouse restrictions are not enabled in the master.':'',
@@ -210,7 +212,7 @@ export default function MaterialsMaster() {
             let id=draftId.current||editingId;
             const data={name:name.trim(),attributes:values,shortText,...registration,
                 warehouseRestrictionCodes:restrictionCodes,warehouseRestriction:restrictionCodes[0]||'',supplyType:supply,partyEntryMode:mode,
-                ...(supply==='BIDDED'?{vendorId:'',partyName:'',generalPartNumber:''}:{}),assemblyIds:(typeof registration.assemblyIds==='string'?registration.assemblyIds.split(',').map(x=>x.trim()).filter(Boolean):[])};
+                ...(supplierless?{vendorId:'',partyName:'',oemPartNumber:'',ocmPartNumber:'',generalPartNumber:'',model:'',versionNumber:'',costCenterId:'',assetId:'',assemblyId:'',assemblyIds:[]}:{}),assemblyIds:(typeof registration.assemblyIds==='string'?registration.assemblyIds.split(',').map(x=>x.trim()).filter(Boolean):[])};
             if(!submit){
                 const draft=await callBackend<{id:string}>(endpoint+'/autosave',{id,data:{
                     ...data,categoryCode:category,subcategoryCode:subcategory,familyCode:family,materialCode:material}});
@@ -407,12 +409,12 @@ export default function MaterialsMaster() {
                     </SelectField>
                 </div>
             </StepSection>
-            <StepSection title='How will this material be sourced?' hint={supply==='BIDDED'?'Use competitive bidding. No supplier is recommended at material creation.':detail?.guidance?.supply ? `${detail.guidance.label}: usual supply route: ${detail.guidance.supply.usual.map((u) => SUPPLY_WORD[u] ?? u).join(' or ')}. ${detail.guidance.supply.note}` : 'Choose the supply relationship.'}>
-                <div role='radiogroup' aria-label='Supply type' className='grid gap-2 sm:grid-cols-3'>
-                    {SUPPLY_TYPES.map((t) => <OptionCard key={t.code} selected={supply === t.code} title={t.title} text={t.text} badge={t.code!=='BIDDED'&&detail?.guidance?.supply?.usual.includes(t.code) ? 'usual' : undefined}
-                        onSelect={() => setRegistration((p) => ({ ...p, supplyType: t.code, partyEntryMode: t.code === 'BIDDED' ? 'none' : 'registered', vendorId: '', partyName: '', generalPartNumber: '' }))} />)}
+            <StepSection title='How will this material be sourced?' hint={supply==='PROPRIETARY_SUPPLIER'?'No additional sourcing setup is required.':supply==='BIDDED'?'Use competitive bidding. No supplier is recommended at material creation.':detail?.guidance?.supply ? `${detail.guidance.label}: usual supply route: ${detail.guidance.supply.usual.map((u) => SUPPLY_WORD[u] ?? u).join(' or ')}. ${detail.guidance.supply.note}` : 'Choose the supply relationship.'}>
+                <div role='radiogroup' aria-label='Supply type' className='grid gap-2 sm:grid-cols-2'>
+                    {SUPPLY_TYPES.map((t) => <OptionCard key={t.code} selected={supply === t.code} title={t.title} text={t.text} badge={!['BIDDED','PROPRIETARY_SUPPLIER'].includes(t.code)&&detail?.guidance?.supply?.usual.includes(t.code) ? 'usual' : undefined}
+                        onSelect={() => setRegistration((p) => ({ ...p, supplyType: t.code, partyEntryMode: ['BIDDED','PROPRIETARY_SUPPLIER'].includes(t.code) ? 'none' : 'registered', vendorId: '', partyName: '', oemPartNumber: '', ocmPartNumber: '', generalPartNumber: '', model: '', versionNumber: '', costCenterId: '', assetId: '', assemblyId: '', assemblyIds: '' }))} />)}
                 </div>
-                {supply==='BIDDED'?<Alert tone='info'>No supplier is nominated or recommended for a bidded material. A supplier will be selected later through approved procurement and competitive bidding.</Alert>:
+                {supply==='BIDDED'?<Alert tone='info'>No supplier is nominated or recommended for a bidded material. A supplier will be selected later through approved procurement and competitive bidding.</Alert>:supply==='PROPRIETARY_SUPPLIER'?null:
                 <div className='mt-4 space-y-4'>
                     <Tabs value={mode as 'registered' | 'manual'} onChange={(v) => setRegistration((p) => ({ ...p, partyEntryMode: v, vendorId: '', partyName: '' }))}
                         options={[{ value: 'registered', label: 'Registered vendor' }, { value: 'manual', label: 'Type the name' }]} />
@@ -514,7 +516,7 @@ export default function MaterialsMaster() {
             <ReviewSection title='Classification' onEdit={() => go(1)} items={[['Category', categories.find((x) => x.code === category)?.name], ['Subcategory', subcategories.find((x) => x.code === subcategory)?.name], ['Family', families.find((x) => x.code === family)?.name], ['Catalogue material', materials.find((x) => x.code === material)?.name], ['Material name', name]]} />
             <ReviewSection title='Technical attributes' onEdit={() => go(1)} items={(detail?.attributes ?? []).filter((x) => values[x.code]).map((x) => [x.name, shownValue(x, values[x.code])] as [string, string])} />
             <ReviewSection title='Sourcing' onEdit={() => go(2)} items={[['Unit', options?.uoms.find((x) => x.code === registration.uom)?.label ?? registration.uom], ['Supply type', SUPPLY_TYPES.find((t) => t.code === supply)?.title],
-                ...(supply==='BIDDED'?[['Supplier','Not nominated — competitive bidding'] as [string,string]]:[[partyLabel,partyName] as [string,string],['Part number',registration[partKey]] as [string,string]]), ['Model', registration.model], ['Version', registration.versionNumber], ['Cost center', options?.costCenters.find((x) => x.id === registration.costCenterId)?.name], ['Asset', options?.assets.find((x) => x.id === registration.assetId)?.name], ['Assemblies', supply === 'OEM' ? (options?.scopedAssemblies ?? []).filter((x) => selectedAssemblies.includes(x.id)).map((x) => x.name).join(', ') || 'Whole asset' : '']]} />
+                ...(supply==='BIDDED'?[['Supplier','Not nominated — competitive bidding'] as [string,string]]:supply==='PROPRIETARY_SUPPLIER'?[['Supplier','Proprietary — no details required'] as [string,string]]:[[partyLabel,partyName] as [string,string],['Part number',registration[partKey]] as [string,string]]), ['Model', registration.model], ['Version', registration.versionNumber], ['Cost center', options?.costCenters.find((x) => x.id === registration.costCenterId)?.name], ['Asset', options?.assets.find((x) => x.id === registration.assetId)?.name], ['Assemblies', supply === 'OEM' ? (options?.scopedAssemblies ?? []).filter((x) => selectedAssemblies.includes(x.id)).map((x) => x.name).join(', ') || 'Whole asset' : '']]} />
             <ReviewSection title='Warehouse' onEdit={() => go(3)} items={[['Warehouse', options?.warehouses.find((x) => x.id === registration.warehouseId)?.name], ['Restrictions',restrictionLabels.join(' · ')],['Cluster',registration.clusterCode||'Not assigned']]} />
             <ConfirmBox checked={reviewAgreed} onChange={setReviewAgreed}>I have reviewed the short text, classification, attributes, sourcing and warehouse details and confirm they are correct.</ConfirmBox>
         </>}
