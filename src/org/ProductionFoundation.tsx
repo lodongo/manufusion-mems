@@ -152,13 +152,31 @@ function BomEditor({draft,onChange,items,refs,skuSetup,materialPolicy}:{
  const units=(skuId:string,current:string,baseUnit?:string):Array<[string,string]>=>{
     const masterUom=baseUnit||str(items.find(i=>i.id===skuId)?.uom);
     const unit=skuSetup.units.find(u=>u.code===masterUom||u.symbol.toLowerCase()===masterUom.toLowerCase());
-    const supported=unit?skuSetup.units.filter(u=>u.categoryCode===unit.categoryCode&&u.baseUnit===unit.baseUnit):[];
+    const supported=unit?skuSetup.units.filter(u=>u.categoryCode===unit.categoryCode&&u.baseUnit===unit.baseUnit):
+        skuSetup.units.filter(u=>u.code&&u.baseUnit);
     return [
         ...(!current?([['','Choose a unit']] as Array<[string,string]>):
             [[current,bomUomName(current,skuSetup.units)] as [string,string]]),
         ...supported.filter(u=>u.code!==current&&u.symbol!==current)
             .map(u=>[u.code,bomUomName(u.code,skuSetup.units)] as [string,string]),
     ];
+ };
+ const changeComponentUnit=(index:number,code:string)=>{
+    const old=components[index];
+    const from=skuSetup.units.find(u=>u.code===old.uom||u.symbol===old.uom);
+    const to=skuSetup.units.find(u=>u.code===code||u.symbol===code);
+    // Converting material UOM must also convert its quantity and all
+    // associated rate/buffer values: do not silently change physical amounts.
+    if(from&&to&&from.baseUnit===to.baseUnit&&from.categoryCode===to.categoryCode&&
+        Number.isFinite(from.multiplier)&&Number.isFinite(to.multiplier)&&to.multiplier>0){
+        const factor=from.multiplier/to.multiplier;
+        updateComponent(index,{uom:code,quantity:old.quantity*factor,
+            ...(old.source==='PROCESS_SUPPLY'?{
+                requiredFlowPerHour:old.requiredFlowPerHour==null?null:old.requiredFlowPerHour*factor,
+                bufferCapacity:old.bufferCapacity==null?null:old.bufferCapacity*factor,
+                bufferUsable:old.bufferUsable==null?null:old.bufferUsable*factor,
+            }:{})});
+    }else if(!old.uom||old.uom===code)updateComponent(index,{uom:code});
  };
  return <div className='space-y-4'>
     <div className='rounded-xl bg-page p-3 text-sm text-soft'>
@@ -307,20 +325,41 @@ function BomEditor({draft,onChange,items,refs,skuSetup,materialPolicy}:{
                                     uom:str(items.find(item=>item.id===v)?.uom)||''})}/>
                             {selected&&<p className='text-xs text-muted'>SKU {selected.id} · {selected.name} · {str(selected.category)}</p>}
                         </div>}
-                        <div className='grid grid-cols-2 gap-2'>
-                            <Field title='Required quantity' type='number' value={c.quantity}
+                        <div className='grid grid-cols-1 gap-2 sm:grid-cols-2'>
+                            <Field title={processSupply?'Planned material quantity for BOM output':'Required quantity'}
+                                type='number' value={c.quantity}
                                 onChange={v=>updateComponent(i,{quantity:Number(v)})}/>
-                            <div className='rounded-xl border border-line bg-panel p-3'>
-                                <p className='text-xs text-muted'>Unit of measure</p>
-                                <p className='mt-1 break-words text-sm font-semibold'>{bomUomName(c.uom,skuSetup.units)}</p>
-                            </div>
+                            {processSupply?
+                                <Choice title='Material quantity unit' value={c.uom}
+                                    options={units(c.skuId,c.uom,unitBasis)}
+                                    onChange={v=>changeComponentUnit(i,v)}/>:
+                                <div className='rounded-xl border border-line bg-panel p-3'>
+                                    <p className='text-xs text-muted'>Unit of measure</p>
+                                    <p className='mt-1 break-words text-sm font-semibold'>{bomUomName(c.uom,skuSetup.units)}</p>
+                                </div>}
                         </div>
-                        {(fromWarehouse?!!material:!!c.skuId)&&<details className='text-xs text-muted'>
+                        {processSupply&&<div className='space-y-2 rounded-lg border border-line bg-panel p-3'>
+                            <p className='text-xs font-semibold'>Continuous / on-demand quantity planning</p>
+                            <p className='text-xs text-muted'>The quantity above is required for {quantity} {bomUomName(outputUom,skuSetup.units)} of output, regardless of whether supply is metered or buffered. It is the planning basis for BOM demand, NOT a buffer volume or equipment rate.</p>
+                            <Field title='Optional required continuous flow (material units/hour)' type='number'
+                                value={c.requiredFlowPerHour??''}
+                                onChange={v=>updateComponent(i,{requiredFlowPerHour:v===''?null:Number(v)})}/>
+                            <p className='text-xs text-muted'>Use the same unit selected above. This optional target can be compared with upstream capacity during planning; it does not overwrite recipe quantities or represent a live meter reading.</p>
+                            {['BUFFERED','BULK_STORAGE'].includes(c.deliveryMode||'INLINE')&&
+                                c.bufferUsable!==null&&c.bufferUsable!==undefined&&
+                                c.requiredFlowPerHour!==null&&c.requiredFlowPerHour!==undefined&&c.requiredFlowPerHour>0&&
+                                <p className='text-xs font-semibold text-ink'>
+                                    Without replenishment, the usable buffer would cover approximately {(c.bufferUsable/c.requiredFlowPerHour*60).toLocaleString(undefined,{maximumFractionDigits:1})} minutes of the stated requirement. This is not a live stoppage prediction.
+                                </p>}
+                        </div>}
+                        {(fromWarehouse?!!material:processSupply?
+                            (supplyRef==='SKU'?!!c.skuId:supplyRef==='PROCUREMENT'?!!c.materialId:!!c.utilityCode):
+                            !!c.skuId)&&<details className='text-xs text-muted'>
                             <summary className='cursor-pointer py-2'>Consumption options</summary>
                             <div className='grid gap-2 pt-2 sm:grid-cols-2'>
-                                <Choice title='Alternate compatible unit' value={c.uom}
-                                    options={units(c.skuId,c.uom,unitBasis)} onChange={v=>updateComponent(i,{uom:v})}/>
-                                <Field title='Scrap allowance (%)' type='number' value={c.scrapPct}
+                                {!processSupply&&<Choice title='Alternate compatible unit' value={c.uom}
+                                    options={units(c.skuId,c.uom,unitBasis)} onChange={v=>changeComponentUnit(i,v)}/>}
+                                <Field title='Scrap / process loss allowance (%)' type='number' value={c.scrapPct}
                                     onChange={v=>updateComponent(i,{scrapPct:Number(v)})}/>
                             </div>
                         </details>}
