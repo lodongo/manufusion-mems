@@ -236,6 +236,35 @@ function validate(kind: Kind, raw: unknown) {
     const skip = new Set<string>(['attributeDomains', 'attributes', 'profiles', def.keys.l1, def.keys.l2, def.keys.l3, itemsKey]);
     for (const [k, v] of Object.entries(raw)) if (!skip.has(k)) cat.header[k] = v as Plain;
 
+    // Older material imports placed hundreds of debit/credit posting templates in
+    // the catalogue header. That exceeds the 300 KB header document limit.
+    // Preserve every full rule beside its family instead of rejecting a valid JSON master.
+    if (kind === 'materials' && Array.isArray(raw.familyPostingRules)) {
+        const rules = arr(raw.familyPostingRules);
+        const families = new Map(cat.families.map(f => [str(f.code), f]));
+        const seen = new Set<string>();
+        for (const rule of rules) {
+            const code = str(rule.familyCode);
+            if (!families.has(code) || seen.has(code)) {
+                err(`Family posting rule has an unknown or duplicate family code: ${code.slice(0, 60)}.`);
+                continue;
+            }
+            seen.add(code);
+            const family = families.get(code)!;
+            family.postingRule = rule;
+            family.financialPostingRuleId = str(rule.ruleId);
+        }
+        if (rules.length !== cat.families.length)
+            err(`Material posting rules cover ${rules.length} of ${cat.families.length} families.`);
+        delete cat.header.familyPostingRules;
+        cat.header.postingRulesLayout = {
+            version: str(raw.schemaVersion),
+            location: 'families[].postingRule',
+            familyCount: rules.length,
+            note: 'Full debit/credit templates are stored with each family to stay within the import header limit.',
+        };
+    }
+
     const unique = (list: Obj[], label: string) => {
         const seen = new Set<string>();
         for (const item of list) {
