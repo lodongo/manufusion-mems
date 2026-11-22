@@ -214,6 +214,12 @@ async function reviewSingleManufacturingRouting(ctx:OrgContext,raw:Obj){
  */
 export async function reviewManufacturingRouting(ctx:OrgContext,raw:Obj){
  const skuIds=routingSkuIds(raw);
+ if(!skuIds.length)return {
+  ready:false,legacy:false,issues:[{stageCode:'HEADER',field:'skuMappings',
+   message:'Map at least one manufactured SKU to this process route and configure its stage BOMs.'}],
+  stages:[],bottlenecks:[],comparisonNote:'A process classification describes the eligible SKU group. Assignments and approved stage BOMs are still required before routing release.',
+  skuReviews:[],
+ };
  const reviews=[];
  for(const skuId of skuIds){
   const variant=routingForSku(raw,skuId);
