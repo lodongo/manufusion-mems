@@ -15,6 +15,7 @@ import {eligibleManufacturingHierarchy,routingManufacturingCostCenter,routingCom
 import {physicalRatingUnits} from './plnPhysicalCapacity';
 import { allowedNodeIds } from './positions';
 import {reviewManufacturingRouting} from './mfgRoutingReadiness';
+import {routingSkuIds,routingForSku} from './mfgRoutingSkuMappings';
 
 export const MASTER_KINDS = ['items', 'boms', 'resources', 'routings'] as const;
 export type MasterKind = typeof MASTER_KINDS[number];
@@ -176,7 +177,7 @@ export function normalizeMaster(kind:MasterKind, raw:unknown): Obj {
         });
         return {...base,classificationCode,productVariantId,alternativeCode,routingId,parentSkuId,outputQty:POSITIVE(raw.outputQty??1,'Output basis'),outputUom:UOM(raw.outputUom),components:lines as unknown as Plain,effectiveFrom:effectiveDate(raw.effectiveFrom),versionNote:str(raw.versionNote).slice(0,300)};
     }
-    const skuId=VALID_ID(raw.skuId,'Routed SKU');
+    const skuId=VALID_ID(raw.skuId,'Primary routed SKU');
     const routingModelVersion=raw.routingModelVersion===2?2:1;
     const advanced=routingModelVersion===2;
     const operations=ARR(raw.operations);
@@ -211,7 +212,48 @@ export function normalizeMaster(kind:MasterKind, raw:unknown): Obj {
             batchSize:NONNEGATIVE(o.batchSize??0,'Batch size'),
             cycleMinutes:NONNEGATIVE(o.cycleMinutes??0,'Batch cycle minutes',100000)};
     });
-    return {...base,skuId,operations:steps as unknown as Plain,
+    // A shared route keeps one master process while SKU-specific records supply
+    // their own BOM/output identities and optional stage timings.
+    const mappings=ARR(raw.skuMappings);
+    if(mappings.length>100)throw new HttpError(400,'A routing may be assigned to at most 100 additional SKUs.');
+    const mapped=new Set<string>(),stageCodes=new Set(steps.map(o=>str(o.code)));
+    const skuMappings=mappings.map((mapping,i)=>{
+        const mappedSkuId=VALID_ID(mapping.skuId,'Mapped SKU');
+        if(mappedSkuId===skuId||mapped.has(mappedSkuId))
+            throw new HttpError(400,'The same SKU cannot be mapped to a routing more than once.');
+        mapped.add(mappedSkuId);
+        const overrides=ARR(mapping.stages);
+        if(overrides.length>steps.length)throw new HttpError(400,'Too many stage settings for mapped SKU '+mappedSkuId+'.');
+        const used=new Set<string>();
+        const stages=overrides.map(o=>{
+            const code=VALID_ID(o.code,'Mapped stage');
+            if(!stageCodes.has(code)||used.has(code))
+                throw new HttpError(400,'Mapped SKU '+mappedSkuId+' must reference distinct existing routing stages.');
+            used.add(code);
+            const result:Obj={code};
+            if(Object.hasOwn(o,'producesSkuId')){
+                const outputId=str(o.producesSkuId).trim();
+                result.producesSkuId=outputId?VALID_ID(outputId,'Mapped stage output'):'';
+            }
+            if(Object.hasOwn(o,'bomId')){
+                const bomId=str(o.bomId).trim();
+                result.bomId=bomId?VALID_ID(bomId,'Mapped stage BOM'):'';
+            }
+            for(const [field,label,max] of [
+                ['setupMinutes','Setup minutes',100000],
+                ['runMinutesPerUnit','Minutes per unit',100000],
+                ['batchSize','Batch size',1e12],
+                ['cycleMinutes','Cycle minutes',100000],
+            ] as const)if(Object.hasOwn(o,field))
+                result[field]=NONNEGATIVE(o[field],label,max);
+            if(Object.hasOwn(o,'capacityBasis'))
+                result.capacityBasis=ENUM(o.capacityBasis,
+                    ['PHYSICAL_CONTAINER','RESOURCE_RATE','BATCH_CYCLE','TIME_PER_UNIT'] as const,'capacity basis');
+            return result;
+        });
+        return {skuId:mappedSkuId,stages};
+    });
+    return {...base,skuId,skuMappings:skuMappings as unknown as Plain,operations:steps as unknown as Plain,
         routingModelVersion,alternativeCode:advanced?bomAlternative(raw.alternativeCode):'STANDARD',
         effectiveFrom:effectiveDate(raw.effectiveFrom)};
 }
@@ -309,8 +351,8 @@ export async function referenceChecks(ctx:OrgContext,kind:MasterKind,item:Obj,ex
         const routingId=str(item.routingId);
         if(routingId){
             const route=await getDoc(DOC(ctx.orgId,'routings',routingId));
-            if(!route||str(route.data.skuId)!==str(item.parentSkuId))
-                throw new HttpError(400,'The optional routing must produce this BOM output SKU.');
+            if(!route||!routingSkuIds(route.data).includes(str(item.parentSkuId)))
+                throw new HttpError(400,'The optional routing must include this BOM output SKU in its assigned SKUs.');
         }
         const components=ARR(item.components);
         const warehouseLines=components.filter(c=>str(c.source)==='WAREHOUSE');
@@ -348,10 +390,14 @@ export async function referenceChecks(ctx:OrgContext,kind:MasterKind,item:Obj,ex
             throw new HttpError(400,'The BOM introduces a circular manufacturing dependency.');
     }
     if(kind==='routings'){
-        const routed=await getDoc(DOC(ctx.orgId,'items',str(item.skuId)));
-        if(!routed)throw new HttpError(400,'Routing SKU not found.');
-        for(const o of ARR(item.operations)){
-            const stage='Stage '+(num(o.sequence)??0)+' ('+(str(o.name)||str(o.code))+'): ';
+        for(const skuId of routingSkuIds(item)){
+         const routed=await getDoc(DOC(ctx.orgId,'items',skuId));
+         if(!routed||!['FINISHED','INTERMEDIATE'].includes(str(routed.data.category)))
+             throw new HttpError(400,'Routing SKU '+skuId+' is not an eligible manufactured SKU.');
+         const variant=routingForSku(item,skuId);
+         if(!variant)throw new HttpError(400,'Cannot resolve the SKU allocation '+skuId+'.');
+         for(const o of ARR(variant.operations)){
+            const stage='SKU '+skuId+' / Stage '+(num(o.sequence)??0)+' ('+(str(o.name)||str(o.code))+'): ';
             if(!str(o.resourceId)&&item.routingModelVersion!==2)
                 throw new HttpError(400,stage+'a manufacturing resource is required.');
             if(str(o.resourceId)){
@@ -377,6 +423,7 @@ export async function referenceChecks(ctx:OrgContext,kind:MasterKind,item:Obj,ex
                 if(str(bom.data.siteId)&&str(bom.data.siteId)!==str(item.siteId))
                     throw new HttpError(400,stage+'BOM belongs to another production site.');
             }
+         }
         }
     }
 }
