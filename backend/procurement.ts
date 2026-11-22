@@ -1083,6 +1083,14 @@ async function synchronizeMaterialCluster(ctx:OrgContext,data:Record<string,unkn
 
 function materialSourcingPolicy(data:Obj):Obj{
     const relationship=str(data.supplyType);
+    // Proprietary supplier is a selection-only supply relationship, not a
+    // vendor registration or a disclosure of confidential supply details.
+    // Strip stale fields as well, including when switching from an OEM/OCM draft.
+    if(relationship==='PROPRIETARY_SUPPLIER')return {...data,
+        supplyType:'PROPRIETARY_SUPPLIER',partyEntryMode:'none',
+        vendorId:'',partyName:'',oemPartNumber:'',ocmPartNumber:'',
+        generalPartNumber:'',model:'',versionNumber:'',
+        costCenterId:'',assetId:'',assemblyId:'',assemblyIds:[]};
     if(relationship!=='BIDDED'&&relationship!=='GENERAL')return data;
     return {...data,supplyType:'BIDDED',partyEntryMode:'none',vendorId:'',partyName:'',generalPartNumber:''};
 }
