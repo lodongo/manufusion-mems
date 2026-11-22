@@ -1,6 +1,7 @@
 import { isInternalUtilitySupply } from './utilitySupplyPolicy';
+import {resolveEquipmentUtilitySupply,validateEquipmentUtilityDistribution,getCostCenterUtilityCapability,costCenterForEquipment} from './costCenterUtilityDistribution';
 export {isInternalUtilitySupply} from './utilitySupplyPolicy';
-import { HttpError, getDoc, isObj, listDocs, nowIso, randomId, str, writeDoc, type Doc, type Obj } from './core';
+import { HttpError, commitChecked, getDoc, isObj, listDocs, nowIso, randomId, str, writeDoc, type Doc, type Obj } from './core';
 import { orgRoute, type OrgContext } from './guards';
 import { seedModuleMetadata } from './moduleDefaults';
 import { effectiveSafetyItems, safetyCatalogue } from './safConfiguration';
@@ -133,6 +134,17 @@ async function saveRating(ctx:OrgContext, defs:Obj[], adopted:Set<string>){
 }
 export async function utilityLinkIssue(org:string,node:Doc,row:Obj,def:Obj|undefined):Promise<string>{
     if(isInternalUtilitySupply(row))return '';
+    if(row.supplyLinkRule===3){
+        const ccId=str(node.data.parentId);
+        const cc=await getDoc('organizations/'+org+'/structure/'+ccId);
+        if(!cc||str(cc.data.level)!=='cost_center')return 'Assign the equipment to a cost centre before connecting a utility.';
+        const supplied=await getCostCenterUtilityCapability(org,ccId,str(row.code));
+        if(!supplied)return 'Add this utility to the supplying cost centre.';
+        if(!supplied.sources.length)return 'Add a source asset to this cost-centre utility.';
+        if(!supplied.ready||supplied.review.status==='overload'||supplied.review.status==='incompatible')
+            return 'Resolve the cost-centre utility capacity and compatibility warnings.';
+        return '';
+    }
     const tag=str(row.sourceAssetTag);
     if(!TAG_RE.test(tag))return 'Link the external utility to its supply asset.';
     const [asset,site]=await Promise.all([getDoc(assetCol(org)+'/'+tag),siteOf(org,node)]);
@@ -161,7 +173,8 @@ export const utilityRoutes = {
             if(requested){
                 const def=catalogue.find(x=>x.code===requested);
                 if(!def)throw new HttpError(400,'Utility is not adopted.');
-                return {sources:await sourceRows(ctx,id,node,def),determinant:capacityDeterminant(def)};
+                return {sources:await sourceRows(ctx,id,node,def),determinant:capacityDeterminant(def),
+                    costCenterSupply:await resolveEquipmentUtilitySupply(ctx,id,requested)};
             }
             const items=rowsOf(doc);
             const docs=items.some(r=>str(r.sourceAssetTag))?await listDocs('organizations/'+ctx.orgId+'/equipment_utilities'):[];
@@ -171,10 +184,36 @@ export const utilityRoutes = {
                 const energy=energyRows.find(x=>x.code===row.code&&x.linkedUtility===true);
                 const asset=TAG_RE.test(tag)?await getDoc(assetCol(ctx.orgId)+'/'+tag):null;
                 const valid=!!asset&&!!site&&asset.data.siteId===site&&eligibleStatus(asset)&&asset.data.workCenterId!==id;
-                const supply=valid&&asset&&def?publicSummary(supplySummary(asset,def,docs,id)):null;
                 const internal=isInternalUtilitySupply(row);
-                const complete=!!def&&allowed.has(str(row.code))&&(internal||valid&&(!supply?.determinant||!!supply.capacity&&!!positive(isObj(row.values)?row.values[supply.determinant.key]:null)));
-                return {...row,label:str(def?.label)||str(row.label),energyTag:str(energy?.tag),energyColor:str(def?.color)||energyColor(def||row),energyPointId:str(energy?.pointId),isInternalSupply:internal,supplyLinkRule:2,sourceAssetName:valid?str(asset?.data.name):'',sourceAssetStatus:valid?str(asset?.data.status):'',supply,configurationComplete:complete};
+                let supply=null as ReturnType<typeof publicSummary>|null;
+                let sourceCostCenterName='';
+                let complete=false;
+                if(!internal&&row.supplyLinkRule===3){
+                    const linked=await resolveEquipmentUtilitySupply(ctx,id,str(row.code));
+                    sourceCostCenterName=linked.costCenterName;
+                    const c=linked.supply;
+                    if(c){
+                        supply={code:c.code,label:c.label,determinant:c.review.determinant,capacity:c.capacity,
+                            rating:null,total:c.review.demand,ownDemand:c.review.consumers.find(x=>x.equipmentId===id)?.demand||0,
+                            unknown:c.review.unknown,count:c.review.consumers.length,
+                            percent:c.review.percentage,status:c.review.status==='overload'?'overload':
+                              c.review.status==='warning'?'warning':c.review.status==='normal'?'normal':'unknown'};
+                        complete=c.ready&&(!c.review.determinant||c.review.consumers.some(x=>x.equipmentId===id&&x.demand!==null))&&
+                            !c.review.gaps.some(x=>x.equipmentId===id&&
+                              !['migration','asset'].includes(x.key));
+                    }
+                }else{
+                    supply=valid&&asset&&def?publicSummary(supplySummary(asset,def,docs,id)):null;
+                    complete=!!def&&allowed.has(str(row.code))&&(internal||
+                        valid&&(!supply?.determinant||!!supply.capacity&&
+                        !!positive(isObj(row.values)?row.values[supply.determinant.key]:null)));
+                }
+                return {...row,label:str(def?.label)||str(row.label),energyTag:str(energy?.tag),
+                    energyColor:str(def?.color)||energyColor(def||row),energyPointId:str(energy?.pointId),
+                    isInternalSupply:internal,supplyLinkRule:row.supplyLinkRule===3?3:2,
+                    sourceCostCenterName,sourceAssetName:valid?str(asset?.data.name):'',
+                    sourceAssetStatus:valid?str(asset?.data.status):'',
+                    supply,configurationComplete:complete};
             }));
             return { catalogue, items:enriched, configurationComplete:enriched.every(x=>x.configurationComplete),version:Number(doc?.data.version)||0 };
         }),
@@ -210,8 +249,13 @@ export const utilityRoutes = {
                     if(!prior||stableJson(row.values)!==stableJson(prior.values)||str(row.sourceAssetTag)!==str(prior.sourceAssetTag)||internal!==isInternalUtilitySupply(prior))throw new HttpError(400,'Select an adopted utility or retain the existing historical values.');
                     return prior;
                 }
-                // An unchanged historical row is never promoted to complete by an unrelated edit.
-                if(prior&&stableJson(prior.values)===stableJson(row.values)&&str(prior.sourceAssetTag)===str(row.sourceAssetTag)&&internal===isInternalUtilitySupply(prior))return prior;
+                // Historical direct links stay readable, but switching supply paths
+                // must be an explicit revision, never an incidental reclassification.
+                if(prior&&stableJson(prior.values)===stableJson(row.values)&&
+                    str(prior.sourceAssetTag)===str(row.sourceAssetTag)&&
+                    str(prior.sourceCostCenterId)===str(row.sourceCostCenterId)&&
+                    Number(prior.supplyLinkRule||2)===Number(row.supplyLinkRule||2)&&
+                    internal===isInternalUtilitySupply(prior))return prior;
                 const values: Record<string, string | number> = {};
                 const raw = isObj(row.values) ? row.values : {};
                 for (const attr of (Array.isArray(def.attributes) ? def.attributes : []).filter(isObj)) {
@@ -235,11 +279,23 @@ export const utilityRoutes = {
                 const sourceAssetTag=str(row.sourceAssetTag);
                 const connectionId=prior?str(prior.connectionId)||'legacy-'+code:randomId(16);
                 if(internal){
-                    if(sourceAssetTag)throw new HttpError(400,'Clear the supplying asset link when selecting supply generated within this equipment.');
-                    return {code,label:str(def.label),values,isInternalSupply:true,supplyLinkRule:2,sourceAssetTag:'',connectionId};
+                    if(sourceAssetTag||str(row.sourceCostCenterId))
+                        throw new HttpError(400,'Clear external supply links when generated inside this equipment.');
+                    return {code,label:str(def.label),values,isInternalSupply:true,supplyLinkRule:2,sourceAssetTag:'',sourceCostCenterId:'',connectionId};
                 }
-                // Legacy rows can remain unchanged while colleagues repair links individually; they stay incomplete.
+                if(row.supplyLinkRule===3){
+                    if(sourceAssetTag)throw new HttpError(400,'Equipment must receive this utility via the cost centre, not directly from an asset.');
+                    const validated=await validateEquipmentUtilityDistribution(ctx,id,code,values);
+                    if(str(row.sourceCostCenterId)!==validated.costCenterId)
+                        throw new HttpError(400,'The supply cost centre must match the equipment parent cost centre.');
+                    return {code,label:str(def.label),values,isInternalSupply:false,
+                        supplyLinkRule:3,sourceAssetTag:'',sourceCostCenterId:validated.costCenterId,connectionId};
+                }
+                // Keep an unchanged legacy row only; new external connections must use cost-centre distribution.
                 if(!sourceAssetTag&&prior&&!str(prior.sourceAssetTag)&&stableJson(prior.values)===stableJson(values))return prior;
+                if(!prior||str(prior.sourceAssetTag)!==sourceAssetTag||
+                   stableJson(prior.values)!==stableJson(values))
+                    throw new HttpError(409,'New external utility connections must be supplied through the cost centre. Reconfigure this equipment utility.');
                 const asset=await checkedAsset(ctx,sourceAssetTag);
                 if(!site||asset.data.siteId!==site||!eligibleStatus(asset)||asset.data.workCenterId===id)throw new HttpError(400,'Choose an available supply asset at this site, other than the consuming equipment itself.');
                 if(!prior||str(prior.sourceAssetTag)!==sourceAssetTag)await requireAt(ctx,PERMS.utilitiesView,str(asset.data.nodeId),'read','You cannot link to this source asset.');
