@@ -13,6 +13,7 @@ import {stockMasterItems,warehouseRestrictionMaster} from './stockMasters';
 import {SEGREGATED_RESTRICTIONS,binningBlock,effectiveRestriction,locationBlock,restrictionCodesOf} from './restrictionRules';
 import {materialPhotos,vendorsForMaterial} from './materialMedia';
 import {unitPricePerStockUnit,convertStockCurrency,inventoryNumericField} from './inventoryValuation';
+import {summarizeInventoryDashboard} from './inventoryDashboardSummary';
 // Numeric replenishment strategy parameters and their allowed ranges (material and warehouse, Inventory section).
 const REPLENISHMENT_LIMITS:Record<string,{min:number;max:number;integer?:boolean;message:string}>={
     annualDemand:{min:0,max:1e12,message:'Annual demand must be 0 or more.'},
@@ -1345,6 +1346,165 @@ async function makeMaterialDecision(ctx:OrgContext,kind:'creation'|'extension'):
     return {ok:true,status:next,stageLabel:str(changed.workflowStage),...(masterDataId?{masterDataId}:{})};
 }
 
+/** Shared, permission-scoped inventory snapshot used by the dashboard and stock table. */
+async function inventoryOnHandSnapshot(ctx: OrgContext) {
+        if(ctx.role!=='org_super_admin'&&!hasPerm(ctx.permissions,'INV.view')&&!hasPerm(ctx.permissions,'INV.')&&!hasPerm(ctx.permissions,'PRC.view'))
+            throw new HttpError(403,'Inventory viewing permission required.');
+        const root='organizations/'+ctx.orgId;
+        const [user,warehouses,materials,extensions,nodes,journal,inventoryInfo,procurementInfo,occupancies,org,legalEntities,uomDoc,currencyDoc]=await Promise.all([
+            getDoc('users/'+ctx.uid),listDocs(root+'/warehouses'),listDocs(root+'/materials'),
+            listDocs(root+'/material_extensions'),listDocs(root+'/structure'),
+            listDocs(root+'/material_journal'),listDocs(root+'/inventory_material_info'),
+            listDocs(root+'/procurement_material_info'),listDocs(root+'/warehouse_bin_occupancy'),
+            getDoc(root),listDocs(root+'/legal_entities'),getDoc('module_workspaces/PRC/metadata/unitsOfMeasure'),getDoc('reference/currencies'),
+        ]);
+        const allowed=ctx.role==='org_super_admin'?'all':user?await allowedNodeIds(ctx.orgId,user,true):new Set<string>();
+        const nodeMap=new Map(nodes.map(x=>[x.id,x]));
+        const visible=warehouses.filter(x=>allowed==='all'||allowed.has(x.id));
+        const warehouseById=new Map(visible.map(x=>[x.id,x.data]));
+        const entityById=new Map(legalEntities.map(x=>[x.id,x.data]));
+        const customUnits=Array.isArray(uomDoc?.data.items)?uomDoc.data.items.filter(isObj):[];
+        const configuredUnits=customUnits.length?customUnits:undefined;
+        // An entity's currency is normally stored on the Organization Design
+        // legal_entity structure node (attributes.currencyCode). Legacy
+        // installations may also have standalone legal_entities records.
+        const legalCurrency=(entityId:string):string=>{
+            const node=nodeMap.get(entityId)?.data;
+            const attr=isObj(node?.attributes)?node.attributes:{};
+            const legacy=entityById.get(entityId);
+            const legacyAttr=isObj(legacy?.attributes)?legacy.attributes:{};
+            return (str(attr.currencyCode)||str(attr.localCurrency)||
+                str(node?.currencyCode)||str(node?.localCurrency)||
+                str(legacyAttr.currencyCode)||str(legacy?.localCurrency)||
+                str(legacy?.currencyCode)).toUpperCase();
+        };
+        const owningLegalEntity=(warehouseId:string,materialEntityId:string):string=>{
+            const warehouse=warehouseById.get(warehouseId);
+            const explicit=str(warehouse?.legalEntityId)||materialEntityId;
+            if(explicit && legalCurrency(explicit))return explicit;
+            // Warehouses are attached to sites; follow the structure parents.
+            let current=warehouseId;
+            const seen=new Set<string>();
+            for(let i=0;i<20&&current&&!seen.has(current);i++){
+                seen.add(current);
+                const node=nodeMap.get(current)?.data;
+                if(str(node?.level)==='legal_entity')return current;
+                current=str(node?.parentId)||str(current===warehouseId?warehouse?.parentId:'');
+            }
+            // An explicit entity ID is retained even if its currency has not
+            // yet been entered. Never pick another entity's currency.
+            return explicit;
+        };
+        const currencyEntries=(Array.isArray(currencyDoc?.data.items)?currencyDoc.data.items:[])
+            .filter(isObj).map(c=>({code:str(c.code).toUpperCase(),rate:Number(c.unitsPerUsd),enabled:c.enabled!==false}))
+            .filter(c=>/^[A-Z]{3}$/.test(c.code)&&c.enabled&&Number.isFinite(c.rate)&&c.rate>0);
+        const rates=Object.fromEntries(currencyEntries.map(c=>[c.code,c.rate]));
+        const whMap=new Map(visible.map(w=>[w.id,{
+            id:w.id,name:str(nodeMap.get(w.id)?.data.name)||str(w.data.name)||w.id,
+            code:str(nodeMap.get(w.id)?.data.code)||str(w.data.code)||w.id,
+        }]));
+        // Never present a zero or a financial value when the journal is missing or
+        // any stock movement has not been posted and reconciled.
+        type Balance={physical:number;reserved:number;quarantined:number;damaged:number;expired:number;other:number;seen:boolean;valid:boolean};
+        const balances=new Map<string,Balance>();
+        const ledgerKey=(materialId:string,warehouseId:string)=>JSON.stringify([materialId,warehouseId]);
+        for(const row of journal){
+            const d=row.data,materialId=str(d.materialId),warehouseId=str(d.warehouseId);
+            if(!materialId||!whMap.has(warehouseId))continue;
+            const key=ledgerKey(materialId,warehouseId);
+            const b=balances.get(key)||{physical:0,reserved:0,quarantined:0,damaged:0,expired:0,other:0,seen:false,valid:true};
+            b.seen=true;
+            if(str(d.status)!=='posted'||d.reconciled!==true)b.valid=false;
+            else {
+                const delta=isObj(d.balancesDelta)?d.balancesDelta:{};
+                for(const [field,source] of [
+                    ['physical','physicalStock'],['reserved','reservedStock'],['quarantined','quarantinedStock'],
+                    ['damaged','damagedStock'],['expired','expiredStock'],['other','other'],
+                ] as const){
+                    if(delta[source]!==undefined&&(!Number.isFinite(Number(delta[source])))){
+                        b.valid=false;continue;
+                    }
+                    b[field]+=Number(delta[source])||0;
+                }
+            }
+            balances.set(key,b);
+        }
+        const inv=new Map(inventoryInfo.map(x=>[x.id,x.data]));
+        const purchasing=new Map(procurementInfo.map(x=>[x.id,x.data]));
+        const occupied=new Set(occupancies.filter(x=>whMap.has(str(x.data.warehouseId))&&
+            !!str(x.data.materialId)).map(x=>ledgerKey(str(x.data.materialId),str(x.data.warehouseId))));
+        // Firestore stores Unit Price and stock levels as numbers. core.str()
+        // returns '' for a number, causing every valid price to look missing.
+        const level=inventoryNumericField;
+        const items:Array<Record<string,unknown>>=[];
+        const unique=new Set<string>();
+        for(const m of materials){
+            if(!['active','approved'].includes(str(m.data.status))||!str(m.data.materialNumber))continue;
+            const linked=Array.isArray(m.data.warehouseIds)?m.data.warehouseIds.map(str):[];
+            if(str(m.data.pushedAt)&&str(m.data.warehouseId))linked.push(str(m.data.warehouseId));
+            for(const ex of extensions)if(str(ex.data.sourceId)===m.id&&str(ex.data.status)==='approved')
+                linked.push(str(ex.data.warehouseId));
+            for(const warehouseId of new Set(linked)){
+                const wh=whMap.get(warehouseId),key=ledgerKey(m.id,warehouseId);
+                if(!wh||unique.has(key))continue;
+                unique.add(key);
+                const stock=balances.get(key);
+                const ready=!!stock&&stock.seen&&stock.valid;
+                const physical=ready?stock.physical:null;
+                const net=ready?stock.physical-stock.reserved-stock.quarantined-
+                    stock.damaged-stock.expired-stock.other:null;
+                const settings=inv.get(m.id+'_'+warehouseId);
+                const min=level(settings?.minimumLevel)??level(settings?.reorderPoint);
+                const max=level(settings?.maximumLevel);
+                const emptyBin=occupied.has(key)&&ready&&physical===0;
+                const stockStatus=!stock?.seen?'Not yet tracked':
+                    !ready?'Unreconciled':emptyBin?'Empty bin':
+                    max!==null&&physical!==null&&physical>max?'Overstock':
+                    min!==null&&net!==null&&net<min?'Understock':'Within limits';
+                const purchase=purchasing.get(m.id+'_'+warehouseId),unitPrice=level(purchase?.unitPrice);
+                const stockUom=str(m.data.uom);
+                // Material registration defines its UoM as stocked, issued AND ordered.
+                // Procurement can override the purchase UoM; without an override
+                // the source UoM is the material's registered ordering unit.
+                const priceUom=str(purchase?.purchaseUom)||stockUom;
+                const entityId=owningLegalEntity(warehouseId,str(m.data.legalEntityId));
+                const localCurrency=(legalCurrency(entityId)||
+                    str(org?.data.localCurrency)||str(org?.data.currencyCode)).toUpperCase();
+                // The detail page already defaults an unspecified supplier currency
+                // to the legal-entity currency. Preserve that same interpretation.
+                const priceCurrency=(str(purchase?.priceCurrency)||localCurrency).toUpperCase();
+                const unitCost=unitPrice!==null?unitPricePerStockUnit(unitPrice,priceUom,stockUom,configuredUnits):null;
+                const unitCostLocal=unitCost!==null?convertStockCurrency(unitCost,priceCurrency,localCurrency,rates):null;
+                const netStockValue=ready&&net!==null&&unitCostLocal!==null?net*unitCostLocal:null;
+                const valuationReason=!ready?'Stock journal must be posted and reconciled':
+                    unitPrice===null?'Set Unit Price in Procurement Information':
+                    !priceUom||!stockUom?'Configure the purchase and stock units of measure':
+                    unitCost===null?'Purchase and stock units need a compatible enabled conversion':
+                    !localCurrency?'Configure local currency in Organization Design → Legal entity':
+                    !priceCurrency?'Configure the supplier price currency':
+                    unitCostLocal===null?'Configure the exchange rate for '+priceCurrency+' → '+localCurrency:'';
+                items.push({
+                    id:m.id,materialNumber:str(m.data.materialNumber),name:str(m.data.name),
+                    shortText:str(m.data.shortText),categoryCode:str(m.data.categoryCode),
+                    subcategoryCode:str(m.data.subcategoryCode),familyCode:str(m.data.familyCode),
+                    materialCode:str(m.data.materialCode),uom:stockUom,
+                    supplyType:str(m.data.supplyType),
+                    partNumber:str(m.data.oemPartNumber)||str(m.data.ocmPartNumber)||
+                        str(m.data.proprietaryPartNumber)||str(m.data.generalPartNumber),
+                    warehouseId,warehouseName:wh.name,warehouseCode:wh.code,
+                    status:str(m.data.status),quantityOnHand:physical,netAvailable:net,
+                    netStockValue,stockCurrency:localCurrency,unitCostLocal,priceCurrency,priceUom,
+                    purchaseUnitPrice:unitPrice,valuationReason,valuationSource:'Procurement Information',
+                    valuationUnitSource:purchase?.purchaseUom?'procurement':'material master default',
+                    priceCurrencyDefaulted:!str(purchase?.priceCurrency),
+                    stockLedgerAvailable:ready,stockStatus,emptyBin,hasLinkedBin:occupied.has(key),
+                    minimumLevel:min,maximumLevel:max,createdAt:str(m.data.createdAt),
+                });
+            }
+        }
+        return {warehouses:Array.from(whMap.values()),currencies:currencyEntries.map(({code,rate})=>({code,rate})),items};
+}
+
 export const procurementRoutes = {
     // Wire the shared platform catalog endpoints. The MEMS Admin menu uses these
     // routes for Material catalog, Service catalog and GL account master.
@@ -1620,164 +1780,17 @@ export const procurementRoutes = {
       }
       return {warehouses:visible.map(w=>({id:w.id,name:warehouseNames.get(w.id)})),movements:movements.slice(0,1000),alerts,journalDiagnostics:{accessibleWarehouses:visible.length,visibleJournalEntries:movements.length}};
     })],
-    'POST /api/org/inventory/dashboard': [orgRoute('org.inventory.dashboard',null,async ctx=>{if(ctx.role!=='org_super_admin'&&!hasPerm(ctx.permissions,'INV.view')&&!hasPerm(ctx.permissions,'PRC.view'))throw new HttpError(403,'Inventory viewing permission required.');const root='organizations/'+ctx.orgId;const [user,warehouses,occupancies,journal,infos,procurements]=await Promise.all([getDoc('users/'+ctx.uid),listDocs(root+'/warehouses'),listDocs(root+'/warehouse_bin_occupancy'),listDocs(root+'/material_journal'),listDocs(root+'/inventory_material_info'),listDocs(root+'/procurement_material_info')]);const allowed=ctx.role==='org_super_admin'?'all':user?await allowedNodeIds(ctx.orgId,user,true):new Set<string>();const visible=new Set(warehouses.filter(w=>allowed==='all'||allowed.has(w.id)).map(w=>w.id));const infoMap=new Map(infos.map(x=>[x.id,x.data]));const priceMap=new Map(procurements.map(x=>[x.id,x.data]));const balances=new Map<string,{physical:number;valid:boolean;seen:boolean}>();for(const row of journal){const d=row.data,w=str(d.warehouseId);if(!visible.has(w))continue;const key=str(d.materialId)+'_'+w;const b=balances.get(key)||{physical:0,valid:true,seen:false};b.seen=true;if(str(d.status)!=='posted'||d.reconciled!==true)b.valid=false;else b.physical+=Number(isObj(d.balancesDelta)?d.balancesDelta.physicalStock:0)||0;balances.set(key,b);}let emptyBins=0,overstockQuantity=0,overstockCount=0,unvalued=0,unreconciled=0;const byCurrency:Record<string,{stockValue:number;overstockValue:number;stockQuantity:number;overstockQuantity:number}>={};const stockKeys=new Set<string>();for(const [key,b] of balances){if(!b.valid||!b.seen){unreconciled++;continue;}stockKeys.add(key);const info=infoMap.get(key),proc=priceMap.get(key);const price=Number(proc?.unitPrice),currency=str(proc?.priceCurrency)||'Unspecified';const q=Math.max(0,b.physical),max=Number(info?.maximumLevel);const excess=info?.maximumLevel!==undefined&&info?.maximumLevel!==null&&str(info.maximumLevel)!==''&&Number.isFinite(max)?Math.max(0,q-max):0;if(excess>0){overstockCount++;overstockQuantity+=excess;}if(!Number.isFinite(price)||price<0){if(q>0)unvalued++;continue;}const c=byCurrency[currency]||(byCurrency[currency]={stockValue:0,overstockValue:0,stockQuantity:0,overstockQuantity:0});c.stockValue+=q*price;c.stockQuantity+=q;c.overstockValue+=excess*price;c.overstockQuantity+=excess;}for(const occ of occupancies){const d=occ.data,w=str(d.warehouseId);if(!visible.has(w))continue;const key=str(d.materialId)+'_'+w,b=balances.get(key);if(b?.valid&&b.seen&&b.physical===0)emptyBins++;}return {emptyBins,overstockQuantity,overstockCount,byCurrency,unvalued,unreconciled};})],
-    'POST /api/org/inventory/on-hand': [orgRoute('org.inventory.onhand', null, async ctx => {
-        if(ctx.role!=='org_super_admin'&&!hasPerm(ctx.permissions,'INV.view')&&!hasPerm(ctx.permissions,'INV.')&&!hasPerm(ctx.permissions,'PRC.view'))
-            throw new HttpError(403,'Inventory viewing permission required.');
-        const root='organizations/'+ctx.orgId;
-        const [user,warehouses,materials,extensions,nodes,journal,inventoryInfo,procurementInfo,occupancies,org,legalEntities,uomDoc,currencyDoc]=await Promise.all([
-            getDoc('users/'+ctx.uid),listDocs(root+'/warehouses'),listDocs(root+'/materials'),
-            listDocs(root+'/material_extensions'),listDocs(root+'/structure'),
-            listDocs(root+'/material_journal'),listDocs(root+'/inventory_material_info'),
-            listDocs(root+'/procurement_material_info'),listDocs(root+'/warehouse_bin_occupancy'),
-            getDoc(root),listDocs(root+'/legal_entities'),getDoc('module_workspaces/PRC/metadata/unitsOfMeasure'),getDoc('reference/currencies'),
-        ]);
-        const allowed=ctx.role==='org_super_admin'?'all':user?await allowedNodeIds(ctx.orgId,user,true):new Set<string>();
-        const nodeMap=new Map(nodes.map(x=>[x.id,x]));
-        const visible=warehouses.filter(x=>allowed==='all'||allowed.has(x.id));
-        const warehouseById=new Map(visible.map(x=>[x.id,x.data]));
-        const entityById=new Map(legalEntities.map(x=>[x.id,x.data]));
-        const customUnits=Array.isArray(uomDoc?.data.items)?uomDoc.data.items.filter(isObj):[];
-        const configuredUnits=customUnits.length?customUnits:undefined;
-        // An entity's currency is normally stored on the Organization Design
-        // legal_entity structure node (attributes.currencyCode). Legacy
-        // installations may also have standalone legal_entities records.
-        const legalCurrency=(entityId:string):string=>{
-            const node=nodeMap.get(entityId)?.data;
-            const attr=isObj(node?.attributes)?node.attributes:{};
-            const legacy=entityById.get(entityId);
-            const legacyAttr=isObj(legacy?.attributes)?legacy.attributes:{};
-            return (str(attr.currencyCode)||str(attr.localCurrency)||
-                str(node?.currencyCode)||str(node?.localCurrency)||
-                str(legacyAttr.currencyCode)||str(legacy?.localCurrency)||
-                str(legacy?.currencyCode)).toUpperCase();
-        };
-        const owningLegalEntity=(warehouseId:string,materialEntityId:string):string=>{
-            const warehouse=warehouseById.get(warehouseId);
-            const explicit=str(warehouse?.legalEntityId)||materialEntityId;
-            if(explicit && legalCurrency(explicit))return explicit;
-            // Warehouses are attached to sites; follow the structure parents.
-            let current=warehouseId;
-            const seen=new Set<string>();
-            for(let i=0;i<20&&current&&!seen.has(current);i++){
-                seen.add(current);
-                const node=nodeMap.get(current)?.data;
-                if(str(node?.level)==='legal_entity')return current;
-                current=str(node?.parentId)||str(current===warehouseId?warehouse?.parentId:'');
-            }
-            // An explicit entity ID is retained even if its currency has not
-            // yet been entered. Never pick another entity's currency.
-            return explicit;
-        };
-        const currencyEntries=(Array.isArray(currencyDoc?.data.items)?currencyDoc.data.items:[])
-            .filter(isObj).map(c=>({code:str(c.code).toUpperCase(),rate:Number(c.unitsPerUsd),enabled:c.enabled!==false}))
-            .filter(c=>/^[A-Z]{3}$/.test(c.code)&&c.enabled&&Number.isFinite(c.rate)&&c.rate>0);
-        const rates=Object.fromEntries(currencyEntries.map(c=>[c.code,c.rate]));
-        const whMap=new Map(visible.map(w=>[w.id,{
-            id:w.id,name:str(nodeMap.get(w.id)?.data.name)||str(w.data.name)||w.id,
-            code:str(nodeMap.get(w.id)?.data.code)||str(w.data.code)||w.id,
-        }]));
-        // Never present a zero or a financial value when the journal is missing or
-        // any stock movement has not been posted and reconciled.
-        type Balance={physical:number;reserved:number;quarantined:number;damaged:number;expired:number;other:number;seen:boolean;valid:boolean};
-        const balances=new Map<string,Balance>();
-        const ledgerKey=(materialId:string,warehouseId:string)=>JSON.stringify([materialId,warehouseId]);
-        for(const row of journal){
-            const d=row.data,materialId=str(d.materialId),warehouseId=str(d.warehouseId);
-            if(!materialId||!whMap.has(warehouseId))continue;
-            const key=ledgerKey(materialId,warehouseId);
-            const b=balances.get(key)||{physical:0,reserved:0,quarantined:0,damaged:0,expired:0,other:0,seen:false,valid:true};
-            b.seen=true;
-            if(str(d.status)!=='posted'||d.reconciled!==true)b.valid=false;
-            else {
-                const delta=isObj(d.balancesDelta)?d.balancesDelta:{};
-                for(const [field,source] of [
-                    ['physical','physicalStock'],['reserved','reservedStock'],['quarantined','quarantinedStock'],
-                    ['damaged','damagedStock'],['expired','expiredStock'],['other','other'],
-                ] as const){
-                    if(delta[source]!==undefined&&(!Number.isFinite(Number(delta[source])))){
-                        b.valid=false;continue;
-                    }
-                    b[field]+=Number(delta[source])||0;
-                }
-            }
-            balances.set(key,b);
-        }
-        const inv=new Map(inventoryInfo.map(x=>[x.id,x.data]));
-        const purchasing=new Map(procurementInfo.map(x=>[x.id,x.data]));
-        const occupied=new Set(occupancies.filter(x=>whMap.has(str(x.data.warehouseId))&&
-            !!str(x.data.materialId)).map(x=>ledgerKey(str(x.data.materialId),str(x.data.warehouseId))));
-        // Firestore stores Unit Price and stock levels as numbers. core.str()
-        // returns '' for a number, causing every valid price to look missing.
-        const level=inventoryNumericField;
-        const items:Array<Record<string,unknown>>=[];
-        const unique=new Set<string>();
-        for(const m of materials){
-            if(!['active','approved'].includes(str(m.data.status))||!str(m.data.materialNumber))continue;
-            const linked=Array.isArray(m.data.warehouseIds)?m.data.warehouseIds.map(str):[];
-            if(str(m.data.pushedAt)&&str(m.data.warehouseId))linked.push(str(m.data.warehouseId));
-            for(const ex of extensions)if(str(ex.data.sourceId)===m.id&&str(ex.data.status)==='approved')
-                linked.push(str(ex.data.warehouseId));
-            for(const warehouseId of new Set(linked)){
-                const wh=whMap.get(warehouseId),key=ledgerKey(m.id,warehouseId);
-                if(!wh||unique.has(key))continue;
-                unique.add(key);
-                const stock=balances.get(key);
-                const ready=!!stock&&stock.seen&&stock.valid;
-                const physical=ready?stock.physical:null;
-                const net=ready?stock.physical-stock.reserved-stock.quarantined-
-                    stock.damaged-stock.expired-stock.other:null;
-                const settings=inv.get(m.id+'_'+warehouseId);
-                const min=level(settings?.minimumLevel)??level(settings?.reorderPoint);
-                const max=level(settings?.maximumLevel);
-                const emptyBin=occupied.has(key)&&ready&&physical===0;
-                const stockStatus=!stock?.seen?'Not yet tracked':
-                    !ready?'Unreconciled':emptyBin?'Empty bin':
-                    max!==null&&physical!==null&&physical>max?'Overstock':
-                    min!==null&&net!==null&&net<min?'Understock':'Within limits';
-                const purchase=purchasing.get(m.id+'_'+warehouseId),unitPrice=level(purchase?.unitPrice);
-                const stockUom=str(m.data.uom);
-                // Material registration defines its UoM as stocked, issued AND ordered.
-                // Procurement can override the purchase UoM; without an override
-                // the source UoM is the material's registered ordering unit.
-                const priceUom=str(purchase?.purchaseUom)||stockUom;
-                const entityId=owningLegalEntity(warehouseId,str(m.data.legalEntityId));
-                const localCurrency=(legalCurrency(entityId)||
-                    str(org?.data.localCurrency)||str(org?.data.currencyCode)).toUpperCase();
-                // The detail page already defaults an unspecified supplier currency
-                // to the legal-entity currency. Preserve that same interpretation.
-                const priceCurrency=(str(purchase?.priceCurrency)||localCurrency).toUpperCase();
-                const unitCost=unitPrice!==null?unitPricePerStockUnit(unitPrice,priceUom,stockUom,configuredUnits):null;
-                const unitCostLocal=unitCost!==null?convertStockCurrency(unitCost,priceCurrency,localCurrency,rates):null;
-                const netStockValue=ready&&net!==null&&unitCostLocal!==null?net*unitCostLocal:null;
-                const valuationReason=!ready?'Stock journal must be posted and reconciled':
-                    unitPrice===null?'Set Unit Price in Procurement Information':
-                    !priceUom||!stockUom?'Configure the purchase and stock units of measure':
-                    unitCost===null?'Purchase and stock units need a compatible enabled conversion':
-                    !localCurrency?'Configure local currency in Organization Design → Legal entity':
-                    !priceCurrency?'Configure the supplier price currency':
-                    unitCostLocal===null?'Configure the exchange rate for '+priceCurrency+' → '+localCurrency:'';
-                items.push({
-                    id:m.id,materialNumber:str(m.data.materialNumber),name:str(m.data.name),
-                    shortText:str(m.data.shortText),categoryCode:str(m.data.categoryCode),
-                    subcategoryCode:str(m.data.subcategoryCode),familyCode:str(m.data.familyCode),
-                    materialCode:str(m.data.materialCode),uom:stockUom,
-                    supplyType:str(m.data.supplyType),
-                    partNumber:str(m.data.oemPartNumber)||str(m.data.ocmPartNumber)||
-                        str(m.data.proprietaryPartNumber)||str(m.data.generalPartNumber),
-                    warehouseId,warehouseName:wh.name,warehouseCode:wh.code,
-                    status:str(m.data.status),quantityOnHand:physical,netAvailable:net,
-                    netStockValue,stockCurrency:localCurrency,unitCostLocal,priceCurrency,priceUom,
-                    purchaseUnitPrice:unitPrice,valuationReason,valuationSource:'Procurement Information',
-                    valuationUnitSource:purchase?.purchaseUom?'procurement':'material master default',
-                    priceCurrencyDefaulted:!str(purchase?.priceCurrency),
-                    stockLedgerAvailable:ready,stockStatus,emptyBin,
-                    minimumLevel:min,maximumLevel:max,createdAt:str(m.data.createdAt),
-                });
-            }
-        }
-        return {warehouses:Array.from(whMap.values()),currencies:currencyEntries.map(({code,rate})=>({code,rate})),items};
+    'POST /api/org/inventory/dashboard': [orgRoute('org.inventory.dashboard',null,async ctx=>{
+        const snapshot=await inventoryOnHandSnapshot(ctx);
+        const warehouseId=str(ctx.body.warehouseId);
+        const displayCurrency=str(ctx.body.displayCurrency).toUpperCase();
+        if(warehouseId&&warehouseId!=='all'&&!snapshot.warehouses.some(w=>w.id===warehouseId))
+            throw new HttpError(403,'Selected warehouse is not accessible.');
+        if(displayCurrency&&!snapshot.currencies.some(c=>c.code===displayCurrency))
+            throw new HttpError(400,'Choose a configured, enabled display currency.');
+        return summarizeInventoryDashboard(snapshot,warehouseId,displayCurrency);
     })],
+    'POST /api/org/inventory/on-hand': [orgRoute('org.inventory.onhand', null, inventoryOnHandSnapshot)],
     'POST /api/org/procurement/materials/options': [orgRoute('org.procurement.materials.options', null, async ctx => {requireModule(ctx,'materials');const [u,c,v,assemblies,warehouseDocs,user]=await Promise.all([getDoc('module_workspaces/PRC/metadata/unitsOfMeasure'),getDoc('module_workspaces/INV/metadata/materialClassifications'),listDocs('organizations/'+ctx.orgId+'/vendors'),listDocs('organizations/'+ctx.orgId+'/structure'),listDocs('organizations/'+ctx.orgId+'/warehouses'),getDoc('users/'+ctx.uid)]);const allowed=ctx.role==='org_super_admin'?'all':user?await allowedNodeIds(ctx.orgId,user,true):new Set<string>();const nodes=new Map(assemblies.map(x=>[x.id,x]));const costCenters=assemblies.filter(x=>str(x.data.level)==='cost_center'&&(allowed==='all'||allowed.has(x.id))&&str(x.data.status)!=='inactive').map(x=>({id:x.id,name:str(x.data.name)||x.id,code:str(x.data.code)||x.id}));const assets=assemblies.filter(x=>str(x.data.level)==='work_center'&&str(x.data.status)!=='inactive').map(x=>({id:x.id,name:str(x.data.name)||x.id,code:str(x.data.code)||x.id,parentId:str(x.data.parentId)}));const scopedAssemblies=assemblies.filter(x=>str(x.data.level)==='assembly'&&str(x.data.status)!=='inactive').map(x=>({id:x.id,name:str(x.data.name)||x.id,parentId:str(x.data.parentId)}));const warehouses=warehouseDocs.filter(x=>allowed==='all'||allowed.has(x.id)).map(x=>({id:x.id,name:str(nodes.get(x.id)?.data.name)||str(x.data.name)||x.id,code:str(nodes.get(x.id)?.data.code)||x.id,categoryCodes:Array.isArray(x.data.materialCategoryCodes)?x.data.materialCategoryCodes.map(str):str(x.data.materialCategoryCode)?[str(x.data.materialCategoryCode)]:[]}));return {warehouses,costCenters,assets,scopedAssemblies,uoms:(Array.isArray(u?.data.items)?u.data.items:[]).filter(x=>isObj(x)&&x.active!==false),classifications:(Array.isArray(c?.data.items)?c.data.items:[]).filter(x=>isObj(x)&&x.active!==false),restrictions:(await warehouseRestrictionMaster()).filter(x=>x.active),vendors:v.filter(x=>x.data.active!==false).map(x=>({id:x.id,name:str(x.data.name)||str(x.data.legalName)||x.id})),assemblies:assemblies.filter(x=>str(x.data.level)==='assembly').map(x=>({id:x.id,name:str(x.data.name)||x.id}))};})],
     'POST /api/org/procurement/materials/clusters': [orgRoute('org.procurement.materials.clusters',null,async ctx=>{
         requireModule(ctx,'materials');

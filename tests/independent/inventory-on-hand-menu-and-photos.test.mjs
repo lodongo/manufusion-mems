@@ -70,8 +70,8 @@ test('Android wrapper: Take photo starts the camera app through a private FilePr
 test('inventory on hand uses reconciled journal balances, calculates net available and assigns actionable stock colours',()=>{
     const backend=read('backend/procurement.ts');
     const endpoint=backend.slice(
-        backend.indexOf("'POST /api/org/inventory/on-hand':"),
-        backend.indexOf("'POST /api/org/procurement/materials/options':"));
+        backend.indexOf('async function inventoryOnHandSnapshot('),
+        backend.indexOf('export const procurementRoutes ='));
     const ui=read('src/org/InventoryOnHand.tsx');
     for(const field of ['material_journal','inventory_material_info','procurement_material_info','warehouse_bin_occupancy'])
         assert.ok(endpoint.includes(field), 'on-hand must load '+field);
