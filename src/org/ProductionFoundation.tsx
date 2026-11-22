@@ -181,7 +181,7 @@ function BomEditor({draft,onChange,items,refs,skuSetup,materialPolicy}:{
  return <div className='space-y-4'>
     <div className='rounded-xl bg-page p-3 text-sm text-soft'>
         <p className='font-semibold text-ink'>Bill of materials</p>
-        <p className='mt-1'>First choose what is produced. Then specify the components and their quantities. MEMS creates the BOM code and name automatically.</p>
+        <p className='mt-1'>First choose what is produced, then add its ingredients and materials. Use a manufactured intermediate for an internal output, a warehouse material for stock-issued items, or Process supply for metered, inline, buffered and bulk inputs such as water or gases. MEMS creates the BOM code and name automatically.</p>
     </div>
     <section className='space-y-3 rounded-xl border border-line p-3'>
         <h3 className='font-semibold'>1. What are you producing?</h3>
@@ -219,6 +219,7 @@ function BomEditor({draft,onChange,items,refs,skuSetup,materialPolicy}:{
                     const processSupply=c.source==='PROCESS_SUPPLY';
                     const supplyRef=c.processSupplyKind||'SKU';
                     const processMaterial=refs.materials.find(m=>m.id===c.materialId);
+                    const materialSupplyProfile=(selected?.supplyProfile||{}) as SupplyProfile;
                     const processUtility=refs.utilities.find(u=>u.workCenterId===c.utilityWorkCenterId&&u.code===c.utilityCode);
                     const material=refs.warehouseMaterials.find(m=>m.warehouseId===c.warehouseId&&m.id===c.materialId);
                     const warehouse=refs.warehouses.find(w=>w.id===c.warehouseId);
@@ -292,7 +293,10 @@ function BomEditor({draft,onChange,items,refs,skuSetup,materialPolicy}:{
                                 }}/>}
                             {supplyRef==='UTILITY'&&<p className='text-xs text-muted'>This uses the registered utility reference. Select its approved quantity unit below if the register does not provide one.</p>}
                             {supplyRef==='SKU'&&selected&&<p className='text-xs text-muted'>
-                                Source SKU {selected.id} · {selected.name}. Supply origins, rates and tariffs belong to this material's supply profile, not a second BOM line.
+                                Source SKU {selected.id} · {selected.name}.
+                                {materialSupplyProfile.handlingMode?' Handling: '+materialSupplyProfile.handlingMode.replaceAll('_',' ').toLowerCase()+'.':''}
+                                {materialSupplyProfile.sources?.length?' '+materialSupplyProfile.sources.length+' configured supply source(s).':''}
+                                Supply origin and tariffs belong to the material's shared supply profile, not another BOM line.
                             </p>}
                             {supplyRef==='PROCUREMENT'&&processMaterial&&<p className='text-xs text-muted'>
                                 {processMaterial.materialNumber} · {processMaterial.name}. Direct process use does not create a warehouse stock issue or purchase.
