@@ -2,6 +2,7 @@ import {useEffect,useId,useState} from 'react';
 import {Alert,Field,SelectField} from '../components/ui';
 import {callBackend} from '../lib/backend';
 import {DEFAULT_FORM_DEFAULTS,formDefaultsFor,type FormDefaults} from './plnFormDefaults';
+import {COST_CENTER_CATEGORIES,costCenterSubcategories,type CostCenterCategory} from '../shared/costCenterTaxonomy';
 
 type Site={id:string;name:string;code:string};
 type Props={initial:FormDefaults;revision:number;sites:Site[];canEdit:boolean;
@@ -28,14 +29,28 @@ export default function PlnFormDefaultsPanel({initial,revision,sites,canEdit,onS
  const [draft,setDraft]=useState<FormDefaults>(()=>formDefaultsFor(initial));
  const [busy,setBusy]=useState(false);
  const [error,setError]=useState(''),[notice,setNotice]=useState('');
+ const [costCategories,setCostCategories]=useState<CostCenterCategory[]>(COST_CENTER_CATEGORIES);
+ useEffect(()=>{
+  let mounted=true;
+  void callBackend<{types:CostCenterCategory[]}>('/api/org/reference/cost-center-types')
+   .then(x=>{if(mounted&&x.types?.length)setCostCategories(x.types);})
+   .catch(()=>{/* Shared taxonomy remains the fallback. */});
+  return ()=>{mounted=false;};
+ },[]);
+ // Manufacturing resources can be adopted only from Production/Manufacturing cost centres.
+ const resourceCategories=costCategories.filter(c=>c.code==='MFG'||
+  /\b(manufactur(?:e|ing)?|production|factory)\b/i.test(c.label));
+ const resourceSubcategories=costCategories.find(c=>c.code===draft.resourceCostCenterCategory)?.subcategories||
+  costCenterSubcategories(draft.resourceCostCenterCategory);
  useEffect(()=>{setDraft(formDefaultsFor(initial));setError('');setNotice('');},[initial,revision]);
  const change=<K extends keyof FormDefaults>(key:K,value:FormDefaults[K])=>
   setDraft(old=>({...old,[key]:value}));
  const invalid=()=>{
   if(!Number.isFinite(draft.bomOutputQty)||draft.bomOutputQty<=0)return 'BOM output quantity must be greater than zero.';
-  if(!Number.isFinite(draft.resourceRate)||draft.resourceRate<=0)return 'Resource rating must be greater than zero.';
-  if(!Number.isFinite(draft.resourceEfficiency)||draft.resourceEfficiency<=0||draft.resourceEfficiency>100)
-   return 'Resource efficiency must be greater than zero and at most 100%.';
+  if(!resourceCategories.some(c=>c.code===draft.resourceCostCenterCategory))
+   return 'Choose a Manufacturing/Production cost-centre category from the shared cost-centre types.';
+  if(draft.resourceCostCenterSubcategory&&!resourceSubcategories.some(x=>x.code===draft.resourceCostCenterSubcategory))
+   return 'Choose a subcategory belonging to the selected cost-centre category.';
   if(!/^[A-Z0-9][A-Z0-9_-]{0,31}$/.test(draft.routingAlternativeCode))
    return 'Alternative code must contain 1–32 uppercase letters, digits, underscores or hyphens.';
   if(!Number.isFinite(draft.demandQuantity)||draft.demandQuantity<=0)
@@ -100,18 +115,16 @@ export default function PlnFormDefaultsPanel({initial,revision,sites,canEdit,onS
     </div>
    </details>
    <details className='rounded-xl border border-line p-3'>
-    <summary className='cursor-pointer font-semibold'>3. Manufacturing resources</summary>
+    <summary className='cursor-pointer font-semibold'>3. Manufacturing resources · cost-centre classification</summary>
     <div className='mt-3 grid gap-3 sm:grid-cols-2'>
-     <Choice title='Default resource class' value={draft.resourceType}
-      options={['LINE','WORK_CENTER','MACHINE','BATCH_VESSEL','ASSEMBLY_CELL','OTHER']
-       .map(t=>[t,t.replaceAll('_',' ')] as [string,string])}
-      disabled={!canEdit||busy} onChange={v=>change('resourceType',v as FormDefaults['resourceType'])}/>
-     <Quantity title='Resource nominal units per hour' value={draft.resourceRate}
-      min='0.000001' disabled={!canEdit||busy} onChange={v=>change('resourceRate',v)}/>
-     <Quantity title='Default resource planning efficiency (%)' value={draft.resourceEfficiency}
-      min='0.000001' disabled={!canEdit||busy} onChange={v=>change('resourceEfficiency',v)}/>
+     <Choice title='Default cost-centre category' value={draft.resourceCostCenterCategory}
+      options={resourceCategories.map(c=>[c.code,c.code+' · '+c.label] as [string,string])}
+      disabled={!canEdit||busy} onChange={v=>setDraft(old=>({...old,resourceCostCenterCategory:v,resourceCostCenterSubcategory:''}))}/>
+     <Choice title='Default cost-centre subcategory' value={draft.resourceCostCenterSubcategory}
+      options={[['','All subcategories'],...resourceSubcategories.map(x=>[x.code,x.label+' · '+x.code] as [string,string])]}
+      disabled={!canEdit||busy} onChange={v=>change('resourceCostCenterSubcategory',v)}/>
     </div>
-    <p className='mt-2 text-xs text-muted'>These are generic resource form defaults, not commissioned SKU throughput. Container speed and rating units remain owned by the manufacturing cost centre and adopted physical-container catalogue.</p>
+    <p className='mt-2 text-xs text-muted'>These are optional filters when adopting manufacturing resources from authorized production cost centres. Actual categories and subcategories are owned by Organization Design → Cost Centres. Resource defaults never change cost-centre classifications, equipment types or commissioned SKU speeds.</p>
    </details>
    <details className='rounded-xl border border-line p-3'>
     <summary className='cursor-pointer font-semibold'>4. Demand & S&amp;OP</summary>
