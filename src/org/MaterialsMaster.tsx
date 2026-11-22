@@ -514,7 +514,7 @@ export default function MaterialsMaster() {
                 </div>
                 {clustersLoading?<p className='text-xs text-soft'>Checking cluster compatibility…</p>:
                     clustersError?<Alert tone='error'>{clustersError}</Alert>:
-                    matchingClusters.length===0?<Alert tone='warn'>No exact matches. Select an eligible cluster below to adopt its restrictions, or create another cluster.</Alert>:
+                    matchingClusters.length===0?<Alert tone='warn'>No matching clusters in this warehouse for the selected subcategory and restrictions. Select an eligible cluster below to adopt its restrictions, or create another cluster.</Alert>:
                     <p className='text-xs text-soft'>{matchingClusters.length} compatible cluster(s) found.</p>}
                 {clusterOptions.filter(c=>showAllClusters||c.adoptable||c.code===registration.clusterCode)
                     .map(c=><button type='button' key={c.code}
