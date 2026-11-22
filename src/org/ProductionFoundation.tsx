@@ -525,8 +525,8 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
         try{
             const body={...draft};
             if(active==='routings'&&!str(body.name).trim()){
-                const output=rows.items.find(x=>x.id===str(body.skuId));
-                body.name=(output?.name||'Manufacturing')+' · Process routing';
+                const group=skuSetup.parameters.find(p=>p.kind==='processClasses'&&p.id===str(body.processClassId));
+                body.name=(group?.name||'Manufacturing')+' · Process route';
             }
             const result=await callBackend<{record:Row;generatedCode?:string}>('/api/org/pln-mfg/foundation/save',{kind:recordKind(active),record:body,expectedRevision:body.revision??0});
             await load();setDraft(null);setNotice('Saved '+(result.generatedCode||result.record.id)+' · Revision '+result.record.revision+'. The code is maintained by MEMS.');
