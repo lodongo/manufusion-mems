@@ -78,7 +78,7 @@ const stageList=(input:unknown):RoutingStep[]=>Array.isArray(input)?input as Rou
 export default function PlnProcessRoutingEditor({value,onChange,items,boms,resources,sites,processClasses,measureUnits}:{
  value:RoutingRecord;onChange:(next:RoutingRecord)=>void;items:Row[];boms:Row[];resources:Row[];
  sites:Array<{id:string;name:string;code:string}>;processClasses:Array<{id:string;name:string;enabled?:boolean}>;
- measureUnits:CapacityUnit[]}){
+ measureUnits:Array<CapacityUnit&{label?:string;symbol?:string}>}){
  const [centers,setCenters]=useState<CostCenter[]>([]);
  const [loadError,setLoadError]=useState('');
  const [section,setSection]=useState<'setup'|'stages'|'skus'|'review'>('setup');
@@ -399,7 +399,7 @@ export default function PlnProcessRoutingEditor({value,onChange,items,boms,resou
          value={stage.flowRatePerHour??0}
          onChange={v=>updateStep(stage.code,{flowRatePerHour:Number(v)})}/>
         <Choice label='Output measurement unit' value={stage.flowRateUom||''}
-         options={[['','Choose MEMS unit'],...measureUnits.map(x=>[x.code,x.code] as [string,string])]}
+         options={[['','Choose MEMS unit'],...measureUnits.map(x=>[x.code,(x.label||x.code)+(x.symbol?' ('+x.symbol+')':'')] as [string,string])]}
          onChange={flowRateUom=>updateStep(stage.code,{flowRateUom})}/>
         <p className='sm:col-span-2 text-xs text-muted'>This is a configured sustainable rate, not a live measurement. No fictitious batch size is required.</p>
        </>}
@@ -492,7 +492,7 @@ export default function PlnProcessRoutingEditor({value,onChange,items,boms,resou
     <Action onClick={()=>setSection('skus')} primary>Next: map SKUs</Action>
    </div>
   </div>}
-  {!legacy&&section==='stages'&&<PlnFlowOpportunities analysis={liveFlow}
+  {!legacy&&section==='stages'&&<PlnFlowOpportunities analysis={liveFlow} units={measureUnits}
    heading='Live capacity opportunities · draft configuration' showUnresolved={false}/>}
   {!legacy&&section==='skus'&&<div className='space-y-3'>
    <div className='rounded-xl border border-line bg-page p-3'>
@@ -584,10 +584,10 @@ export default function PlnProcessRoutingEditor({value,onChange,items,boms,resou
       <strong>{issue.stageCode} · {issue.field}: </strong>{issue.message}
      </p>)}
     </div>}
-    <PlnFlowOpportunities analysis={review.flowAnalysis}
+    <PlnFlowOpportunities analysis={review.flowAnalysis} units={measureUnits}
      heading='Capacity opportunities · verified source rates'/>
     {review.skuReviews&&review.skuReviews.length>1&&review.skuReviews.map(x=>
-     <PlnFlowOpportunities key={x.skuId} analysis={x.flowAnalysis}
+     <PlnFlowOpportunities key={x.skuId} analysis={x.flowAnalysis} units={measureUnits}
       heading={'SKU analysis · '+(items.find(item=>item.id===x.skuId)?.name||x.skuId)} showUnresolved={false}/>)}
     <h4 className='font-semibold'>Stage throughput — read-only sources</h4>
     <div className='grid gap-2 sm:grid-cols-2'>
