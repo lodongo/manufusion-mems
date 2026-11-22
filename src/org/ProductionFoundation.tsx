@@ -870,6 +870,7 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
     const [skuSetup,setSkuSetup]=useState<SkuSetup>(emptySkuSetup);
     const [refs,setRefs]=useState<References>(emptyReferences);
     const [draft,setDraft]=useState<Row|null>(null);
+    const [testBomOverride,setTestBomOverride]=useState(false);
     const [viewSkuId,setViewSkuId]=useState('');
     const [viewBomId,setViewBomId]=useState('');
     const [classEditingSku,setClassEditingSku]=useState('');
@@ -925,14 +926,16 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
     const load=async()=>{
         setLoading(true);setError('');
         try{
-            const [datasets,configuration,refData,skuData,materialSetup,capacitySetup]=await Promise.all([
+            const [datasets,configuration,refData,skuData,materialSetup,capacitySetup,testState]=await Promise.all([
                 canViewMasters?Promise.all(kinds.map(kind=>callBackend<{records:Row[]}>('/api/org/pln-mfg/foundation/list',{kind}))):Promise.resolve(kinds.map(()=>({records:[] as Row[]}))),
                 callBackend<{config:Config;revision:number;formDefaultsRevision:number}>('/api/org/pln-mfg/foundation/config').catch(()=>null),
                 canViewMasters?callBackend<References>('/api/org/pln-mfg/foundation/references'):Promise.resolve(emptyReferences),
                 canViewMasters?callBackend<SkuSetup>('/api/org/pln-mfg/sku/setup'):Promise.resolve(emptySkuSetup),
                 canViewMasters?callBackend<{policy:MaterialPolicy;revision:number}>('/api/org/pln-mfg/foundation/material-policy'):Promise.resolve({policy:defaultMaterialPolicy,revision:0}),
                 canViewPlanning?callBackend<{mappings:SetupRow[]}>('/api/org/pln/cost-center/hierarchy').catch(()=>null):Promise.resolve(null),
+                canViewMasters?callBackend<{testOverride:boolean}>('/api/org/pln-mfg/foundation/test-state').catch(()=>({testOverride:false})):Promise.resolve({testOverride:false}),
             ]);
+            setTestBomOverride(testState.testOverride);
             const [items,boms,resources,routings]=datasets;
             setRows({items:items.records,boms:boms.records,resources:resources.records,routings:routings.records});
             setRefs(refData);
@@ -1083,7 +1086,8 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
             }
             const result=await callBackend<{record:Row;generatedCode?:string}>('/api/org/pln-mfg/foundation/save',{kind:recordKind(active),record:body,expectedRevision:body.revision??0});
             await load();setDraft(null);setNotice('Saved '+(result.generatedCode||result.record.id)+' · Revision '+result.record.revision+
-                '. Existing BOM code retained. Approved edits require reapproval before use.');
+                (active==='boms'&&testBomOverride?'. Applied immediately with audited test override.':
+                 '. Existing BOM code retained. Normal approval controls apply.'));
         }catch(e){setError(e instanceof Error?e.message:'Could not save.');}
         finally{setBusy(false);}
     };
@@ -1215,9 +1219,13 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
             <div className='flex justify-end'><Button disabled={!canConfig||busy} onClick={()=>void saveConfig()}>Save planning configuration</Button></div>
         </Card>:<>
             <div className='flex min-w-0 flex-wrap items-center justify-between gap-2'><p className='text-xs text-muted sm:text-sm'>{active==='routings'?'Choose or create a process route. A route can serve multiple SKUs.':filtered.length+' saved master records · draft versions'}</p>{canSave&&!viewSkuId&&!viewBomId&&<Button onClick={()=>{setViewBomId('');setDraft(newRecord(active,materialPolicy,formDefaults,refs.sites));setError('');setNotice('');}}>Add {active==='items'?'SKU':active==='boms'?'BOM':active==='routings'?'new route':'resource'}</Button>}</div>
-            {draft?<Card className='space-y-4'>
+            {draft?<Card className={'space-y-4'+(active==='boms'&&testBomOverride?' border-2 border-blue-600':'')}>
                 <div className='flex items-center justify-between gap-2'><h2 className='font-semibold'>{active==='routings'?(draft.revision?'Edit routing draft':'Create manufacturing route'):(draft.revision?'Edit draft':'New master record')}</h2>{active!=='boms'&&<Button variant='secondary' disabled={busy} onClick={()=>setDraft(null)}>Cancel</Button>}</div>
-                {draft.revision&&<div className='flex flex-wrap gap-2 text-xs text-soft'><span className='font-semibold'>Immutable revisions:</span>{history.map(h=><span key={String(h.revision)} className='rounded-md border border-line px-2 py-1'>r{h.revision} · {str(h.updatedAt).slice(0,10)}</span>)}</div>}
+                {active==='boms'&&testBomOverride&&
+                    <div role='status' className='rounded-xl border-2 border-blue-600 bg-blue-50 p-3 text-sm text-blue-900'>
+                        Development test override · super admin. Save applies changes immediately to this BOM code; version history and high-priority security audit are retained.
+                    </div>}
+                {draft.revision&&<div className='flex flex-wrap gap-2 text-xs text-soft'><span className='font-semibold'>Revision history:</span>{history.map(h=><span key={String(h.revision)} className='rounded-md border border-line px-2 py-1'>r{h.revision} · {str(h.updatedAt).slice(0,10)}</span>)}</div>}
                 <MasterEditor tab={active} draft={draft} onChange={setDraft} items={rows.items}
                     boms={rows.boms} resources={rows.resources} refs={refs} skuSetup={skuSetup} materialPolicy={materialPolicy}/>
                 {active==='items'&&draft.id&&['FINISHED','INTERMEDIATE'].includes(str(draft.category))&&
@@ -1225,7 +1233,8 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
 
                 <div className='flex flex-wrap justify-end gap-2'>
                     {active==='boms'&&<Button variant='secondary' disabled={busy} onClick={()=>setDraft(null)}>Cancel</Button>}
-                    <Button disabled={busy||!canSave} onClick={()=>void save()}>{busy?'Saving...':'Save draft'}</Button>
+                    <Button disabled={busy||!canSave} className={active==='boms'&&testBomOverride?'border-2 border-blue-600 ring-2 ring-blue-300':''}
+                        onClick={()=>void save()}>{busy?'Saving...':active==='boms'&&testBomOverride?'Save & apply now':active==='boms'?'Save BOM':'Save draft'}</Button>
                 </div>
             </Card>:active==='boms'&&viewedBom?<Card className='space-y-4'>
                 <div className='flex flex-wrap items-center justify-between gap-2'>
@@ -1307,8 +1316,9 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
                         <Button variant='secondary' disabled={busy} onClick={()=>{
                             setDraft(null);setViewSkuId('');setViewBomId(row.id);setError('');setNotice('');
                         }}>View</Button>
-                        {canSave&&<Button variant='secondary' disabled={busy||str(row.status)==='pending_approval'}
-                            title={str(row.status)==='pending_approval'?'Submitted BOMs must complete review before editing.':''}
+                        {canSave&&<Button variant='secondary' disabled={busy||(str(row.status)==='pending_approval'&&!testBomOverride)}
+                            className={testBomOverride?'border-2 border-blue-600':''}
+                            title={str(row.status)==='pending_approval'&&!testBomOverride?'Submitted BOMs must complete review before editing.':''}
                             onClick={()=>void openDraft(row)}>
                             Edit
                         </Button>}
@@ -1338,13 +1348,16 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
                     </div>
                 </div>}
                 {str(row.status)==='draft'&&canSubmit&&<Button variant='secondary' disabled={busy} onClick={()=>void release(row.id,'submit')}>Submit for technical approval</Button>}
-                {str(row.status)==='pending_approval'&&canApprove&&<div className='space-y-2'>
+                {str(row.status)==='pending_approval'&&(canApprove||active==='boms'&&testBomOverride)&&<div className='space-y-2'>
                     <Field title='Decision note / rejection reason' value={decisionReason} onChange={setDecisionReason}/>
                     <div className='flex flex-wrap gap-2'>
-                        <Button disabled={busy} onClick={()=>void release(row.id,'approve')}>Approve version</Button>
+                        <Button disabled={busy} className={testBomOverride?'border-2 border-blue-600':''}
+                            onClick={()=>void release(row.id,'approve')}>Approve version</Button>
                         <Button variant='danger' disabled={busy} onClick={()=>void release(row.id,'reject')}>Reject</Button>
                     </div>
-                    <p className='text-xs text-muted'>The submitter and creator cannot approve their own master data.</p>
+                    <p className='text-xs text-muted'>{active==='boms'&&testBomOverride?
+                        'Blue-border test override: a super admin may approve their own BOM; all bypasses are audited.':
+                        'The submitter and creator cannot approve their own master data.'}</p>
                 </div>}
             </Card>)}</div>}
             {!filtered.length&&!draft&&<Card><p className='text-sm text-muted'>No records exist yet. Begin with material and product records, then define BOMs, resources and routings.</p></Card>}
