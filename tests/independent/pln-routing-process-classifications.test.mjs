@@ -7,7 +7,7 @@ import {normalizeMaster} from '../../backend/plnMfgFoundation.ts';
 const read=path=>readFileSync(new URL('../../'+path,import.meta.url),'utf8');
 const sku={
  id:'SKU-PROCESS-001',name:'Generic manufactured item',category:'INTERMEDIATE',
- family:'Organization family',uom:'L',packQty:1,sourceMode:'INVENTORY',
+ uom:'L',packQty:1,sourceMode:'INVENTORY',
 };
 const stage={code:'STG-000000001',name:'Generic processing step',resourceId:'RSC-01',
  producesSkuId:'SKU-PROCESS-001',bomId:'BOM-001',costCenterId:'CC-01',
@@ -24,11 +24,11 @@ test('Manufacturing process classifications are organization-managed, not a fixe
  assert.throws(()=>normalizeSkuParameter('processClasses',{name:''}),/parameter name/);
  assert.throws(()=>normalizeSkuParameter('processClasses',{name:'Missing business code'}),/classification code/);
 });
-test('Classification is independent of flavor, site, SKU type and product family',()=>{
- const raw=normalizeMaster('items',{...sku,processClassId:'PRC_000000001',siteId:'SITE-01'});
+test('SKU process classification replaces obsolete free-text family without disturbing identity and site scope',()=>{
+ const raw=normalizeMaster('items',{...sku,processClassId:'PRC_000000001',family:'Old ungoverned family',siteId:'SITE-01'});
  assert.equal(raw.processClassId,'PRC_000000001');
  assert.equal(raw.siteId,'');
- assert.equal(raw.family,'Organization family');
+ assert.equal(Object.hasOwn(raw,'family'),false);
  const existing=normalizeMaster('items',sku);
  assert.equal(existing.processClassId,'');
  assert.equal(existing.id,raw.id);
