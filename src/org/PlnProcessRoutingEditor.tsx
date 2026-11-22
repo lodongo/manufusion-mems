@@ -14,7 +14,7 @@ type MappedStage={code:string;producesSkuId?:string;bomId?:string;
  setupMinutes?:number;runMinutesPerUnit?:number;batchSize?:number;cycleMinutes?:number;
  capacityBasis?:RoutingStep['capacityBasis']};
 type SkuMapping={skuId:string;stages:MappedStage[]};
-type RoutingRecord=Row&{skuId?:string;siteId?:string;alternativeCode?:string;
+type RoutingRecord=Row&{skuId?:string;siteId?:string;processClassId?:string;alternativeCode?:string;
  effectiveFrom?:string;routingModelVersion?:number;operations?:RoutingStep[];
  skuMappings?:SkuMapping[]};
 type CostCenter={id:string;name:string;code:string;siteId:string;legalEntityId:string;commissionedSkuIds:string[]};
@@ -71,9 +71,9 @@ const freshStage=(code:string):RoutingStep=>({
 });
 const stageList=(input:unknown):RoutingStep[]=>Array.isArray(input)?input as RoutingStep[]:[];
 /** Stage editor does not write to resources, BOMs or equipment; it only saves routing references. */
-export default function PlnProcessRoutingEditor({value,onChange,items,boms,resources,sites}:{
+export default function PlnProcessRoutingEditor({value,onChange,items,boms,resources,sites,processClasses}:{
  value:RoutingRecord;onChange:(next:RoutingRecord)=>void;items:Row[];boms:Row[];resources:Row[];
- sites:Array<{id:string;name:string;code:string}>}){
+ sites:Array<{id:string;name:string;code:string}>;processClasses:Array<{id:string;name:string;enabled?:boolean}>}){
  const [centers,setCenters]=useState<CostCenter[]>([]);
  const [loadError,setLoadError]=useState('');
  const [section,setSection]=useState<'setup'|'stages'|'skus'|'review'>('setup');
@@ -138,6 +138,13 @@ export default function PlnProcessRoutingEditor({value,onChange,items,boms,resou
  // SKU identity is organization-wide; stage cost-centre mapping controls commissioned capacity.
  const availableOutputs=useMemo(()=>items.filter(x=>
   ['FINISHED','INTERMEDIATE'].includes(str(x.category))),[items]);
+ // A process class groups final SKUs, not component and intermediate stage outputs.
+ const routeSkuChoices=availableOutputs.filter(x=>
+  str(x.processClassId)===str(value.processClassId)||x.id===value.skuId||
+  skuMappings.some(m=>m.skuId===x.id));
+ const classOptions=[...processClasses.filter(x=>x.enabled!==false),
+  ...processClasses.filter(x=>x.id===value.processClassId&&x.enabled===false)];
+
  const resourcesForSite=resources.filter(x=>!str(x.siteId)||!value.siteId||str(x.siteId)===value.siteId);
  const centersForSite=centers.filter(x=>x.siteId===value.siteId);
  const chosenBoms=selected?.producesSkuId?boms.filter(x=>str(x.parentSkuId)===selected.producesSkuId&&
@@ -195,7 +202,7 @@ export default function PlnProcessRoutingEditor({value,onChange,items,boms,resou
  };
  const upgrade=()=>{
   update('routingModelVersion',2);
-  onChange({...value,routingModelVersion:2,alternativeCode:str(value.alternativeCode)||'STANDARD',
+  onChange({...value,routingModelVersion:2,alternativeCode:str(value.alternativeCode),
    operations:ops.map(s=>({...freshStage(s.code),...s}))});
   setSection('setup');setStepNotice('Legacy routing is now a draft of the enriched process path. Validate all stages before release.');
  };
@@ -221,16 +228,29 @@ export default function PlnProcessRoutingEditor({value,onChange,items,boms,resou
      options={[['','Select site'],...sites.map(s=>[s.id,s.name+' · '+s.code] as [string,string])]}
      onChange={siteId=>{setReview(null);onChange({...value,siteId,
       operations:ops.map(s=>({...s,costCenterId:'',resourceId:'',bomId:''}))});}}/>
+    <Choice label='Manufacturing process classification' value={value.processClassId||''}
+     options={[['','No classification assigned'],...classOptions.map(x=>[x.id,x.name] as [string,string])]}
+     onChange={processClassId=>{
+      // Switching the process group clears incompatible SKU/BOM assignments,
+      // but preserves the process stage graph and its resources.
+      onChange({...value,processClassId,skuId:'',skuMappings:[],
+       operations:ops.map(step=>({...step,producesSkuId:'',bomId:''}))});
+      setSkuToAdd('');setReview(null);
+     }}/>
+    <p className='sm:col-span-2 text-xs text-muted'>Select the process family configured under Product Configuration. SKUs in the same family can share this route even when their recipes differ. Classifications are organization-managed, not limited to any particular industry.</p>
     <Choice label='Primary manufactured SKU' value={value.skuId||''}
-     options={[['','Select produced finished or intermediate SKU'],
-      ...availableOutputs.map(x=>[x.id,x.name] as [string,string])]}
+     options={[['','Select an SKU in this process classification'],
+      ...routeSkuChoices.map(x=>[x.id,x.name] as [string,string])]}
      onChange={skuId=>{if(skuMappings.some(x=>x.skuId===skuId))return;
       const chosen=items.find(x=>x.id===skuId);
-      onChange({...value,skuId,
+      onChange({...value,skuId,processClassId:str(chosen?.processClassId)||str(value.processClassId),
        name:str(value.name)||((chosen?.name||'New SKU')+' · Routing'),routingModelVersion:2});}}/>
     <TextField label='Routing name' value={value.name} onChange={name=>update('name',name)}/>
-    <TextField label='Alternative code' value={value.alternativeCode||'STANDARD'}
-     onChange={alternativeCode=>update('alternativeCode',alternativeCode.toUpperCase())}/>
+    <div>
+     <TextField label='Route alternative code' value={str(value.alternativeCode)}
+      onChange={alternativeCode=>update('alternativeCode',alternativeCode.toUpperCase())}/>
+     <p className='mt-1 text-xs text-muted'>Edit freely, including clearing the whole field. Enter a distinctive code for another manufacturing method. Empty codes are allowed while editing but must be completed before saving.</p>
+    </div>
     <TextField label='Effective from (optional)' type='date' value={value.effectiveFrom||''}
      onChange={effectiveFrom=>update('effectiveFrom',effectiveFrom)}/>
     <TextField label='Routing description (optional)' value={str(value.description)}
@@ -426,7 +446,7 @@ export default function PlnProcessRoutingEditor({value,onChange,items,boms,resou
     <div className='min-w-0 flex-1'>
      <Choice label='Add another SKU to the shared route' value={skuToAdd}
       options={[['','Choose manufactured SKU'],...availableOutputs.filter(x=>
-       x.id!==value.skuId&&!skuMappings.some(m=>m.skuId===x.id)).map(x=>[x.id,x.name] as [string,string])]}
+       x.id!==value.skuId&&str(x.processClassId)===str(value.processClassId)&&!skuMappings.some(m=>m.skuId===x.id)).map(x=>[x.id,x.name] as [string,string])]}
       onChange={setSkuToAdd}/>
     </div>
     <Action primary disabled={!skuToAdd||!value.skuId||skuMappings.length>=100||!ops.length} onClick={addSkuMapping}>Map SKU</Action>
