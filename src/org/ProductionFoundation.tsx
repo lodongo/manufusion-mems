@@ -166,7 +166,7 @@ function BomEditor({draft,onChange,items,refs,skuSetup,materialPolicy}:{
  draft:Row;onChange:(v:Row)=>void;items:Row[];refs:References;skuSetup:SkuSetup;materialPolicy:MaterialPolicy;
 }){
  const output=items.find(i=>i.id===str(draft.parentSkuId));
- const [sectionTab,setSectionTab]=useState<'output'|'materials'|'settings'>('output');
+ const [sectionTab,setSectionTab]=useState<'output'|'materials'|'settings'>('settings');
  const [materialsView,setMaterialsView]=useState<'list'|'edit'>('list');
  const [selectedMaterialIndex,setSelectedMaterialIndex]=useState<number|null>(null);
  const [materialEditorMode,setMaterialEditorMode]=useState<'create'|'edit'>('create');
@@ -174,7 +174,7 @@ function BomEditor({draft,onChange,items,refs,skuSetup,materialPolicy}:{
  const [materialEditorError,setMaterialEditorError]=useState('');
  const [estimatedRunHours,setEstimatedRunHours]=useState('');
  useEffect(()=>{
-    setSectionTab('output');
+    setSectionTab('settings');
     setMaterialsView('list');
     setSelectedMaterialIndex(null);
     setMaterialEditorSnapshot(null);
@@ -359,9 +359,9 @@ function BomEditor({draft,onChange,items,refs,skuSetup,materialPolicy}:{
     }else if(!old.uom||old.uom===code)updateComponent(index,{uom:code});
  };
  const sectionTabs=[
-    {key:'output',title:'1. Output'},
-    {key:'materials',title:'2. Materials'},
-    {key:'settings',title:'3. Settings'},
+    {key:'settings',title:'1. Settings'},
+    {key:'output',title:'2. Output'},
+    {key:'materials',title:'3. Materials'},
  ] as const;
  return <div className='space-y-4'>
     <div role='tablist' aria-label='BOM creation sections' className='grid grid-cols-3 gap-1 rounded-xl border border-line bg-page p-1'>
@@ -382,8 +382,8 @@ function BomEditor({draft,onChange,items,refs,skuSetup,materialPolicy}:{
     </div>
     <section id='bom-panel-output' role='tabpanel' aria-labelledby='bom-tab-output'
         className={'space-y-3 rounded-xl border border-line p-3'+(sectionTab==='output'?'':' hidden')}>
-        <h3 className='font-semibold'>1. What are you producing?</h3>
-        <Choice title='Output material or finished product' value={str(draft.parentSkuId)}
+        <h3 className='font-semibold'>2. What are you producing?</h3>
+        {(str(draft.applicability)||'SKU')==='SKU'&&<Choice title='Output material or finished product' value={str(draft.parentSkuId)}
             options={outputChoices} onChange={v=>{
                 const selected=items.find(i=>i.id===v);
                 onChange({...draft,parentSkuId:v,outputUom:str(selected?.uom)||'EA',
@@ -391,22 +391,28 @@ function BomEditor({draft,onChange,items,refs,skuSetup,materialPolicy}:{
                     components:components.filter(c=>c.skuId!==v)});
                 setMaterialsView('list');
                 setSelectedMaterialIndex(null);
-            }}/>
+            }}/>}
         {output?<p className='text-sm text-soft'>Material classification: {str(output.category)} · Base unit: {bomUomName(str(output.uom),skuSetup.units)}</p>:
-            <p className='text-xs text-muted'>Not listed? Create the material first in Materials & Products.</p>}
+            <p className='text-xs text-muted'>{(str(draft.applicability)||'SKU')==='SKU'
+                ?'Not listed? Create the material first in Materials & Products.'
+                :'This is a shared BOM. Define the output measurement basis and quantity below.'}</p>}
         <div className='grid gap-2 sm:grid-cols-2'>
             <Field title='How much does this BOM produce?' type='number' value={quantity}
                 onChange={v=>update('outputQty',Number(v))}/>
             <div className='rounded-xl border border-line bg-page p-3'>
-                <p className='text-xs text-muted'>Output unit (from selected material)</p>
-                <p className='mt-1 text-sm font-semibold'>{bomUomName(outputUom,skuSetup.units)}</p>
+                {(str(draft.applicability)||'SKU')==='SKU'?
+                    <><p className='text-xs text-muted'>Output unit (from selected material)</p>
+                    <p className='mt-1 text-sm font-semibold'>{bomUomName(outputUom,skuSetup.units)}</p></>:
+                    <Choice title='Output quantity unit' value={outputUom}
+                        options={skuSetup.units.map(unit=>[unit.code,bomUomName(unit.code,skuSetup.units)] as [string,string])}
+                        onChange={v=>update('outputUom',v)}/>}
             </div>
         </div>
     </section>
     <section id='bom-panel-materials' role='tabpanel' aria-labelledby='bom-tab-materials'
         className={'space-y-3 rounded-xl border border-line p-3'+(sectionTab==='materials'?'':' hidden')}>
         <div>
-            <h3 className='font-semibold'>2. What materials are needed?</h3>
+            <h3 className='font-semibold'>3. What materials are needed?</h3>
             <p className='mt-1 text-xs text-muted'>Quantities for {quantity} {bomUomName(outputUom,skuSetup.units)} of the output.</p>
         </div>
         <div className='flex flex-wrap items-center justify-between gap-2'>
@@ -699,8 +705,28 @@ function BomEditor({draft,onChange,items,refs,skuSetup,materialPolicy}:{
     </section>
     <section id='bom-panel-settings' role='tabpanel' aria-labelledby='bom-tab-settings'
         className={'rounded-xl border border-line p-3'+(sectionTab==='settings'?'':' hidden')}>
-        <h3 className='font-semibold'>3. Additional settings (optional)</h3>
-        <p className='my-3 text-xs text-muted'>The defaults work for most BOMs. Only change these when you need a different purpose, alternative method, site or effective date.</p>
+        <h3 className='font-semibold'>1. BOM settings and applicability</h3>
+        <Choice title='Where does this BOM apply?' value={str(draft.applicability)||'SKU'}
+            options={ [['SKU','One specific SKU'],['PROCESS_CLASS','All SKUs in a manufacturing process classification'],['ALL','All SKUs']] }
+            onChange={v=>onChange({...draft,applicability:v,
+                processClassId:v==='PROCESS_CLASS'?str(draft.processClassId):'',
+                parentSkuId:v==='SKU'?str(draft.parentSkuId):'',
+                outputUom:v==='SKU'?str(draft.outputUom):'EA'})}/>
+        {(str(draft.applicability)||'SKU')==='SKU'&&
+            <Choice title='Applicable SKU' value={str(draft.parentSkuId)} options={outputChoices}
+                onChange={v=>{
+                    const selected=items.find(i=>i.id===v);
+                    onChange({...draft,parentSkuId:v,outputUom:str(selected?.uom)||'EA',
+                        components:components.filter(c=>c.skuId!==v)});
+                }}/>}
+        {str(draft.applicability)==='PROCESS_CLASS'&&
+            <Choice title='Manufacturing process classification' value={str(draft.processClassId)}
+                options={[['','Choose process classification'],
+                    ...skuSetup.parameters.filter(p=>p.kind==='processClasses'&&p.enabled!==false)
+                        .map(p=>[p.id,p.name] as [string,string])]}
+                onChange={v=>update('processClassId',v)}/>}
+        {str(draft.applicability)==='ALL'&&
+            <p className='rounded-lg bg-page p-3 text-sm text-muted'>This BOM is a common default for all SKUs. SKU-specific and process-classification BOMs take precedence.</p>}
         <div className='grid gap-3 sm:grid-cols-2'>
             <Choice title='BOM classification' value={str(draft.classificationCode)||'PRODUCTION'}
                 options={classes} onChange={v=>update('classificationCode',v)}/>
@@ -723,13 +749,13 @@ function BomEditor({draft,onChange,items,refs,skuSetup,materialPolicy}:{
         <p className='mt-2 text-xs text-muted'>Product identity comes from the output material; no separate variant selection is needed. Routing is maintained separately.</p>
     </section>
     <div className='flex flex-wrap items-center justify-between gap-2'>
-        {sectionTab!=='output'?<Button type='button' variant='secondary'
-            onClick={()=>setSectionTab(sectionTab==='settings'?'materials':'output')}>
+        {sectionTab!=='settings'?<Button type='button' variant='secondary'
+            onClick={()=>setSectionTab(sectionTab==='materials'?'output':'settings')}>
             Back
         </Button>:<span className='text-xs text-muted'>Step 1 of 3</span>}
-        {sectionTab!=='settings'&&<Button type='button' variant='secondary'
-            onClick={()=>setSectionTab(sectionTab==='output'?'materials':'settings')}>
-            Next: {sectionTab==='output'?'Materials':'Settings'}
+        {sectionTab!=='materials'&&<Button type='button' variant='secondary'
+            onClick={()=>setSectionTab(sectionTab==='settings'?'output':'materials')}>
+            Next: {sectionTab==='settings'?'Output':'Materials'}
         </Button>}
     </div>
     <p className='text-xs text-muted'>Save draft is available on every tab. You can define upstream BOMs later. Production release follows the approval workflow.</p>
@@ -1021,7 +1047,9 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
         }
         if(active==='boms'){
             const parts=asComponents(draft.components);
-            if(!str(draft.parentSkuId)){setError('Choose the output material before saving.');return;}
+            if((str(draft.applicability)||'SKU')==='SKU'&&!str(draft.parentSkuId)){setError('Choose the applicable SKU before saving.');return;}
+            if(str(draft.applicability)==='PROCESS_CLASS'&&!str(draft.processClassId)){setError('Choose the manufacturing process classification before saving.');return;}
+            if(!str(draft.outputUom)){setError('Choose the output unit before saving.');return;}
             if(!parts.length||parts.some(c=>{
                 const missing=c.source==='WAREHOUSE'?(!str(c.warehouseId)||!str(c.materialId)):
                     c.source==='PROCESS_SUPPLY'?(c.processSupplyKind==='SKU'?!str(c.skuId):
