@@ -1693,7 +1693,304 @@ function ClusterForm({ data, onDone, onCancel, prefill }: { data: Data;
     );
 }
 
-function PhysicalStorage({data,setup,reload}:{data:Data;setup:Setup;reload:()=>void}){const [page,setPage]=useState(0);const [historyOpen,setHistoryOpen]=useState(false);const [selected,setSelected]=useState<{code:string;cluster?:Cluster;binId?:string;floor:number;rack:number;row:number;column:number;position:number}|null>(null);const [detail,setDetail]=useState<Record<string,unknown>|null>(null);const [busy,setBusy]=useState(false);const [candidates,setCandidates]=useState<Array<{id:string;materialNumber:string;name:string;shortText:string}>>([]);const [choice,setChoice]=useState('');const [actionError,setActionError]=useState('');const PAGE=200;const offsets=setup.layout.floors.map((_,i)=>setup.layout.floors.slice(0,i).reduce((n,x)=>n+floorPositions(x),0));const total=setup.layout.floors.reduce((n,f)=>n+floorPositions(f),0);const bins=Array.from({length:Math.max(0,Math.min(PAGE,total-page*PAGE))},(_,i)=>{const index=page*PAGE+i;let floorNo=1;for(let j=0;j<offsets.length;j++)if(index>=offsets[j])floorNo=j+1;const f=setup.layout.floors[floorNo-1],o=index-offsets[floorNo-1];const cluster=data.clusters.find(c=>c.floor===floorNo&&c.segments.some(([s,e])=>o>=s&&o<=e));const code=codeAt(floorNo,f,o);const binId=data.linkedBins?.find(x=>x.binId===cluster?.code+'__'+code||x.binId===code)?.binId;const positions=f.positions||1;const columns=f.racking?f.columns||1:1;const racks=f.racking?f.racks||1:1;return {code,cluster,binId,floor:floorNo,rack:Math.floor(o/(positions*columns))%racks+1,row:Math.floor(o/(positions*columns*racks))+1,column:Math.floor(o/positions)%columns+1,position:o%positions+1};});const open=async(b:typeof bins[number])=>{setSelected(b);setHistoryOpen(false);setDetail(null);setCandidates([]);setChoice('');setActionError('');if(!b.cluster)return;setBusy(true);try{const responseDetail=await callBackend<Record<string,unknown>>('/api/org/warehouse/bin/detail',{costCenterId:data.costCenter.id,binId:b.binId||b.cluster.code+'__'+b.code});setDetail(responseDetail);if(!b.binId){const response=await callBackend<{materials:Array<{id:string;materialNumber:string;name:string;shortText:string}>;blockedReason?:string}>('/api/org/inventory/material/bin/candidates',{warehouseId:data.costCenter.id,binId:b.cluster.code+'__'+b.code});setCandidates(response.materials);if(response.blockedReason)setActionError(response.blockedReason);return;}}catch(e){setDetail({error:String(e)});}finally{setBusy(false);}};const changeLink=async(unlink:boolean)=>{if(!selected||!selected.cluster)return;if(unlink&&!(await appConfirm('Delink this material? The event will be audited.')))return;setBusy(true);setActionError('');try{await callBackend(unlink?'/api/org/inventory/material/bin/unlink':'/api/org/inventory/material/bin/link',unlink?{id:detail?.materialId,warehouseId:data.costCenter.id,reason:'Manual delink from physical bin'}:{id:choice,warehouseId:data.costCenter.id,binId:selected.cluster.code+'__'+selected.code});setSelected(null);reload();}catch(e){setActionError(String(e));}finally{setBusy(false);}};const item=(label:string,value:unknown)=><div className='rounded-lg border border-slate-700 p-3'><p className='text-xs text-slate-400'>{label}</p><p className='mt-1 break-words font-semibold text-white'>{value===null||value===undefined||value===''?'Not recorded':String(value)}</p></div>;return <div className='space-y-3'><Card><h2 className='font-semibold text-white'>Physical locations · sequential positions</h2><p className='text-xs text-slate-300'>Tap a physical location to inspect its status and linked material. Position codes retain the original physical address.</p><div className='mt-3 flex flex-wrap gap-3 text-xs text-slate-200'><span>■ Grey: Unallocated</span><span>□ White: Allocated</span><span className='text-orange-300'>■ Orange: Linked</span></div><div className='mt-3 flex items-center justify-between text-xs text-slate-300'><span>{total?page*PAGE+1:0}–{Math.min(total,(page+1)*PAGE)} of {total.toLocaleString()}</span><div className='flex gap-2'><button disabled={page===0} onClick={()=>setPage(p=>p-1)} className='rounded border border-slate-600 px-3 py-2 disabled:opacity-30'>Previous</button><button disabled={(page+1)*PAGE>=total} onClick={()=>setPage(p=>p+1)} className='rounded border border-slate-600 px-3 py-2 disabled:opacity-30'>Next</button></div></div><div className='mt-3 grid grid-cols-3 gap-2 sm:grid-cols-5 lg:grid-cols-8'>{bins.map(b=><button key={b.code} onClick={()=>void open(b)} className={'rounded-lg border p-2 font-mono text-[11px] font-semibold '+(b.binId?'border-orange-500 bg-orange-200 text-orange-950':b.cluster?'border-slate-400 bg-white text-slate-900':'border-slate-500 bg-slate-400 text-slate-950')}>{b.code}</button>)}</div></Card>{selected&&<div role='dialog' aria-modal='true' className='fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-3'><div className='max-h-[90dvh] w-full max-w-lg overflow-y-auto rounded-2xl border border-slate-600 bg-slate-950 p-5'><div className='flex items-center justify-between'><h2 className='text-xl font-bold text-white'>Physical location {selected.code}</h2><button aria-label='Close' onClick={()=>setSelected(null)} className='rounded border border-slate-600 p-2 text-white'><X className='h-5 w-5'/></button></div><p className='mt-2 text-sm text-slate-300'>Status: {selected.binId?'Linked to material':selected.cluster?'Allocated, empty':'Unallocated'}</p>{selected.cluster&&<p className='mt-1 text-xs text-slate-300'>Cluster {selected.cluster.code} · {selected.cluster.name||selected.cluster.locationName} · Permitted restrictions: {selected.cluster.restrictionCodes.join(', ')||'Not configured'}</p>}<div className='mt-3 grid grid-cols-3 gap-2'>{item('Floor',selected.floor)}{item('Rack',selected.rack)}{item('Row',selected.row)}{item('Column',selected.column)}{item('Position',selected.position)}{item('Physical location address',selected.code)}</div>{busy?<Spinner/>:selected.binId?<div className='mt-4 grid grid-cols-2 gap-2'>{item('Material number',detail?.materialNumber)}{item('Material name',detail?.name)}<div className='col-span-2'>{item('Short text',detail?.shortText)}</div>{item('Minimum',detail?.minimum)}{item('Maximum',detail?.maximum)}{item('Actual stock',detail?.actual)}{item('Cost / stock value',detail?.cost)}{detail?.error ? <p className='col-span-2 text-red-300'>{String(detail.error)}</p> : null}{data.canUnlink&&<button disabled={busy} onClick={()=>void changeLink(true)} className='col-span-2 rounded-lg bg-orange-700 p-3 font-semibold text-white'>Delink material</button>}</div>:<div className='mt-4 space-y-3'><p className='text-sm text-slate-300'>No material linked to this physical location.</p>{selected.cluster&&data.canLink&&<><label className='block text-sm text-white'>Link an eligible unlinked material</label><select value={choice} onChange={e=>setChoice(e.target.value)} className='w-full rounded border border-slate-500 bg-slate-900 p-3 text-white'><option value=''>Select compatible material</option>{candidates.map(m=><option key={m.id} value={m.id}>{m.materialNumber} · {m.shortText||m.name}</option>)}</select>{!candidates.length&&<p className='text-xs text-amber-300'>No unlinked materials match this cluster's selected warehouse restrictions, subcategory and warehouse mapping. A material's restriction is set in Stock Control (or on its material master).</p>}<button disabled={!choice||busy} onClick={()=>void changeLink(false)} className='rounded bg-emerald-700 px-4 py-3 font-semibold text-white disabled:opacity-40'>Link selected material</button></>}</div>}<div className='mt-5 border-t border-slate-700 pt-4'>{data.canHistory&&<button type='button' onClick={()=>setHistoryOpen(true)} className='rounded-lg border border-slate-500 bg-slate-800 px-4 py-2 font-semibold text-white'>History</button>}</div>{historyOpen&&<div role='dialog' aria-modal='true' aria-label='Bin history' className='fixed inset-0 z-[60] flex items-center justify-center bg-black/80 p-3'><div className='max-h-[85dvh] w-full max-w-lg overflow-y-auto rounded-2xl border border-slate-600 bg-slate-950 p-5'><div className='flex items-center justify-between gap-3'><h3 className='text-lg font-semibold text-white'>Physical location {selected.code} · History</h3><button type='button' aria-label='Close history' onClick={()=>setHistoryOpen(false)} className='rounded-lg border border-slate-500 px-3 py-2 text-white'>Close</button></div><div className='mt-4'><h4 className='text-sm font-semibold text-slate-200'>Recorded events and material snapshots</h4>{Array.isArray(detail?.history)&&detail.history.length?<div className='mt-3 space-y-3'>{(detail.history as Array<Record<string,unknown>>).map((h,i)=><div key={String(h.id||i)} className='rounded-lg border border-slate-700 bg-slate-900 p-3'><p className='font-semibold text-white'>{String(h.event||'Event')} · {String(h.at||'')}</p><p className='text-xs text-slate-400'>Recorded by: {String(h.by||'Not recorded')}{h.reason?' · '+String(h.reason):''}</p><div className='mt-2 grid grid-cols-2 gap-2'>{Object.entries((h.snapshot&&typeof h.snapshot==='object'?h.snapshot:{}) as Record<string,unknown>).map(([k,v])=><div key={k}>{item(k.replace(/([A-Z])/g,' $1'),v)}</div>)}</div></div>)}</div>:<p className='mt-2 text-sm text-slate-400'>No link or delink history recorded for this physical location.</p>}</div></div></div>}{actionError&&<p className='mt-3 text-sm text-red-300'>{actionError}</p>}</div></div>}</div>}
+// Physical location information and actions follow MEMS site theme and shared
+// form/dropdown defaults. Warehouse allocation rules remain server-authoritative.
+function PhysicalStorage({data,setup,reload}:{data:Data;setup:Setup;reload:()=>void}) {
+    const [page,setPage]=useState(0);
+    const [historyOpen,setHistoryOpen]=useState(false);
+    const [selected,setSelected]=useState<{
+        code:string;cluster?:Cluster;binId?:string;
+        floor:number;rack:number;row:number;column:number;position:number
+    }|null>(null);
+    const [detail,setDetail]=useState<Record<string,unknown>|null>(null);
+    const [busy,setBusy]=useState(false);
+    const [candidates,setCandidates]=useState<Array<{
+        id:string;materialNumber:string;name:string;shortText:string
+    }>>([]);
+    const [choice,setChoice]=useState('');
+    const [actionError,setActionError]=useState('');
+    const PAGE=200;
+    const offsets=setup.layout.floors.map((_,i)=>
+        setup.layout.floors.slice(0,i).reduce((n,x)=>n+floorPositions(x),0)
+    );
+    const total=setup.layout.floors.reduce((n,f)=>n+floorPositions(f),0);
+    const bins=Array.from({length:Math.max(0,Math.min(PAGE,total-page*PAGE))},(_,i)=>{
+        const index=page*PAGE+i;
+        let floorNo=1;
+        for(let j=0;j<offsets.length;j++)if(index>=offsets[j])floorNo=j+1;
+        const f=setup.layout.floors[floorNo-1],o=index-offsets[floorNo-1];
+        const cluster=data.clusters.find(c=>c.floor===floorNo&&c.segments.some(([s,e])=>o>=s&&o<=e));
+        const locationCode=codeAt(floorNo,f,o);
+        const binId=data.linkedBins?.find(x=>
+            x.binId===cluster?.code+'__'+locationCode||x.binId===locationCode
+        )?.binId;
+        const positions=f.positions||1;
+        const columns=f.racking?f.columns||1:1;
+        const racks=f.racking?f.racks||1:1;
+        return {
+            code:locationCode,cluster,binId,floor:floorNo,
+            rack:Math.floor(o/(positions*columns))%racks+1,
+            row:Math.floor(o/(positions*columns*racks))+1,
+            column:Math.floor(o/positions)%columns+1,
+            position:o%positions+1,
+        };
+    });
+    const close=()=>{if(busy)return;setHistoryOpen(false);setSelected(null);setActionError('');};
+    const open=async(b:typeof bins[number])=>{
+        setSelected(b);
+        setHistoryOpen(false);
+        setDetail(null);
+        setCandidates([]);
+        // Do not auto-link or silently select the first available material.
+        setChoice('');
+        setActionError('');
+        if(!b.cluster)return;
+        setBusy(true);
+        try {
+            const responseDetail=await callBackend<Record<string,unknown>>(
+                '/api/org/warehouse/bin/detail',
+                {costCenterId:data.costCenter.id,binId:b.binId||b.cluster.code+'__'+b.code}
+            );
+            setDetail(responseDetail);
+            if(!b.binId){
+                const response=await callBackend<{
+                    materials:Array<{id:string;materialNumber:string;name:string;shortText:string}>;
+                    blockedReason?:string
+                }>('/api/org/inventory/material/bin/candidates',{
+                    warehouseId:data.costCenter.id,
+                    binId:b.cluster.code+'__'+b.code,
+                });
+                setCandidates(response.materials);
+                if(response.blockedReason)setActionError(response.blockedReason);
+            }
+        }catch(e){
+            setDetail({error:String(e)});
+            setActionError(String(e));
+        }finally{setBusy(false);}
+    };
+    const changeLink=async(unlink:boolean)=>{
+        if(!selected?.cluster)return;
+        if(!unlink&&!choice)return;
+        if(unlink&&!(await appConfirm('Delink this material? The event will be audited.')))return;
+        setBusy(true);
+        setActionError('');
+        try{
+            await callBackend(
+                unlink?'/api/org/inventory/material/bin/unlink':'/api/org/inventory/material/bin/link',
+                unlink?{
+                    id:detail?.materialId,
+                    warehouseId:data.costCenter.id,
+                    reason:'Manual delink from physical bin',
+                }:{
+                    id:choice,
+                    warehouseId:data.costCenter.id,
+                    binId:selected.cluster.code+'__'+selected.code,
+                }
+            );
+            setSelected(null);
+            setHistoryOpen(false);
+            reload();
+        }catch(e){setActionError(String(e));}finally{setBusy(false);}
+    };
+    const item=(label:string,value:unknown)=>(
+        <div className='min-w-0 rounded-xl border border-line bg-panel p-3'>
+            <p className='text-xs text-muted'>{label}</p>
+            <p className='mt-1 break-all font-semibold text-ink'>
+                {value===null||value===undefined||value===''?'Not recorded':String(value)}
+            </p>
+        </div>
+    );
+    const secondary='inline-flex min-h-11 items-center justify-center rounded-xl border border-line bg-panel px-4 text-sm font-semibold text-ink disabled:opacity-50';
+    const primary='inline-flex min-h-12 items-center justify-center rounded-xl bg-brand px-4 text-sm font-semibold text-onbrand disabled:opacity-50';
+
+    return (
+        <div className='space-y-3'>
+            <section className='rounded-2xl border border-line bg-panel p-4'>
+                <h2 className='font-semibold text-ink'>Physical locations · sequential positions</h2>
+                <p className='mt-1 text-xs text-soft'>Tap a physical location to inspect its status and linked material. Position codes retain their physical addresses.</p>
+                <div className='mt-3 flex flex-wrap gap-3 text-xs text-soft'>
+                    <span>■ Grey: Unallocated</span>
+                    <span>□ White: Allocated</span>
+                    <span>■ Orange: Linked</span>
+                </div>
+                <div className='mt-3 flex items-center justify-between gap-2 text-xs text-soft'>
+                    <span>{total?page*PAGE+1:0}–{Math.min(total,(page+1)*PAGE)} of {total.toLocaleString()}</span>
+                    <div className='flex gap-2'>
+                        <button type='button' disabled={page===0} onClick={()=>setPage(p=>p-1)} className={secondary}>Previous</button>
+                        <button type='button' disabled={(page+1)*PAGE>=total} onClick={()=>setPage(p=>p+1)} className={secondary}>Next</button>
+                    </div>
+                </div>
+                <div className='mt-3 grid grid-cols-3 gap-2 sm:grid-cols-5 lg:grid-cols-8'>
+                    {bins.map(b=>(
+                        <button key={b.code} type='button' aria-label={'Open physical location '+b.code}
+                            onClick={()=>void open(b)}
+                            className={'min-h-10 rounded-xl border p-2 font-mono text-[11px] font-semibold '+
+                                (b.binId?'border-orange-500 bg-orange-100 text-orange-950':
+                                    b.cluster?'border-line bg-panel text-ink':
+                                    'border-line bg-page text-muted')}>
+                            {b.code}
+                        </button>
+                    ))}
+                </div>
+            </section>
+
+            {selected&&(
+                <div role='dialog' aria-modal='true' aria-label={'Physical location '+selected.code}
+                    className='fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-0 sm:items-center sm:p-4'>
+                    <div className='flex max-h-[94dvh] w-full max-w-xl flex-col overflow-hidden rounded-t-2xl border border-line bg-page shadow-2xl sm:max-h-[90dvh] sm:rounded-2xl'>
+                        <header className='flex shrink-0 items-start justify-between gap-3 border-b border-line bg-panel p-4'>
+                            <div className='min-w-0'>
+                                <p className='text-xs font-semibold uppercase tracking-wide text-muted'>Warehouse · physical location</p>
+                                <h2 className='mt-1 break-all text-lg font-bold text-ink sm:text-xl'>{selected.code}</h2>
+                                <p className='mt-2 text-sm text-soft'>
+                                    Status: {selected.binId?'Linked to material':selected.cluster?'Allocated, empty':'Unallocated'}
+                                </p>
+                            </div>
+                            <button type='button' aria-label='Close physical location' disabled={busy}
+                                onClick={close}
+                                className='flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-line bg-page text-ink disabled:opacity-50'>
+                                <X className='h-5 w-5'/>
+                            </button>
+                        </header>
+
+                        <div className='min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain p-4'>
+                            {selected.cluster&&(
+                                <div className='rounded-xl border border-line bg-panel p-3 text-sm text-soft'>
+                                    <p className='font-semibold text-ink'>
+                                        Cluster {selected.cluster.code} · {selected.cluster.name||selected.cluster.locationName}
+                                    </p>
+                                    <p className='mt-1 text-xs'>
+                                        Permitted restrictions: {selected.cluster.restrictionCodes.join(', ')||'Not configured'}
+                                    </p>
+                                </div>
+                            )}
+                            <section aria-label='Location details'>
+                                <h3 className='mb-2 text-sm font-semibold text-ink'>Location details</h3>
+                                <div className='grid grid-cols-2 gap-2 sm:grid-cols-3'>
+                                    {item('Floor',selected.floor)}
+                                    {item('Rack',selected.rack)}
+                                    {item('Row',selected.row)}
+                                    {item('Column',selected.column)}
+                                    {item('Position',selected.position)}
+                                    {item('Physical location address',selected.code)}
+                                </div>
+                            </section>
+
+                            {busy&&<Spinner/>}
+                            {!busy&&selected.binId&&(
+                                <section aria-label='Linked material' className='space-y-3'>
+                                    <h3 className='text-sm font-semibold text-ink'>Linked material</h3>
+                                    <div className='grid grid-cols-2 gap-2'>
+                                        {item('Material number',detail?.materialNumber)}
+                                        {item('Material name',detail?.name)}
+                                        <div className='col-span-2'>{item('Short text',detail?.shortText)}</div>
+                                        {item('Minimum',detail?.minimum)}
+                                        {item('Maximum',detail?.maximum)}
+                                        {item('Actual stock',detail?.actual)}
+                                        {item('Cost / stock value',detail?.cost)}
+                                    </div>
+                                    {data.canUnlink&&(
+                                        <button type='button' disabled={busy} onClick={()=>void changeLink(true)}
+                                            className='min-h-12 w-full rounded-xl border border-red-500/50 bg-panel px-4 font-semibold text-red-600 dark:text-red-300 disabled:opacity-50'>
+                                            Delink material
+                                        </button>
+                                    )}
+                                </section>
+                            )}
+                            {!busy&&!selected.binId&&(
+                                <section aria-label='Material allocation' className='space-y-3'>
+                                    <p className='text-sm text-soft'>
+                                        {selected.cluster?'No material linked to this physical location.':'This position is not allocated to a cluster.'}
+                                    </p>
+                                    {selected.cluster&&data.canLink&&(
+                                        <>
+                                            <SelectField id='physical-location-material'
+                                                label='Link an eligible unlinked material'
+                                                value={choice} required
+                                                disabled={busy||candidates.length===0}
+                                                hint='Search for the material, select it and confirm. No automatic selection or link.'
+                                                onChange={e=>setChoice(e.target.value)}>
+                                                <option value=''>Select compatible material</option>
+                                                {candidates.map(m=><option key={m.id} value={m.id}>
+                                                    {m.materialNumber} · {m.shortText||m.name}
+                                                </option>)}
+                                            </SelectField>
+                                            {candidates.length===0&&(
+                                                <p className='text-xs text-muted'>
+                                                    No unlinked materials currently match this cluster's warehouse restrictions,
+                                                    selected subcategories and warehouse mapping.
+                                                </p>
+                                            )}
+                                            <button type='button' disabled={!choice||busy}
+                                                onClick={()=>void changeLink(false)}
+                                                className={primary+' w-full'}>
+                                                Link selected material
+                                            </button>
+                                        </>
+                                    )}
+                                </section>
+                            )}
+                            {actionError&&<Alert tone='error'>{actionError}</Alert>}
+                            {data.canHistory&&(
+                                <div className='border-t border-line pt-4'>
+                                    <button type='button' onClick={()=>setHistoryOpen(true)} className={secondary}>
+                                        History
+                                    </button>
+                                </div>
+                            )}
+                        </div>
+                        <footer className='shrink-0 border-t border-line bg-panel p-3 sm:p-4'>
+                            <button type='button' disabled={busy} onClick={close} className={secondary+' w-full'}>
+                                Close
+                            </button>
+                        </footer>
+                    </div>
+                </div>
+            )}
+
+            {selected&&historyOpen&&(
+                <div role='dialog' aria-modal='true'
+                    aria-label={'Physical location '+selected.code+' history'}
+                    className='fixed inset-0 z-[60] flex items-end justify-center bg-black/60 p-0 sm:items-center sm:p-4'>
+                    <div className='flex max-h-[90dvh] w-full max-w-xl flex-col overflow-hidden rounded-t-2xl border border-line bg-page shadow-2xl sm:rounded-2xl'>
+                        <header className='flex shrink-0 items-center justify-between gap-3 border-b border-line bg-panel p-4'>
+                            <div className='min-w-0'>
+                                <h3 className='break-all text-lg font-semibold text-ink'>{selected.code} · History</h3>
+                                <p className='text-sm text-soft'>Recorded events and material snapshots</p>
+                            </div>
+                            <button type='button' aria-label='Close history'
+                                onClick={()=>setHistoryOpen(false)}
+                                className={secondary}>Close</button>
+                        </header>
+                        <div className='min-h-0 flex-1 overflow-y-auto p-4'>
+                            {Array.isArray(detail?.history)&&detail.history.length?(
+                                <div className='space-y-3'>
+                                    {(detail.history as Array<Record<string,unknown>>).map((h,i)=>(
+                                        <div key={String(h.id||i)} className='rounded-xl border border-line bg-panel p-3'>
+                                            <p className='font-semibold text-ink'>{String(h.event||'Event')} · {String(h.at||'')}</p>
+                                            <p className='mt-1 text-xs text-muted'>
+                                                Recorded by: {String(h.by||'Not recorded')}
+                                                {h.reason?' · '+String(h.reason):''}
+                                            </p>
+                                            <div className='mt-2 grid grid-cols-2 gap-2'>
+                                                {Object.entries((h.snapshot&&typeof h.snapshot==='object'?h.snapshot:{}) as Record<string,unknown>)
+                                                    .map(([k,v])=><div key={k}>{item(k.replace(/([A-Z])/g,' $1'),v)}</div>)}
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            ):(
+                                <p className='text-sm text-soft'>
+                                    No link or delink history recorded for this physical location.
+                                </p>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+}
 
 // ---------------------------------------------------------------------------
 // Topology: every bin of a floor. Unallocated = grey, allocated = white with a border in the colour of the
