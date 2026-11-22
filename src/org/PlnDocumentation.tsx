@@ -134,6 +134,16 @@ const guide:Chapter[]=[
   ]},
  ]},
  {id:'bom',title:'7. Bills of Materials / Recipes',phase:'Master data',summary:'Connect products to quantities consumed by each stage.',screen:'Bills of Materials',topics:[
+  {title:'Cost-centre utility distribution to equipment and BOM',purpose:'Configure a supply once at the cost centre and safely distribute its rated capability across equipment and processes.',steps:[
+   'In Organization Design, select the cost centre → Utility supply & distribution (also available under Manufacturing Cost Centre Setup). Add the adopted utility type from the same catalogue used by equipment.',
+   'Link the registered supplying asset or create one when missing, then record its rated utility capacity in Asset Management. Allocate the amount made available to this cost centre; the same supplying asset cannot be allocated beyond its rating across cost centres.',
+   'Define the supplied voltage, phase, pressure, quality and other required delivery characteristics. A utility configuration can be saved before it is complete but cannot supply new production connections until ready.',
+   'At each equipment unit, choose the utility and record its required attributes. An externally supplied utility automatically inherits the parent cost-centre supply; if the cost centre or equipment asset is missing, the equipment editor offers a setup link.',
+   'MEMS sums coincident additive requirements such as current or mass/volume flow from equipment in the same cost centre. It checks voltage and frequency for compatibility rather than summing them, and checks pressure against minimum requirements.',
+   'Review cost-centre loading: above 84% triggers a capacity warning; more than 100% or incompatible delivery characteristics block new external equipment utility assignments. Missing demands cannot be silently treated as zero.',
+   'Only when adding a BOM material with Process supply selected, choose its configured cost-centre utility. The BOM then displays rated supply capability and existing equipment load, without counting the same equipment consumption twice.',
+   'Keep planned BOM material quantities, rates and buffer capacities separate. Unknown physical conversions remain unresolved; the model does not claim live readings, operating authorization or cost settlement.',
+  ],example:'Illustrative: Five machines each require 17 A at 400 V. The cost centre records a combined 85 A of current demand against 100 A of allocated current capacity (85% loading, warning), while all machines must be compatible with the configured 400 V supply.'},
   {title:'Process supply: inline, continuous and buffered inputs',purpose:'Describe water, gases, steam and other bulk or metered material supplies without artificial stock transactions.',steps:[
    'Open Bills of Materials, choose the produced SKU and Add material → Material source → Process supply · continuous, metered, inline or bulk.',
    'Link an existing manufactured/raw material SKU, registered equipment utility, or approved direct Procurement material. Create the underlying master first if it does not exist.',
