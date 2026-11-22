@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
-import { Warehouse, ArrowDown, Briefcase, Building, Building2, ChevronRight, Cog, Eye, FileText, Home, Layers, Lock, Pencil, Plus, Trash2, Wrench, X } from 'lucide-react';
+import { Warehouse, ArrowDown, Briefcase, Building, Building2, ChevronRight, Cog, Eye, FileText, Home, Layers, Lock, Pencil, Plus, Trash2, Wrench, X, Zap } from 'lucide-react';
 import WorkCenterAsset from './WorkCenterAsset';
 import PlnCostCenterSkuSetup from './PlnCostCenterSkuSetup';
 import EquipmentUtilities from './EquipmentUtilities';
+import CostCenterUtilitySupplies from './CostCenterUtilitySupplies';
 import StoredEnergy from './StoredEnergy';
 import StoredEnergyReview from './StoredEnergyReview';
 import AssemblyActivities from './AssemblyActivities';
@@ -79,7 +80,7 @@ interface NodeData {
     design: Design;
 }
 
-type Mode = null | { type: 'create'; level: string } | { type: 'edit' } | { type: 'bom'; bom?: Bom } | { type: 'levels' } | { type: 'expand' } | { type: 'roles' } | { type: 'details' } | { type: 'planning' } | { type: 'asset'; configure?: boolean } | { type: 'utilities' } | { type: 'hazardous-energy' } | { type: 'class-risk' } | {type:'equipment-tasks'} | { type: 'stored-energy' } | { type: 'activity-risk' } | { type: 'activity-risk-review' } | { type: 'loto-program' } | {type:'short-intervention'} | {type:'equipment-safety-devices'} | { type: 'stored-energy-review' } | { type: 'storage' } | { type: 'activities' };
+type Mode = null | { type: 'create'; level: string } | { type: 'edit' } | { type: 'bom'; bom?: Bom } | { type: 'levels' } | { type: 'expand' } | { type: 'roles' } | { type: 'details' } | { type: 'planning' } | { type: 'asset'; configure?: boolean } | { type: 'utilities' } | { type: 'cost-center-utilities' } | { type: 'hazardous-energy' } | { type: 'class-risk' } | {type:'equipment-tasks'} | { type: 'stored-energy' } | { type: 'activity-risk' } | { type: 'activity-risk-review' } | { type: 'loto-program' } | {type:'short-intervention'} | {type:'equipment-safety-devices'} | { type: 'stored-energy-review' } | { type: 'storage' } | { type: 'activities' };
 
 const open = (id: string) => navigate(id === 'root' ? 'organization_admin/structure' : `organization_admin/structure/${id}`);
 
@@ -143,6 +144,8 @@ function NodeView({ id, canEdit, start }: { id: string; canEdit: boolean; start?
 
     if (mode?.type === 'planning' && node?.level === 'cost_center')
         return <PlnCostCenterSkuSetup costCenterId={node.id} onBack={() => setMode(null)}/>;
+    if (mode?.type === 'cost-center-utilities' && node?.level === 'cost_center')
+        return <CostCenterUtilitySupplies costCenterId={node.id} onBack={()=>setMode(null)}/>;
     if (mode?.type === 'levels') return <LevelsForm design={design} onDone={done} onCancel={() => setMode(null)} />;
     if (mode?.type === 'expand') return <AddUpperLevel onDone={done} onCancel={() => setMode(null)} />;
     if (mode?.type === 'roles' && node) return <SiteRolesForm site={node} onDone={done} onCancel={() => setMode(null)} />;
@@ -404,6 +407,16 @@ function NodeView({ id, canEdit, start }: { id: string; canEdit: boolean; start?
                                 </button>
                             </li>
                         )}
+                        {node?.level === 'cost_center' && (<li>
+                            <button type='button' onClick={()=>setMode({type:'cost-center-utilities'})}
+                                className='flex w-full items-center gap-3 px-4 py-3 text-left'>
+                                <Zap className='h-5 w-5 shrink-0 text-sky-400'/>
+                                <div className='min-w-0 flex-1'>
+                                    <p className='text-sm font-semibold text-ink'>Utility supply &amp; distribution</p>
+                                    <p className='text-xs text-muted'>Adopt utility sources, link supplying assets and review all equipment demand, capacity and compatibility</p>
+                                </div><ChevronRight className='h-4 w-4 shrink-0'/>
+                            </button>
+                        </li>)}
                         {node?.level === 'cost_center' && ['INV', 'WHS'].includes(String(node.attributes.costType ?? '')) && (
                             <li>
                                 <button onClick={() => setMode({ type: 'storage' })} className='flex w-full items-center gap-3 bg-sky-500/5 px-4 py-3 text-left'>
