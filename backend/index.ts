@@ -192,6 +192,7 @@ import { maintenanceSourcingRoutes } from './maintenanceSourcing';
 import { warehouseRoutes } from './warehouse';
 import { maintenanceReferenceRoutes } from './maintenanceReferences';
 import { utilityRoutes } from './astUtilities';
+import { costCenterUtilityDistributionRoutes } from './costCenterUtilityDistribution';
 import { storedEnergyRoutes } from './storedEnergy';
 import {assemblyActivityRoutes} from './assemblyActivities';
 import {activityRiskRoutes} from './activityRisk';
@@ -1740,6 +1741,7 @@ export const handler = router(recordWiredRoutes({
     ...warehouseRoutes,
     ...maintenanceReferenceRoutes,
     ...utilityRoutes,
+    ...costCenterUtilityDistributionRoutes,
     ...storedEnergyRoutes,
     ...assemblyActivityRoutes,
     ...activityRiskRoutes,
