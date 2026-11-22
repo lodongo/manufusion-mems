@@ -9,8 +9,9 @@ import InventoryMaterialDetail from './InventoryMaterialDetail';
 
 // Inventory on hand (INV): every published material in every warehouse the person can access
 // (one row per material × warehouse: master warehouse, pushed warehouse or approved extension).
-// The stock quantity is shown only where the server reports a stock ledger for the row (stockLedgerAvailable);
-// otherwise the row says the stock is not yet tracked rather than showing a misleading zero.
+// Net available and stock value are read from posted, reconciled stock journals only.
+// Missing/unreconciled balances never masquerade as zero; money is shown only
+// when the purchase unit matches the stock UOM and a unit price exists.
 // Tapping a row opens the material detail for that warehouse (stock position, settings, bins, journal).
 // Mobile layout: the page has no header or toolbar of its own. The search box and ONE menu button are the action bar
 // (always visible); the menu holds the warehouse choice, refresh, status and every table tool. The table fills the
@@ -32,7 +33,11 @@ interface Item {
     warehouseName: string;
     warehouseCode: string;
     status: string;
-    quantityOnHand: number;
+    quantityOnHand: number | null;
+    netAvailable: number | null;
+    netStockValue: number | null;
+    stockCurrency: string;
+    stockStatus: 'Not yet tracked'|'Unreconciled'|'Empty bin'|'Overstock'|'Understock'|'Within limits';
     stockLedgerAvailable: boolean;
     createdAt: string;
 }
@@ -44,7 +49,16 @@ interface Warehouse {
 }
 
 /** Quantity on hand, or null when the server has no stock ledger for this material in this warehouse. */
-const onHand = (x: Item): number | null => (x.stockLedgerAvailable && Number.isFinite(Number(x.quantityOnHand)) ? Number(x.quantityOnHand) : null);
+const onHand = (x: Item): number | null => (x.stockLedgerAvailable && x.quantityOnHand !== null && Number.isFinite(x.quantityOnHand) ? x.quantityOnHand : null);
+const netAvailable = (x: Item): number | null => (x.stockLedgerAvailable && x.netAvailable !== null && Number.isFinite(x.netAvailable) ? x.netAvailable : null);
+const numText = (n: number) => n.toLocaleString(undefined,{maximumFractionDigits:3});
+const stockColour = (s: Item['stockStatus']) => s==='Overstock'?
+    'bg-red-100 text-red-900 border-red-300':s==='Understock'?
+    'bg-yellow-100 text-yellow-900 border-yellow-300':s==='Empty bin'?
+    'bg-orange-100 text-orange-900 border-orange-300':
+    s==='Unreconciled'?'bg-rose-100 text-rose-900 border-rose-300':
+    s==='Not yet tracked'?'bg-slate-100 text-slate-700 border-slate-300':
+    'bg-emerald-100 text-emerald-900 border-emerald-300';
 
 const COLUMNS: Array<Column<Item>> = [
     { key: 'materialNumber', label: 'Material number', value: (x) => x.materialNumber, render: (x) => <span className='font-mono font-semibold text-brandsoft'>{x.materialNumber}</span> },
@@ -59,20 +73,42 @@ const COLUMNS: Array<Column<Item>> = [
     { key: 'warehouseCode', label: 'Warehouse code', value: (x) => x.warehouseCode, hidden: true },
     { key: 'uom', label: 'UoM', value: (x) => x.uom || '—' },
     {
-        key: 'quantityOnHand',
-        label: 'On hand',
+        key: 'netAvailable',
+        label: 'Net available',
         type: 'number',
-        value: (x) => onHand(x),
+        value: (x) => netAvailable(x),
         render: (x) => {
-            const q = onHand(x);
-            return q === null ? <span className='text-muted'>—</span> : <span className='font-semibold tabular-nums text-ink'>{q.toLocaleString()}</span>;
+            const q=netAvailable(x);
+            return q===null?<span className='text-muted'>—</span>:
+                <span className={'font-semibold tabular-nums '+(x.stockStatus==='Overstock'?'text-red-700':
+                    x.stockStatus==='Understock'?'text-yellow-700':x.stockStatus==='Empty bin'?'text-orange-700':'text-ink')}>{numText(q)}</span>;
         },
+    },
+    {
+        key: 'quantityOnHand',
+        label: 'Physical on hand',
+        type: 'number',
+        hidden: true,
+        value: (x) => onHand(x),
+        render: (x) => onHand(x)===null?<span className='text-muted'>—</span>:
+            <span className='tabular-nums text-ink'>{numText(onHand(x)!)}</span>,
+    },
+    {
+        key: 'netStockValue',
+        label: 'Net stock value',
+        type: 'number',
+        value: (x) => x.netStockValue,
+        render: (x) => x.netStockValue===null||!Number.isFinite(x.netStockValue)?
+            <span className='text-muted' title='Needs a reconciled stock ledger and unit price in the same UOM as inventory'>—</span>:
+            <span className='font-semibold tabular-nums text-ink'>
+                {x.stockCurrency?x.stockCurrency+' ':''}{x.netStockValue.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}
+            </span>,
     },
     {
         key: 'stockStatus',
         label: 'Stock status',
-        value: (x) => (x.stockLedgerAvailable ? 'Tracked' : 'Not yet tracked'),
-        render: (x) => <Badge tone={x.stockLedgerAvailable ? 'brand' : 'warn'}>{x.stockLedgerAvailable ? 'Tracked' : 'Not yet tracked'}</Badge>,
+        value: (x) => x.stockStatus,
+        render: (x) => <span className={'inline-flex rounded-full border px-2 py-1 text-xs font-semibold '+stockColour(x.stockStatus)}>{x.stockStatus}</span>,
     },
     { key: 'supplyType', label: 'Supply type', value: (x) => x.supplyType, hidden: true },
     { key: 'status', label: 'Material status', value: (x) => x.status, hidden: true },
@@ -160,7 +196,8 @@ export default function InventoryOnHand() {
                                 </section>
                             )}
                             <p className='px-1 text-xs text-slate-400'>
-                                {rows.length} materials · {warehouses.length} warehouses · {tracked} with stock ledger
+                                {rows.length} materials · {warehouses.length} warehouses · {tracked} with reconciled stock ledger
+                                <span className='mt-1 block'>Overstock: red · Understock: yellow · Empty bin: orange. Net available excludes reserved, quarantined, damaged and expired stock.</span>
                             </p>
                             <button
                                 type='button'
