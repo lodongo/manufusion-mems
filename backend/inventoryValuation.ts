@@ -13,8 +13,8 @@ export function inventoryNumericField(value: unknown): number | null {
     const raw=value.trim();
     if(!raw) return null;
     const normalized=raw.replace(/,/g,'');
-    if(!/^[-+]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[eE][-+]?\\d+)?$/.test(normalized)) return null;
-    if(raw.includes(',')&&!/^[-+]?\\d{1,3}(?:,\\d{3})+(?:\\.\\d+)?(?:[eE][-+]?\\d+)?$/.test(raw)) return null;
+    if(!/^[-+]?(?:\d+(?:\.\d+)?|\.\d+)(?:[eE][-+]?\d+)?$/.test(normalized)) return null;
+    if(raw.includes(',')&&!/^[-+]?\d{1,3}(?:,\d{3})+(?:\.\d+)?(?:[eE][-+]?\d+)?$/.test(raw)) return null;
     const n=Number(normalized);
     return Number.isFinite(n)?n:null;
 }
