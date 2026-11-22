@@ -34,8 +34,11 @@ test('new material wizard includes cluster matching, detailed restrictions and e
     assert.ok(ui.includes('No matching clusters in this warehouse'));
     assert.ok(ui.includes('View all existing clusters'));
     assert.ok(ui.includes('Existing restrictions:'));
-    assert.ok(ui.includes('Use cluster and adopt its restrictions'));
-    assert.ok(ui.includes('setRestrictionCodes([...cluster.restrictionCodes])'));
+    assert.ok(ui.includes('Tap to adopt restrictions and apply cluster'));
+    assert.ok(ui.includes('Tap to add this subcategory, adopt restrictions and apply cluster'));
+    assert.ok(ui.includes('onClick={()=>void selectCluster(c)}'));
+    assert.ok(ui.includes("'/api/org/warehouse/cluster/adopt-subcategory'"));
+    assert.ok(ui.includes('setRestrictionCodes([...adoptedRestrictions])'));
     assert.ok(ui.includes("clusterCode:cluster.code"));
     assert.ok(procurement.includes("'POST /api/org/procurement/materials/clusters'"));
     assert.ok(procurement.includes("const compatibleRestrictions=selected.every(code=>codes.includes(code))"));
@@ -59,4 +62,22 @@ test('automatic material-to-cluster association never creates an inventory trans
     assert.ok(warehouseUI.includes('Assigned materials'));
     assert.ok(warehouseUI.includes('Actual stock placement and physical positions are handled in Inventory after approval'));
     assert.ok(procurement.includes("const requiredCodes=materialRequiredRestrictions("));
+});
+
+test('tapping an existing same-category cluster adopts restrictions, and audited expansion respects segregation',()=>{
+    assert.ok(ui.includes('requiresSubcategoryExtension'));
+    assert.ok(ui.includes('appConfirm('));
+    assert.ok(ui.includes('setRegistration(p=>({...p,clusterCode:cluster.code,warehouseRestriction:adoptedRestrictions[0]'));
+    assert.ok(procurement.includes('const adoptable=!!loc&&loc.active!==false&&compatibleCategory'));
+    assert.ok(procurement.includes('requiresSubcategoryExtension:adoptable&&!compatibleSubcategory'));
+    assert.ok(procurement.includes('SEGREGATED_RESTRICTIONS.has(code)'));
+    assert.ok(warehouse.includes("'POST /api/org/warehouse/cluster/adopt-subcategory'"));
+    assert.ok(warehouse.includes('const node=await storageCostCenter(ctx,str(ctx.body.costCenterId))'));
+    assert.ok(warehouse.includes('return withLock(ctx,node.id,async()=>'));
+    assert.ok(warehouse.includes('warehouseRestrictionMaster(),materialCategories()'));
+    assert.ok(warehouse.includes('cluster.subcategories.some(x=>x.categoryCode&&x.categoryCode!==categoryCode)'));
+    assert.ok(warehouse.includes('codes.some(x=>SEGREGATED_RESTRICTIONS.has(x))'));
+    assert.ok(warehouse.includes('materialSubcategoryCodes:newLocationCodes'));
+    assert.ok(warehouse.includes('subcategories:[...existing,cls]'));
+    assert.ok(warehouse.includes('org.warehouse.cluster.adopt_subcategory'));
 });
