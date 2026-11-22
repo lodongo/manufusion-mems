@@ -377,6 +377,8 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
     const [refs,setRefs]=useState<References>(emptyReferences);
     const [draft,setDraft]=useState<Row|null>(null);
     const [viewSkuId,setViewSkuId]=useState('');
+    const [classEditingSku,setClassEditingSku]=useState('');
+    const [classSelected,setClassSelected]=useState('');
     const [materialPolicy,setMaterialPolicy]=useState<MaterialPolicy>(defaultMaterialPolicy);
     const [materialPolicyRevision,setMaterialPolicyRevision]=useState(0);
     const [capacityMappings,setCapacityMappings]=useState<SetupRow[]>([]);
@@ -485,6 +487,19 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
             approvedBy:undefined,approvedAt:undefined});
         setViewSkuId('');setHistory([]);setError('');
         setNotice('New alternative route started. Change its stages, resources or sequence, then save and submit it separately for approval.');
+    };
+    const saveExistingSkuProcessClass=async(row:Row)=>{
+        if(!canEdit||!canSkuConfig||!classSelected)return;
+        setBusy(true);setError('');setNotice('');
+        try{
+            await callBackend('/api/org/pln-mfg/foundation/sku/process-classify',{
+                skuId:row.id,processClassId:classSelected,expectedRevision:row.revision??1,
+            });
+            await load();setClassEditingSku('');setClassSelected('');
+            setNotice('Manufacturing process classification saved for '+row.name+
+                '. The SKU code, BOMs, site allocations and commissioned resource speeds remain unchanged.');
+        }catch(e){setError(e instanceof Error?e.message:'SKU classification could not be saved.');}
+        finally{setBusy(false);}
     };
     const release=async (id:string,decision:'submit'|'approve'|'reject')=>{
         if(decision==='reject'&&!decisionReason.trim()){setError('Enter a rejection reason first.');return;}
@@ -696,10 +711,28 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
                             setViewSkuId(row.id);setDraft(null);setError('');setNotice('');
                         }}>View SKU</Button>}
                     {canSave&&['draft','rejected',''].includes(str(row.status))&&<Button variant='secondary' onClick={()=>void openDraft(row)}>Open / edit</Button>}
+                    {active==='items'&&canEdit&&canSkuConfig&&str(row.status)==='active'&&
+                        ['FINISHED','INTERMEDIATE'].includes(str(row.category))&&
+                        <Button variant='secondary' onClick={()=>{
+                            setClassEditingSku(row.id);setClassSelected(str(row.processClassId));
+                            setError('');setNotice('');
+                        }}>Classify manufacturing process</Button>}
                     {canSave&&active==='routings'&&<Button variant='secondary' onClick={()=>createAlternativeRoute(row)}>Create different route from this</Button>}
                     {canSave&&['active','pending_approval'].includes(str(row.status))&&<Button variant='secondary' onClick={()=>copyVersion(row)}>New version</Button>}
                 </div>
-                {str(row.status)==='draft'&&canSubmit&&<Button variant='secondary' disabled={busy} onClick={()=>void release(row.id,'submit')}>Submit for technical approval</Button>}
+                {active==='items'&&classEditingSku===row.id&&<div className='space-y-2 rounded-xl border border-line bg-page p-3'>
+                    <Choice title='Manufacturing process classification' value={classSelected}
+                        options={[['','Select a process classification'],...skuSetup.parameters
+                            .filter(p=>p.kind==='processClasses'&&p.enabled!==false)
+                            .map(p=>[p.id,p.name] as [string,string])]}
+                        onChange={setClassSelected}/>
+                    <p className='text-xs text-muted'>Only process classification metadata changes. This keeps the existing SKU ID, BOMs, site allocation and commissioned rates intact.</p>
+                    <div className='flex flex-wrap gap-2'>
+                        <Button disabled={!classSelected||busy} onClick={()=>void saveExistingSkuProcessClass(row)}>Save classification</Button>
+                        <Button variant='secondary' disabled={busy} onClick={()=>{setClassEditingSku('');setClassSelected('');}}>Cancel</Button>
+                    </div>
+                </div>}
+                {str(row.status)==='draft'&&canSubmit&&<Button variant='secondary' disabled={busy} onClick={()=>void release(row.id,'submit')}>Submit for technical approval</Button>
                 {str(row.status)==='pending_approval'&&canApprove&&<div className='space-y-2'>
                     <Field title='Decision note / rejection reason' value={decisionReason} onChange={setDecisionReason}/>
                     <div className='flex flex-wrap gap-2'>
