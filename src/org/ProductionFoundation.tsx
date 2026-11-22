@@ -3,7 +3,6 @@ import { Alert, Field as MemsField, SelectField } from '../components/ui';
 import { Spinner } from '../admin/kit';
 import { SkuConfigurationFields, SkuSetupPanel, UnitChoice, emptySkuSetup, type SkuSelections, type SkuSetup } from './MfgSkuSetup';
 import PlnDemand from './PlnDemand';
-import PlnCostCenterSetup from './PlnCostCenterSetup';
 import PlnSkuCostCenterRatings from './PlnSkuCostCenterRatings';
 import ManufacturingResources from './ManufacturingResources';
 import PlnProcessRoutingEditor from './PlnProcessRoutingEditor';
@@ -29,7 +28,7 @@ import { callBackend } from '../lib/backend';
 import { hasPerm } from '../types';
 
 type Kind='items'|'boms'|'resources'|'routings';
-type Tab=Kind|'skuSetup'|'materialPolicy'|'formDefaults'|'config'|'demand'|'costCenterSku'|'documentation';
+type Tab=Kind|'skuSetup'|'materialPolicy'|'formDefaults'|'config'|'demand'|'documentation';
 type Row=Record<string,unknown>&{id:string;name:string;revision?:number;type?:string};
 type Component={source?:'INTERMEDIATE'|'WAREHOUSE';skuId:string;warehouseId?:string;materialId?:string;quantity:number;uom:string;scrapPct:number};
 type Operation={code:string;name:string;resourceId:string;setupMinutes:number;runMinutesPerUnit:number;producesSkuId?:string;dependsOn?:string[]};
@@ -67,7 +66,6 @@ const tabs:{key:Tab;label:string;shortLabel:string;phase:Phase;hint:string}[]=[
     {key:'items',label:'Materials & Products',shortLabel:'Materials & products',phase:'masters',hint:'Create manufactured SKUs, ingredients, packaging and intermediate products'},
     {key:'boms',label:'Bills of Materials',shortLabel:'Bills of materials',phase:'masters',hint:'Define the materials and quantities consumed by each product'},
     {key:'resources',label:'Manufacturing Resources',shortLabel:'Manufacturing resources',phase:'masters',hint:'Register manufacturing resources used by routings'},
-    {key:'costCenterSku',label:'Manufacturing Cost Centre & SKUs',shortLabel:'Cost centre & SKU speeds',phase:'capacity',hint:'Map manufactured SKUs to each cost centre and rate physical-container capacity'},
     {key:'routings',label:'Process Routings',shortLabel:'Process routings',phase:'capacity',hint:'Define operation sequences using configured resources and outputs'},
     {key:'config',label:'Planning Configuration',shortLabel:'Planning rules',phase:'planning',hint:'Configure planning horizon, frozen period and lot-sizing defaults'},
     {key:'demand',label:'Demand & S&OP',shortLabel:'Demand & S&OP',phase:'planning',hint:'Maintain forecast and firm demand after the relevant masters are configured'},
@@ -386,9 +384,7 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
     const canViewMasters=hasPerm(permissions,'MFG.view');
     const canViewPlanning=hasPerm(permissions,'PLN.view');
     const visibleTabs=tabs.filter(t=>t.key==='documentation'?module==='PLN'&&canViewPlanning:
-        t.key==='formDefaults'||t.key==='config'||t.key==='demand'||t.key==='costCenterSku'?canViewPlanning:canViewMasters);
-    const activeIndex=visibleTabs.findIndex(tab=>tab.key===active);
-    const activeTab=tabs.find(tab=>tab.key===active);
+        t.key==='formDefaults'||t.key==='config'||t.key==='demand'?canViewPlanning:canViewMasters);
     // Configuration progression depends on saved masters, not merely opening tabs.
     // Keep MFG master-data navigation and read-only PLN users usable.
     const enforceSetup=module==='PLN'&&canViewMasters&&canViewPlanning;
@@ -398,13 +394,9 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
         resources:rows.resources as SetupRow[],routings:rows.routings as SetupRow[],
         capacityMappings,capacityLoaded,planningConfigurationRevision:configRevision,
     });
-    const prerequisiteNames=(step:Tab)=>setupProgress[step as SetupStep].missing
-        .map(key=>tabs.find(t=>t.key===key)?.shortLabel||key);
-    const nextTab=visibleTabs[activeIndex+1]?.key;
-    const nextMissing=nextTab&&enforceSetup?prerequisiteNames(nextTab):[];
-    // Keep 8 essential readiness gates; optional form defaults do not block production masters.
-    const configuredCount=tabs.filter(t=>t.key!=='formDefaults'&&t.key!=='demand'&&t.key!=='documentation'&&
-        setupProgress[t.key].complete&&setupProgress[t.key].accessible).length;
+    const prerequisiteNames=(step:Tab)=>setupProgress[step].missing
+        .map(key=>key==='costCenterSku'?'SKU allocation in Manufacturing Resources':
+            tabs.find(t=>t.key===key)?.shortLabel||key);
     // Read-only users may have a different first accessible step.
     useEffect(()=>{
         if(visibleTabs.length&&!visibleTabs.some(tab=>tab.key===active)){
@@ -451,12 +443,6 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
     const refreshSkuSetup=async()=>{
         const data=await callBackend<SkuSetup>('/api/org/pln-mfg/sku/setup');
         setSkuSetup(data);
-    };
-    const refreshCapacitySetup=async()=>{
-        try{
-            const result=await callBackend<{mappings:SetupRow[]}>('/api/org/pln/cost-center/hierarchy');
-            setCapacityMappings(result.mappings);setCapacityLoaded(true);
-        }catch{setCapacityLoaded(false);}
     };
     const changeTab=(tab:Tab)=>{
         if(enforceSetup&&loading&&tab!=='documentation'){
@@ -547,63 +533,16 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
         finally{setBusy(false);}
     };
     return <div className='space-y-4'>
-        <PageTitle title={module==='PLN'?'Production Planning & MRP':'Manufacturing'}
-            action={<Button variant='secondary' className='shrink-0 px-3 text-xs sm:text-sm'
-                disabled={busy||loading} onClick={()=>void load()}>Refresh</Button>}/>
-        {enforceSetup&&<section className='rounded-xl border border-line bg-panel p-3 text-xs'>
-            <p className='font-semibold'>Configuration readiness · {configuredCount} / 8 setup requirements saved</p>
-            <p className='mt-1 text-muted'>Steps unlock when their saved configuration dependencies are complete. Independent master-data branches can be configured separately.</p>
-            {enforceSetup&&activeTab&&setupProgress[active].missing.length>0&&
-                <p className='mt-2 text-amber-700'>Prerequisite: {prerequisiteNames(active).join(', ')}</p>}
-        </section>}
-        <nav aria-label='Production configuration sequence' className='sm:hidden rounded-xl border border-line bg-panel p-3'>
-            <div className='flex items-center justify-between gap-2'>
-                <label htmlFor='manufacturing-step-select' className='text-xs font-semibold text-muted'>Configuration sequence</label>
-                <span className='shrink-0 text-xs text-muted'>{activeIndex>=0?activeIndex+1:0} / {visibleTabs.length}</span>
-            </div>
-            <div className='mt-2'>
-                <SelectField id='manufacturing-step-select' label='Configuration sequence' hideLabel value={active}
-                    onChange={event=>changeTab(event.target.value as Tab)}>
+        <PageTitle title={module==='PLN'?'Production Planning & MRP':'Manufacturing'} action={null}/>
+        <nav aria-label='Production configuration menu' className='rounded-xl border border-line bg-panel px-3 py-2'>
+            <SelectField id='manufacturing-step-select' label='Configuration' value={active}
+                onChange={event=>changeTab(event.target.value as Tab)}>
                 {phases.map(phase=><optgroup key={phase.key} label={phase.title}>
                     {visibleTabs.filter(tab=>tab.phase===phase.key).map(tab=>
-                        <option key={tab.key} value={tab.key}>
-                            {visibleTabs.indexOf(tab)+1}. {tab.shortLabel}{enforceSetup&&!setupProgress[tab.key].accessible?' · needs prerequisites':
-                                enforceSetup&&setupProgress[tab.key].complete&&tab.key!=='documentation'?' · configured':''}
-                        </option>)}
+                        <option key={tab.key} value={tab.key}>{tab.shortLabel}</option>)}
                 </optgroup>)}
-                </SelectField>
-            </div>
-            <p className='mt-2 text-xs text-muted'>{activeTab?.hint}</p>
-            {enforceSetup&&nextMissing&&nextMissing.length>0&&
-                <p className='mt-1 text-xs text-amber-700'>Next step requires: {nextMissing.join(', ')}</p>}
-            <div className='mt-3 grid grid-cols-2 gap-2'>
-                <Button variant='secondary' className='w-full px-2 text-xs'
-                    disabled={activeIndex<=0} onClick={()=>changeTab(visibleTabs[activeIndex-1].key)}>Previous</Button>
-                <Button variant='secondary' className='w-full px-2 text-xs'
-                    disabled={activeIndex<0||activeIndex>=visibleTabs.length-1||(!!nextMissing&&nextMissing.length>0)}
-                    onClick={()=>changeTab(visibleTabs[activeIndex+1].key)}>Next step</Button>
-            </div>
+            </SelectField>
         </nav>
-        <nav aria-label='Production configuration stages' className='hidden gap-3 sm:grid sm:grid-cols-2 xl:grid-cols-4'>
-            {phases.map(phase=>{
-                const entries=visibleTabs.filter(tab=>tab.phase===phase.key);
-                return entries.length?<section key={phase.key} className='min-w-0 rounded-xl border border-line bg-panel p-3'>
-                    <p className='mb-2 text-xs font-semibold text-muted'>{phase.title}</p>
-                    <div className='flex flex-wrap gap-2'>{entries.map(tab=>
-                        <button type='button' key={tab.key} aria-current={active===tab.key?'page':undefined}
-                            aria-disabled={enforceSetup&&!setupProgress[tab.key].accessible}
-                            title={enforceSetup&&!setupProgress[tab.key].accessible?
-                                'Prerequisites: '+prerequisiteNames(tab.key).join(', '):tab.hint}
-                            onClick={()=>changeTab(tab.key)}
-                            className={'min-h-10 max-w-full rounded-lg border px-2 py-1.5 text-left text-xs font-medium '+
-                                (active===tab.key?'border-brand bg-brand/10 text-brand':'border-line text-soft')}>
-                            {tab.shortLabel}
-                            {enforceSetup&&!setupProgress[tab.key].accessible&&<span className='block text-[11px] text-muted'>Requires setup</span>}
-                        </button>)}</div>
-                </section>:null;
-            })}
-        </nav>
-        {active!=='skuSetup'&&<p className='hidden text-sm text-muted sm:block'>{activeTab?.hint}</p>}
         {setupBlocked&&<div role='alert' className='space-y-2 rounded-xl border border-amber-500/50 p-3 text-sm'>
             <p>{setupBlocked}</p>
             <Button variant='secondary' className='w-fit px-3 text-xs'
@@ -613,7 +552,9 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
                     while(step&&setupProgress[step].missing.length&&!visited.has(step)){
                         visited.add(step);step=setupProgress[step].missing[0];
                     }
-                    if(step)changeTab(step as Tab);else{setSetupBlocked('');setBlockedTarget(null);}
+                    if(step==='costCenterSku')changeTab('resources');
+                    else if(step)changeTab(step as Tab);
+                    else{setSetupBlocked('');setBlockedTarget(null);}
                 }}>
                 Review prerequisites
             </Button>
@@ -623,14 +564,7 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
         {active==='documentation'?<PlnDocumentation onNavigate={value=>changeTab(value as Tab)}/>:
         loading?<Spinner/>:active==='formDefaults'?<PlnFormDefaultsPanel initial={formDefaults} revision={formDefaultsRevision} sites={refs.sites} canEdit={canConfig} onSaved={(next,revision)=>{
             setConfig(previous=>({...previous,formDefaults:next}));setFormDefaultsRevision(revision);
-        }}/>:active==='costCenterSku'?<PlnCostCenterSetup onMappingsChanged={refreshCapacitySetup}
-            defaultSiteId={formDefaults.defaultSiteId}
-            onEditSku={skuId=>{
-                const found=rows.items.find(item=>item.id===skuId);
-                setActive('items');setDraft(null);setViewSkuId('');
-                if(found){void openDraft(found);}
-                else setError('The selected SKU was not found in your current Materials & Products list. Refresh the list and search for '+skuId+'.');
-            }}/>:active==='demand'?<PlnDemand permissions={permissions} formDefaults={formDefaults}/>: active==='skuSetup'?<SkuSetupPanel setup={skuSetup} canEdit={canSkuConfig} onSaved={refreshSkuSetup}/>:active==='materialPolicy'?<Card className='space-y-4'>
+        }}/>:active==='demand'?<PlnDemand permissions={permissions} formDefaults={formDefaults}/>: active==='skuSetup'?<SkuSetupPanel setup={skuSetup} canEdit={canSkuConfig} onSaved={refreshSkuSetup}/>:active==='materialPolicy'?<Card className='space-y-4'>
             <h2 className='font-semibold'>Manufacturing material handling</h2>
             <p className='text-sm text-muted'>Configure material consumption and intermediate stock policies. The same material and BOM structure applies to every organization.</p>
             <div className='grid gap-3 sm:grid-cols-2'>
