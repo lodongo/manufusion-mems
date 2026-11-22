@@ -7,7 +7,7 @@ import {callBackend} from '../lib/backend';
 import {THROUGHPUT_OUTPUTS,throughputOutput,throughputOutputGroups} from '../shared/throughputOutput';
 import {BULK_STORAGE_CONTAINER_CATEGORY,SKU_CONTAINMENT_SCOPES,skuContainmentNeeds,type SkuContainmentScope} from '../shared/skuContainmentPolicy';
 
-export type SkuParameterKind='productNames'|'productionForms'|'containers'|'containerSizes'|'packages'|'transportPackages'|'packagingSizes'|'packageCounts'|'normalizationUnits';
+export type SkuParameterKind='productNames'|'processClasses'|'productionForms'|'containers'|'containerSizes'|'packages'|'transportPackages'|'packagingSizes'|'packageCounts'|'normalizationUnits';
 export type SkuParameter={
     id:string;kind:SkuParameterKind;name:string;enabled?:boolean;description?:string;
     quantity?:number;uom?:string;baseUom?:string;quantityPerUnit?:number;revision?:number;
@@ -42,7 +42,7 @@ export type SkuSetup={
 };
 export const emptySkuSetup:SkuSetup={
     parameters:[],
-    groups:{productNames:'NME',productionForms:'FRM',containers:'CNT',containerSizes:'SIZ',
+    groups:{productNames:'NME',processClasses:'PRC',productionForms:'FRM',containers:'CNT',containerSizes:'SIZ',
         packages:'PKG',transportPackages:'TLP',packagingSizes:'PSZ',packageCounts:'PCT',normalizationUnits:'NRM'},
     units:[],categories:[],primaryContainerMetadata:{version:1,categories:[],types:[]},
     packagingMetadata:{version:1,categories:[],types:[]},
@@ -63,6 +63,7 @@ export type SkuSelections={
 type MenuKey=Exclude<SkuParameterKind,'packageCounts'>|'namingSequence';
 export const SKU_GROUPS:Array<{kind:MenuKey;title:string}>=[
     {kind:'productNames',title:'Product/Variant'},
+    {kind:'processClasses',title:'Manufacturing Process Classifications'},
     {kind:'productionForms',title:'Production Forms'},
     {kind:'containers',title:'Physical Containers'},
     {kind:'containerSizes',title:'Container Sizes'},
@@ -75,6 +76,7 @@ export const SKU_GROUPS:Array<{kind:MenuKey;title:string}>=[
 type IconComponent=LucideIcon;
 const menu:Array<{key:MenuKey;title:string;Icon:IconComponent}>=[
     {key:'productNames',title:'Product/Variant',Icon:Box},
+    {key:'processClasses',title:'Manufacturing Process Classifications',Icon:Shapes},
     {key:'productionForms',title:'Production Forms',Icon:Layers3},
     {key:'containers',title:'Physical Containers',Icon:PackageOpen},
     {key:'containerSizes',title:'Container Sizes',Icon:Maximize2},
@@ -86,8 +88,8 @@ const menu:Array<{key:MenuKey;title:string;Icon:IconComponent}>=[
 ];
 /** Organize the large parameter catalogue without changing any editor or SKU setting. */
 const menuGroups:{title:string;hint:string;keys:MenuKey[]}[]=[
-    {title:'Product identity',hint:'Product names and production forms',
-        keys:['productNames','productionForms']},
+    {title:'Product identity & manufacturing process',hint:'Manage product names, production forms and reusable manufacturing process families',
+        keys:['productNames','processClasses','productionForms']},
     {title:'Primary container',hint:'Container types and physical sizes',
         keys:['containers','containerSizes']},
     {title:'Commercial & transport packaging',hint:'Selling packs and logistics units',
@@ -645,6 +647,13 @@ export function SkuSetupPanel({setup,canEdit,onSaved,variantLabel='Product/Varia
                     <h3 className='font-semibold'>{draft.id?'Edit':'New'} {kindName}</h3>
                     <button type='button' className={secondary} onClick={()=>setDraft(null)}>Cancel</button>
                 </div>
+                {active==='processClasses'&&<>
+                    <TextInput title='Manufacturing process classification name' value={draft.name||''}
+                        onChange={v=>update('name',v)} required/>
+                    <TextInput title='What manufacturing method does this group share?' value={draft.description||''}
+                        onChange={v=>update('description',v)}/>
+                    <p className='text-xs text-muted'>Group SKUs by their common production process, not their product name, recipe, flavor or material family. You define the classifications for your organization; there are no industry-specific defaults. Different routes may still be used within a classification when processing differs.</p>
+                </>}
                 {active==='productNames'&&<>
                     <TextInput title={variantLabel+' name'} value={draft.name||''} onChange={v=>update('name',v)} required/>
                     <TextInput title={variantLabel+' code'} value={draft.productCode||''} onChange={v=>update('productCode',v.toUpperCase())} required/>
