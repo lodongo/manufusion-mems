@@ -41,7 +41,7 @@ const guide:Chapter[]=[
   {title:'Manufacturing process classifications',purpose:'Group different SKUs by their shared manufacturing method, not their product variant or recipe.',steps:[
    'Open Product Configuration → Manufacturing Process Classifications and create the process groups relevant to your organization.',
    'Name each classification and describe the common manufacturing method it represents. No industry list is hard-coded.',
-   'Assign the classification when creating or editing a manufactured SKU; existing SKU IDs and site allocations are preserved.',
+   'Assign the classification when creating an SKU. For an existing approved SKU, use Classify manufacturing process on its card to change only classification metadata without changing its SKU code, BOM, site allocation or commissioned speeds.',
    'One process classification can offer different approved routing alternatives when a production method or equipment changes.',
   ],example:'Possible user-defined groups include continuous extrusion, batch blending, precision machining, textile weaving, industrial assembly and thermal processing. None are predefined classifications.'},
   {title:'Product/Variant',purpose:'Define reusable brand, flavour, grade or variant identity.',steps:[
