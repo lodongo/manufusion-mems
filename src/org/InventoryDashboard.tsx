@@ -1,9 +1,9 @@
 import { useState, type ReactNode } from 'react';
 import { Boxes, PackageOpen, RefreshCw, TrendingUp } from 'lucide-react';
 import { callBackend } from '../lib/backend';
-import { Alert } from '../components/ui';
+import { Alert, SelectField } from '../components/ui';
 import { Screen } from '../components/screen';
-import { Button, SelectField, Spinner, useLoad } from '../admin/kit';
+import { Button, Spinner, useLoad } from '../admin/kit';
 
 // Inventory dashboard draws on the same reconciled material × warehouse snapshot
 // as Inventory on Hand. Display currencies may change, never the stored supplier price.
