@@ -66,7 +66,6 @@ export default function CostCenterUtilitySupplies({costCenterId,onBack}:{
  };
  const active=data?.catalogue.find(u=>u.code===editing);
  const current=draft.find(x=>x.code===editing);
- const selectedRatingAsset=assets.find(x=>x.tag===ratingAsset);
  const saved=data?.items.find(x=>x.code===editing);
  const determinant=saved?.review?.determinant||active?.attributes?.find(a=>
   ['current','flow','feed','power','force','mass'].includes(a.key)&&a.type==='number');
@@ -74,6 +73,10 @@ export default function CostCenterUtilitySupplies({costCenterId,onBack}:{
   onBack={()=>setBrowse(false)} onChoose={add}/>;
  if(assetForm)return <AssetForm onCancel={()=>setAssetForm(false)} onDone={tag=>{
   setAssetForm(false);
+  // An asset created in the inline flow is immediately proposed as a supply
+  // source. Source rating and allocated capacity still require confirmation.
+  modify(editing,row=>({...row,sources:[...row.sources.filter(s=>s.assetTag!==tag),
+   {assetTag:tag,allocatedCapacity:null}]}));
   void choose(editing).then(()=>setRatingAsset(tag));
  }}/>;
  return <section className='space-y-4'>
