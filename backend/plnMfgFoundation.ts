@@ -15,6 +15,7 @@ import {eligibleManufacturingHierarchy,routingManufacturingCostCenter,routingCom
 import {physicalRatingUnits} from './plnPhysicalCapacity';
 import { allowedNodeIds } from './positions';
 import {reviewManufacturingRouting} from './mfgRoutingReadiness';
+import {normalizeMaterialSupplyProfile} from './mfgMaterialSupplyProfile';
 import {routingSkuIds,routingForSku} from './mfgRoutingSkuMappings';
 
 export const MASTER_KINDS = ['items', 'boms', 'resources', 'routings'] as const;
@@ -138,6 +139,7 @@ export function normalizeMaster(kind:MasterKind, raw:unknown): Obj {
         if(processClassId)VALID_ID(processClassId,'Manufacturing process classification');
         return {...base,category,sourceMode,stockPolicy,utilityCode,utilityWorkCenterId,
             processClassId,family:str(raw.family).slice(0,100),uom:UOM(raw.uom),inventoryMaterialId,
+            supplyProfile:normalizeMaterialSupplyProfile(raw.supplyProfile, UOM(raw.uom)),
             packQty:POSITIVE(raw.packQty??1,'Pack quantity'),skuComponents:isObj(raw.skuComponents)?raw.skuComponents:{},
             skuConversion:isObj(raw.skuConversion)?raw.skuConversion:{},skuNamingSnapshot:isObj(raw.skuNamingSnapshot)?raw.skuNamingSnapshot:{}};
     }
@@ -294,6 +296,16 @@ export async function referenceChecks(ctx:OrgContext,kind:MasterKind,item:Obj,ex
         if(str(site.data.level)!=='site'||str(site.data.status)==='inactive')throw new HttpError(400,'Choose an active organization site.');
     }
     if(kind==='items'){
+        const sourceRecords=ARR(isObj(item.supplyProfile)?item.supplyProfile.sources:null);
+        for(const source of sourceRecords){
+            const sourceSite=str(source.siteId);
+            if(!sourceSite)continue;
+            const node=await getNode(ctx,sourceSite);
+            if(str(node.data.level)!=='site'||str(node.data.status)==='inactive')
+                throw new HttpError(400,'Material supply source must reference an active organization site.');
+            if(!await recordAccess(ctx,'MFG.view',sourceSite))
+                throw new HttpError(403,'A material supply source references a site outside your permitted scope.');
+        }
         const processClassId=str(item.processClassId);
         if(processClassId){
             if(!['FINISHED','INTERMEDIATE'].includes(str(item.category)))
