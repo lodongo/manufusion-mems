@@ -1,5 +1,6 @@
 import { useState, type ChangeEvent } from 'react';
 import CatalogueDraftPreview from '../components/CatalogueDraftPreview';
+import { catalogUploadIssue, splitUtf8UploadParts } from './catalogFileKinds';
 import { CheckCircle2, Download, Eye, FileUp, ShieldCheck } from 'lucide-react';
 import { callBackend } from '../lib/backend';
 import { downloadBlob } from '../lib/xlsx';
@@ -36,7 +37,6 @@ interface UploadResult {
     stats: Record<string, number>;
 }
 
-const CHUNK_CHARS = 400_000;
 
 const TEXT: Record<Kind, { title: string; subtitle: string; item: string; items: string; file: string; module: string; api: string; levels: [string, string, string] }> = {
     materials: {
@@ -96,31 +96,43 @@ export default function ProcurementCatalogAdmin({ kind, canWrite }: { kind: Kind
         if (!file) return;
         setUploadError('');
         setResult(null);
+        if (/\.zip$/i.test(file.name)) return setUploadError('A ZIP bundle cannot be imported directly. Extract it and select the standalone Materials or GL .json file.');
         if (file.size > 48_000_000) return setUploadError('The file is larger than 48 MB.');
         try {
             setProgress('Reading the file…');
-            const textAll = await file.text();
-            let parsed: Record<string, unknown>;
-            try {
-                parsed = JSON.parse(textAll) as Record<string, unknown>;
-            } catch {
-                throw new Error('The file is not valid JSON.');
+            // Large catalogue files can exceed mobile browsers' JSON.parse memory.
+            // The server performs complete parsing and structural/finance validation before activation.
+            const textAll = (await file.text()).replace(/^\uFEFF/, '');
+            const beginning = textAll.trimStart().slice(0, 16);
+            if (beginning.startsWith('PK\u0003\u0004'))
+                throw new Error('This is a ZIP bundle. Extract it and select the standalone .json catalogue file.');
+            if (!beginning.startsWith('{') || !textAll.trimEnd().endsWith('}'))
+                throw new Error('The selected file is not a complete JSON catalogue. Select the standalone .json file, not a ZIP, report, or truncated download.');
+            if (textAll.length <= 2_000_000) {
+                let parsed: Record<string, unknown>;
+                try {
+                    parsed = JSON.parse(textAll) as Record<string, unknown>;
+                } catch (ex) {
+                    throw new Error('The JSON has a syntax error: ' + (ex instanceof Error ? ex.message.slice(0, 180) : 'invalid JSON') + '.');
+                }
+                const issue = catalogUploadIssue(kind, parsed);
+                if (issue) throw new Error(issue);
+                if (parsed.financialIntegration && (parsed.financialIntegration as Record<string, unknown>).catalogueRelease !== 'APPROVED')
+                    throw new Error('This integrated financial master is not approved. Complete its required release process before activating it.');
+            } else {
+                // Read only a small prefix for early file-kind feedback; no full JSON.parse on mobile.
+                const declaredType = textAll.slice(0, 40_000).match(/"catalogType"\s*:\s*"([^"]+)"/)?.[1];
+                if (declaredType && declaredType !== kind)
+                    throw new Error(`This is a ${TEXT[declaredType as Kind]?.title ?? declaredType} file. Open the correct catalogue page to upload it.`);
             }
-            if (typeof parsed.catalogType === 'string' && parsed.catalogType !== kind) {
-                const other = TEXT[parsed.catalogType as Kind]?.title ?? parsed.catalogType;
-                throw new Error(`This is a ${other} file. Open the ${other} to upload it.`);
-            }
-            if (!Array.isArray(parsed.attributes) || !(Array.isArray(parsed[t.items === 'accounts' ? 'accounts' : kind]) || Array.isArray(parsed.items))) throw new Error(`The file has no ${t.items} or attributes.`);
-            if (parsed.financialIntegration && (parsed.financialIntegration as Record<string,unknown>).catalogueRelease !== 'APPROVED')
-                throw new Error('This financial master is a Finance-review draft. Complete Finance sign-off and publish an APPROVED release before activating it.');
             if (data?.loaded && !(await appConfirm(`This replaces the ${t.title.toLowerCase()} in the database. Continue?`))) {
                 setProgress('');
                 return;
             }
             const bytes = new TextEncoder().encode(textAll);
             const sha256 = await sha256Hex(bytes);
-            const chunks: string[] = [];
-            for(let i=0;i<textAll.length;i+=CHUNK_CHARS)chunks.push(textAll.slice(i,i+CHUNK_CHARS));
+            // Preserve UTF-8 surrogate pairs so checksum verification remains correct.
+            const chunks = splitUtf8UploadParts(textAll, 400_000, 650_000);
             if(chunks.length>140)throw new Error('The file requires too many parts for this importer.');
             const uploadId=crypto.randomUUID().replace(/-/g,'');
             await callBackend(`${t.api}/begin`,{kind,uploadId,size:bytes.length,sha256,
