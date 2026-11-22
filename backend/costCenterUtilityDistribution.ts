@@ -4,7 +4,7 @@
  * capacity. Equipment demand is never written to the supply asset or the BOM.
  * Legacy direct asset connections remain visible until explicitly reassigned.
  */
-import {HttpError,getDoc,isObj,listDocs,nowIso,str,writeDoc,type Doc,type Obj} from './core';
+import {HttpError,commitChecked,getDoc,isObj,listDocs,nowIso,str,type Doc,type Obj} from './core';
 import {orgRoute,type OrgContext} from './guards';
 import {allowedAt,PERMS,requireAt,audited} from './scopeGuard';
 import {safetyCatalogue} from './safConfiguration';
@@ -16,6 +16,7 @@ const ASSET=/^AST-\d{6}$/;
 const path=(org:string,cc:string)=>'organizations/'+org+'/cost_center_utility_supplies/'+cc;
 const root=(org:string)=>'organizations/'+org+'/cost_center_utility_supplies';
 const assetsRoot=(org:string)=>'organizations/'+org+'/assets';
+const allocationLockPath=(org:string)=>'organizations/'+org+'/utility_supply_allocation_locks/global';
 const structure=(org:string,id:string)=>'organizations/'+org+'/structure/'+id;
 const equipmentRoot=(org:string)=>'organizations/'+org+'/equipment_utilities';
 const rows=(doc:Doc|null):Obj[]=>Array.isArray(doc?.data.items)?doc.data.items.filter(isObj):[];
@@ -223,6 +224,9 @@ export const costCenterUtilityDistributionRoutes={
    const submitted=ctx.body.items;
    if(!Array.isArray(submitted)||submitted.length>80)throw new HttpError(400,'Choose up to 80 cost-centre utilities.');
    const defs=await utilityDefinitions(ctx.orgId);
+   // Read the global allocation revision BEFORE checking other cost centres.
+   // Concurrent source allocations cannot pass against the same free capacity.
+   const allocationLock=await getDoc(allocationLockPath(ctx.orgId));
    const allOther=await listDocs(root(ctx.orgId));
    const seen=new Set<string>(),next:SupplyItem[]=[];
    for(const raw of submitted){
@@ -295,8 +299,14 @@ export const costCenterUtilityDistributionRoutes={
     if(loads.length)throw new HttpError(409,'Utility '+str(row.label)+' is used by '+loads.length+' equipment item(s). Reassign or disconnect them first.');
    }
    const newData={items:next,version:version+1,siteId,updatedAt:nowIso(),updatedBy:ctx.uid};
-   if(!await writeDoc(path(ctx.orgId,id),newData,saved?{updateTime:saved.updateTime}:{exists:false}))
-    throw new HttpError(409,'Cost-centre utility setup changed before save. Reload.');
+   const newLock={version:Number(allocationLock?.data.version||0)+1,updatedAt:nowIso(),updatedBy:ctx.uid};
+   const committed=await commitChecked([
+    {path:path(ctx.orgId,id),data:newData,precondition:saved?{updateTime:saved.updateTime}:{exists:false}},
+    {path:allocationLockPath(ctx.orgId),data:newLock,
+     precondition:allocationLock?{updateTime:allocationLock.updateTime}:{exists:false}},
+   ]);
+   if(!committed)throw new HttpError(409,
+    'Utility allocations changed concurrently. Refresh cost-centre supplies and review remaining asset capacity.');
    await audited(ctx,'ast.cost_center.utilities.save',id,{codes:next.map(x=>x.code),version:version+1});
    return {saved:next.length,revision:version+1};
   }),
