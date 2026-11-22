@@ -10,8 +10,13 @@ export type RoutingStep={
  capacityBasis?:'PHYSICAL_CONTAINER'|'RESOURCE_RATE'|'BATCH_CYCLE'|'TIME_PER_UNIT';
  batchSize?:number;cycleMinutes?:number;
 };
+type MappedStage={code:string;producesSkuId?:string;bomId?:string;
+ setupMinutes?:number;runMinutesPerUnit?:number;batchSize?:number;cycleMinutes?:number;
+ capacityBasis?:RoutingStep['capacityBasis']};
+type SkuMapping={skuId:string;stages:MappedStage[]};
 type RoutingRecord=Row&{skuId?:string;siteId?:string;alternativeCode?:string;
- effectiveFrom?:string;routingModelVersion?:number;operations?:RoutingStep[]};
+ effectiveFrom?:string;routingModelVersion?:number;operations?:RoutingStep[];
+ skuMappings?:SkuMapping[]};
 type CostCenter={id:string;name:string;code:string;siteId:string;legalEntityId:string;commissionedSkuIds:string[]};
 type Diagnostic={stageCode:string;field:string;message:string};
 type StagePreview={code:string;name:string;stageType:string;producesSkuId:string;costCenterId:string;
@@ -20,7 +25,8 @@ type StagePreview={code:string;name:string;stageType:string;producesSkuId:string
  capacity:{quantity:number;unit:string;source:string;revision?:number}|null};
 type Review={ready:boolean;issues:Diagnostic[];stages:StagePreview[];
  bottlenecks:Array<{outputSkuId:string;limitingStageCode:string;physicalContainersPerHour:number;
- comparableStageCodes:string[]}>;comparisonNote:string};
+ comparableStageCodes:string[]}>;comparisonNote:string;
+ skuReviews?:Array<{skuId:string;ready:boolean;issues:Diagnostic[];stages:StagePreview[]}>};
 const forms='w-full min-h-11 min-w-0 rounded-xl border border-line bg-panel px-3 py-2 text-sm text-ink';
 const fmt=(n:number)=>new Intl.NumberFormat(undefined,{maximumFractionDigits:2}).format(n);
 const str=(x:unknown)=>typeof x==='string'?x:'';
@@ -70,7 +76,8 @@ export default function PlnProcessRoutingEditor({value,onChange,items,boms,resou
  sites:Array<{id:string;name:string;code:string}>}){
  const [centers,setCenters]=useState<CostCenter[]>([]);
  const [loadError,setLoadError]=useState('');
- const [section,setSection]=useState<'setup'|'stages'|'review'>('setup');
+ const [section,setSection]=useState<'setup'|'stages'|'skus'|'review'>('setup');
+ const [skuToAdd,setSkuToAdd]=useState('');
  const [openStep,setOpenStep]=useState('');
  const [review,setReview]=useState<Review|null>(null);
  const [reviewBusy,setReviewBusy]=useState(false);
@@ -80,6 +87,7 @@ export default function PlnProcessRoutingEditor({value,onChange,items,boms,resou
  const [stepNotice,setStepNotice]=useState('');
  const legacy=value.routingModelVersion!==2;
  const ops=stageList(value.operations);
+ const skuMappings=Array.isArray(value.skuMappings)?value.skuMappings:[];
  const selected=ops.find(s=>s.code===openStep);
  const selectedOutput=items.find(x=>x.id===selected?.producesSkuId);
  const update=(field:string,input:unknown)=>{
@@ -89,6 +97,18 @@ export default function PlnProcessRoutingEditor({value,onChange,items,boms,resou
  const updateSteps=(next:RoutingStep[])=>update('operations',next);
  const updateStep=(code:string,changes:Partial<RoutingStep>)=>
   updateSteps(ops.map(s=>s.code===code?{...s,...changes}:s));
+ const addSkuMapping=()=>{
+  if(!skuToAdd||skuToAdd===value.skuId||skuMappings.some(x=>x.skuId===skuToAdd))return;
+  const final=[...ops].reverse().find(x=>(x.stageType||'PRODUCE')==='PRODUCE');
+  const stages:MappedStage[]=final?[{code:final.code,producesSkuId:skuToAdd,bomId:''}]:[];
+  update('skuMappings',[...skuMappings,{skuId:skuToAdd,stages}]);
+  setSkuToAdd('');
+ };
+ const updateSkuStage=(skuId:string,code:string,patch:Partial<MappedStage>)=>
+  update('skuMappings',skuMappings.map(mapping=>mapping.skuId!==skuId?mapping:{
+   ...mapping,stages:[...mapping.stages.filter(x=>x.code!==code),
+    {...(mapping.stages.find(x=>x.code===code)||{code}),...patch}],
+  }));
  const selectedCostCenter=centers.find(x=>x.id===selected?.costCenterId);
  const selectedResource=resources.find(x=>x.id===selected?.resourceId);
  useEffect(()=>{
@@ -185,9 +205,9 @@ export default function PlnProcessRoutingEditor({value,onChange,items,boms,resou
    <p className='text-xs text-muted'>Existing route data remains unchanged. Adopt the new stage-level cost centre, BOM and capacity model explicitly.</p>
    <Action onClick={upgrade}>Upgrade draft routing structure</Action>
   </div>}
-  {!legacy&&<div className='grid grid-cols-3 gap-1 rounded-xl border border-line bg-page p-1' role='group' aria-label='Routing configuration sections'>
+  {!legacy&&<div className='grid grid-cols-4 gap-1 rounded-xl border border-line bg-page p-1' role='group' aria-label='Routing configuration sections'>
    {([
-    ['setup','1. Setup'],['stages','2. Stages'],['review','3. Review'],
+    ['setup','1. Setup'],['stages','2. Stages'],['skus','3. SKUs'],['review','4. Review'],
    ] as Array<[typeof section,string]>).map(([key,label])=>
     <button key={key} type='button' aria-pressed={section===key} onClick={()=>setSection(key)}
      className={'min-h-11 rounded-lg px-1 text-xs font-semibold '+
@@ -201,10 +221,11 @@ export default function PlnProcessRoutingEditor({value,onChange,items,boms,resou
      options={[['','Select site'],...sites.map(s=>[s.id,s.name+' · '+s.code] as [string,string])]}
      onChange={siteId=>{setReview(null);onChange({...value,siteId,
       operations:ops.map(s=>({...s,costCenterId:'',resourceId:'',bomId:''}))});}}/>
-    <Choice label='Manufactured output SKU' value={value.skuId||''}
+    <Choice label='Primary manufactured SKU' value={value.skuId||''}
      options={[['','Select produced finished or intermediate SKU'],
       ...availableOutputs.map(x=>[x.id,x.name] as [string,string])]}
-     onChange={skuId=>{const chosen=items.find(x=>x.id===skuId);
+     onChange={skuId=>{if(skuMappings.some(x=>x.skuId===skuId))return;
+      const chosen=items.find(x=>x.id===skuId);
       onChange({...value,skuId,
        name:str(value.name)||((chosen?.name||'New SKU')+' · Routing'),routingModelVersion:2});}}/>
     <TextField label='Routing name' value={value.name} onChange={name=>update('name',name)}/>
@@ -220,8 +241,8 @@ export default function PlnProcessRoutingEditor({value,onChange,items,boms,resou
     {' · '+str(items.find(x=>x.id===value.skuId)?.category)}
    </p>}
    <div className='rounded-xl bg-page p-3 text-xs text-muted'>
-    Routing is a versioned description of how the selected SKU is manufactured. Stages may use different manufacturing
-    cost centres within the same site. Commissioned rates, materials and assets remain owned by their respective masters.
+    One route describes a shared process: its stages, sequence and resources. The same route can serve multiple SKUs with different recipes.
+    Map additional SKUs in the SKUs tab, each with its own stage BOMs. Create a different route if the equipment, stages or sequence changes.
    </div>
    {!legacy&&<div className='flex justify-end'><Action primary onClick={()=>setSection('stages')}>Configure stages</Action></div>}
   </div>}
@@ -392,7 +413,7 @@ export default function PlnProcessRoutingEditor({value,onChange,items,boms,resou
    {!ops.length&&<p className='text-sm text-muted'>Add your first process stage.</p>}
    <div className='flex flex-wrap justify-between gap-2'>
     <Action onClick={()=>setSection('setup')}>Routing setup</Action>
-    <Action onClick={()=>void check()} primary>Review routing</Action>
+    <Action onClick={()=>setSection('skus')} primary>Next: map SKUs</Action>
    </div>
   </div>}
   {!legacy&&section==='review'&&<div className='space-y-3'>
