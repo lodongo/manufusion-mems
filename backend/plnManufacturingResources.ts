@@ -10,6 +10,7 @@ import {canAt,nodePath,scopeOf} from './access';
 import {audit} from './audit';
 import {PROCUREMENT_UNITS} from './procurementUnits';
 import {isManufacturingCostType} from './plnCostCenterCapacity';
+import {selectedCostCenterSubcategories} from '../src/shared/costCenterTaxonomy';
 
 const ROOT=(orgId:string)=>'organizations/'+orgId;
 const ID=/^[A-Za-z0-9][A-Za-z0-9_-]{1,119}$/;
@@ -56,7 +57,9 @@ async function location(ctx:OrgContext,ccId:string){
  const site=records.find(x=>str(x?.data.level)==='site');
  if(!site)throw new HttpError(409,'Production cost centre has no configured site.');
  return {costCenterId:ccId,siteId:site.id,
-    name:str(cc.data.name)||ccId,code:str(cc.data.code)};
+    name:str(cc.data.name)||ccId,code:str(cc.data.code),
+    costCenterCategory:type,
+    costCenterSubcategories:selectedCostCenterSubcategories(isObj(cc.data.attributes)?cc.data.attributes:{})};
 }
 async function resolve(ctx:OrgContext,ccId:string){
  const pinned=await getDoc(link(ctx.orgId,ccId));
@@ -97,6 +100,8 @@ export const plnManufacturingResourceRoutes={
        accessible.push({
            costCenterId:cc.id,costCenterCode:str(cc.data.code),
            costCenterName:str(cc.data.name)||cc.id,siteId:chain[chain.length-3].id,
+           costCenterCategory:str(isObj(cc.data.attributes)?cc.data.attributes.costType:''),
+           costCenterSubcategories:selectedCostCenterSubcategories(isObj(cc.data.attributes)?cc.data.attributes:{}),
            legalEntityId:chain[chain.length-4].id,departmentId:chain[chain.length-2].id,
            path:chain.map(x=>({id:x.id,name:str(x.data.name)||str(x.data.code)||x.id,
                code:str(x.data.code),level:str(x.data.level)})),
