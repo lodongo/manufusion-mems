@@ -1,7 +1,7 @@
 import { useEffect, useId, useMemo, useState, type ButtonHTMLAttributes, type ReactNode } from 'react';
 import { Alert, Field as MemsField, SelectField } from '../components/ui';
 import { Spinner } from '../admin/kit';
-import { SkuConfigurationFields, SkuSetupPanel, UnitChoice, emptySkuSetup, type SkuSelections, type SkuSetup } from './MfgSkuSetup';
+import { SkuConfigurationFields, SkuSetupPanel, SkuIdentityGuide, UnitChoice, emptySkuSetup, type SkuSelections, type SkuSetup } from './MfgSkuSetup';
 import PlnDemand from './PlnDemand';
 import PlnSkuCostCenterRatings from './PlnSkuCostCenterRatings';
 import ManufacturingResources from './ManufacturingResources';
@@ -338,6 +338,8 @@ function MasterEditor({tab,draft,onChange,items,boms,resources,refs,skuSetup,mat
                 SKUs belong to the organization, not one site. Their manufacturing process classification is shared across sites. Set site-specific availability and production speed through Manufacturing Resources → SKU allocation; no site mappings are changed by classification.
             </p>}
         </div>
+        {tab==='items'&&['FINISHED','INTERMEDIATE'].includes(str(draft.category))&&
+            <SkuIdentityGuide inSkuForm/>}
         {tab==='items'&&str(draft.category)!=='PACKAGING'&&
             <PlnMaterialSupplyProfile
                 value={(draft.supplyProfile||{}) as SupplyProfile}
@@ -609,7 +611,8 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
         {active==='documentation'?<PlnDocumentation onNavigate={value=>changeTab(value as Tab)}/>:
         loading?<Spinner/>:active==='formDefaults'?<PlnFormDefaultsPanel initial={formDefaults} revision={formDefaultsRevision} sites={refs.sites} canEdit={canConfig} onSaved={(next,revision)=>{
             setConfig(previous=>({...previous,formDefaults:next}));setFormDefaultsRevision(revision);
-        }}/>:active==='demand'?<PlnDemand permissions={permissions} formDefaults={formDefaults}/>: active==='skuSetup'?<SkuSetupPanel setup={skuSetup} canEdit={canSkuConfig} onSaved={refreshSkuSetup}/>:active==='materialPolicy'?<Card className='space-y-4'>
+        }}/>:active==='demand'?<PlnDemand permissions={permissions} formDefaults={formDefaults}/>: active==='skuSetup'?<SkuSetupPanel setup={skuSetup} canEdit={canSkuConfig} onSaved={refreshSkuSetup}
+            onOpenSkus={()=>changeTab('items')}/>:active==='materialPolicy'?<Card className='space-y-4'>
             <h2 className='font-semibold'>Manufacturing material handling</h2>
             <p className='text-sm text-muted'>Configure material consumption and intermediate stock policies. The same material and BOM structure applies to every organization.</p>
             <div className='grid gap-3 sm:grid-cols-2'>
