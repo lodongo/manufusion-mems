@@ -859,7 +859,12 @@ export const plnMfgFoundationRoutes={
                         raw.skuNamingSnapshot=old&&isObj(old.data.skuNamingSnapshot)
                             ?old.data.skuNamingSnapshot:{};
                     }else if(naming.configured&&(creating||applySkuNamingSequence)){
-                        raw.name=composeSkuNameWithSequence(selected,configured,naming.sequence,result);
+                        if(naming.sequence.steps.some(step=>step.enabled&&step.field==='manufacturingProcess'&&step.mode==='CODE')){
+                            const selectedClass=configured.find(p=>p.kind==='processClasses'&&p.id===str(raw.processClassId));
+                            if(!str(selectedClass?.processCode))
+                                throw new HttpError(400,'Add a business code to this manufacturing process classification in Product Configuration before using it in SKU naming.');
+                        }
+                        raw.name=composeSkuNameWithSequence(selected,configured,naming.sequence,result,str(raw.processClassId));
                         raw.skuNamingSnapshot={revision:naming.revision,sequence:naming.sequence,
                             generatedName:raw.name,generatedAt:nowIso()};
                     }else if(!creating&&old){
