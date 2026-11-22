@@ -2,6 +2,23 @@
 // Use the adopted PRC conversion registry and the enabled MEMS FX reference. Never guess a conversion.
 import { PROCUREMENT_UNITS } from './procurementUnits';
 
+/**
+ * Prices and stock control levels are persisted as Firestore numbers. Never use
+ * core.str() to decide whether they are blank: str(number) returns ''.
+ * Legacy numeric text is also accepted, but malformed entries are not zero.
+ */
+export function inventoryNumericField(value: unknown): number | null {
+    if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+    if (typeof value !== 'string') return null;
+    const raw=value.trim();
+    if(!raw) return null;
+    const normalized=raw.replace(/,/g,'');
+    if(!/^[-+]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[eE][-+]?\\d+)?$/.test(normalized)) return null;
+    if(raw.includes(',')&&!/^[-+]?\\d{1,3}(?:,\\d{3})+(?:\\.\\d+)?(?:[eE][-+]?\\d+)?$/.test(raw)) return null;
+    const n=Number(normalized);
+    return Number.isFinite(n)?n:null;
+}
+
 export interface ValuationUnit {
     code?: string;
     label?: string;

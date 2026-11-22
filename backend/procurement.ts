@@ -12,7 +12,7 @@ import {METHODS as REPLENISHMENT_METHODS,factorsOf,methodOf,routeFor} from './re
 import {stockMasterItems,warehouseRestrictionMaster} from './stockMasters';
 import {SEGREGATED_RESTRICTIONS,binningBlock,effectiveRestriction,locationBlock,restrictionCodesOf} from './restrictionRules';
 import {materialPhotos,vendorsForMaterial} from './materialMedia';
-import {unitPricePerStockUnit,convertStockCurrency} from './inventoryValuation';
+import {unitPricePerStockUnit,convertStockCurrency,inventoryNumericField} from './inventoryValuation';
 // Numeric replenishment strategy parameters and their allowed ranges (material and warehouse, Inventory section).
 const REPLENISHMENT_LIMITS:Record<string,{min:number;max:number;integer?:boolean;message:string}>={
     annualDemand:{min:0,max:1e12,message:'Annual demand must be 0 or more.'},
@@ -1707,8 +1707,9 @@ export const procurementRoutes = {
         const purchasing=new Map(procurementInfo.map(x=>[x.id,x.data]));
         const occupied=new Set(occupancies.filter(x=>whMap.has(str(x.data.warehouseId))&&
             !!str(x.data.materialId)).map(x=>ledgerKey(str(x.data.materialId),str(x.data.warehouseId))));
-        const level=(value:unknown):number|null=>value===null||value===undefined||str(value).trim()===''?
-            null:Number.isFinite(Number(value))?Number(value):null;
+        // Firestore stores Unit Price and stock levels as numbers. core.str()
+        // returns '' for a number, causing every valid price to look missing.
+        const level=inventoryNumericField;
         const items:Array<Record<string,unknown>>=[];
         const unique=new Set<string>();
         for(const m of materials){

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { unitPricePerStockUnit, convertStockCurrency } from './inventoryValuation';
+import { unitPricePerStockUnit, convertStockCurrency, inventoryNumericField } from './inventoryValuation';
 
 test('supplier price is converted from metric tonnes to stock kilograms',()=>{
     assert.equal(unitPricePerStockUnit(50000,'UOM-01-003','UOM-01-002'),50);
@@ -46,4 +46,18 @@ test('admin UoM records without multipliers use matching canonical PRC conversio
     assert.equal(unitPricePerStockUnit(50000,'UOM-01-003','UOM-01-002',[
         {...old[0],active:false},old[1],
     ]),null);
+});
+
+test('persisted numeric procurement prices and stock limits are never mistaken for blank text',()=>{
+    assert.equal(inventoryNumericField(50000),50000);
+    assert.equal(inventoryNumericField(0),0);
+    assert.equal(inventoryNumericField(100.25),100.25);
+    assert.equal(inventoryNumericField('50,000.00'),50000);
+    assert.equal(inventoryNumericField('0'),0);
+    assert.equal(inventoryNumericField('  '),null);
+    assert.equal(inventoryNumericField(undefined),null);
+    assert.equal(inventoryNumericField(null),null);
+    assert.equal(inventoryNumericField('not a price'),null);
+    assert.equal(inventoryNumericField('1,00'),null);
+    assert.equal(inventoryNumericField(Number.POSITIVE_INFINITY),null);
 });

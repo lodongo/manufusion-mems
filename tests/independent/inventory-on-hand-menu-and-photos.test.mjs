@@ -84,6 +84,8 @@ test('inventory on hand uses reconciled journal balances, calculates net availab
     assert.ok(endpoint.includes('convertStockCurrency(unitCost,priceCurrency,localCurrency,rates)'),'convert to local legal-entity currency');
     assert.ok(endpoint.includes('legal_entities'),'legal entity local currency is respected');
     assert.ok(endpoint.includes('valuationReason'),'unsafe valuation has a diagnostic instead of zero');
+    assert.ok(endpoint.includes('const level=inventoryNumericField;'),'read saved numeric prices and stock limits rather than treating all numbers as blank');
+    assert.ok(!endpoint.includes("str(value).trim()===''"),'never use string-only core.str() for numeric field blank detection');
     assert.ok(ui.includes("Net stock value currency"),'currency selector is available from inventory table menu');
     assert.ok(ui.includes('mixedLocal'),'do not sum unlike local currencies');
     assert.ok(ui.includes("label: 'Net available'"));
