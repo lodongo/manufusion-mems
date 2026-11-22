@@ -87,7 +87,7 @@ test('inventory on hand uses reconciled journal balances, calculates net availab
     assert.ok(ui.includes("Net stock value currency"),'currency selector is available from inventory table menu');
     assert.ok(ui.includes('mixedLocal'),'do not sum unlike local currencies');
     assert.ok(ui.includes("label: 'Net available'"));
-    assert.ok(ui.includes("label: 'Net stock value'"));
+    assert.ok(ui.includes("label: selectedCurrency ?"),'net stock value header identifies chosen display currency');
     assert.ok(ui.includes("label: 'Physical on hand'"));
     assert.ok(ui.includes('bg-red-100'));
     assert.ok(ui.includes('bg-yellow-100'));
