@@ -166,9 +166,11 @@ export function normalizeMaster(kind:MasterKind, raw:unknown): Obj {
         const seen=new Set<string>();
         const lines=components.map((c,i)=>{
             const source=str(c.source);
-            if(source&&!['INTERMEDIATE','WAREHOUSE'].includes(source))
-                throw new HttpError(400,'Component '+(i+1)+': choose an intermediate or a warehouse procurement material.');
-            const quantity=POSITIVE(c.quantity,'Component quantity'),uom=UOM(c.uom);
+            if(source&&!['INTERMEDIATE','WAREHOUSE','PROCESS_SUPPLY'].includes(source))
+                throw new HttpError(400,'Component '+(i+1)+': choose an intermediate, warehouse material or metered/bulk process supply.');
+            // BOM quantity is ALWAYS the planned consumption for outputQty.
+            // An optional hourly flow does not replace the recipe/MRP requirement.
+            const quantity=POSITIVE(c.quantity,'Component planned consumption'),uom=UOM(c.uom);
             const scrapPct=NONNEGATIVE(c.scrapPct??0,'Scrap percentage',100);
             if(source==='WAREHOUSE'){
                 const warehouseId=VALID_ID(c.warehouseId,'Warehouse');
@@ -177,6 +179,38 @@ export function normalizeMaster(kind:MasterKind, raw:unknown): Obj {
                 if(seen.has(key))throw new HttpError(400,'Duplicate material in the same warehouse. Combine its quantities.');
                 seen.add(key);
                 return {line:i+1,source:'WAREHOUSE',skuId:'',warehouseId,materialId,quantity,uom,scrapPct};
+            }
+            if(source==='PROCESS_SUPPLY'){
+                const processSupplyKind=ENUM(c.processSupplyKind,['SKU','UTILITY','PROCUREMENT'] as const,'process supply reference');
+                const deliveryMode=ENUM(c.deliveryMode??'INLINE',
+                    ['INLINE','BUFFERED','BULK_STORAGE','CYLINDER'] as const,'process material delivery mode');
+                const quantityMethod=ENUM(c.quantityMethod??'PLANNED',
+                    ['PLANNED','METERED','AS_REQUIRED'] as const,'process supply quantity method');
+                const hasRate=c.requiredFlowPerHour!==null&&c.requiredFlowPerHour!==undefined&&c.requiredFlowPerHour!=='';
+                const requiredFlowPerHour=hasRate?POSITIVE(c.requiredFlowPerHour,'Planned required flow per hour'):null;
+                const isBuffered=['BUFFERED','BULK_STORAGE'].includes(deliveryMode);
+                const bufferCapacity=isBuffered?POSITIVE(c.bufferCapacity,'Buffer or bulk storage size'):null;
+                const hasUsable=c.bufferUsable!==null&&c.bufferUsable!==undefined&&c.bufferUsable!=='';
+                const bufferUsable=isBuffered&&hasUsable?NONNEGATIVE(c.bufferUsable,'Usable buffer quantity'):null;
+                if(bufferUsable!==null&&bufferCapacity!==null&&bufferUsable>bufferCapacity)
+                    throw new HttpError(400,'Usable buffer quantity cannot exceed the buffer size.');
+                if(!isBuffered&&hasUsable)throw new HttpError(400,'A usable buffer can only be specified for buffered or bulk-storage supply.');
+                const skuId=processSupplyKind==='SKU'?VALID_ID(c.skuId,'Process supply SKU'):'';
+                const materialId=processSupplyKind==='PROCUREMENT'?VALID_ID(c.materialId,'Approved process supply material'):'';
+                const utilityWorkCenterId=processSupplyKind==='UTILITY'?VALID_ID(c.utilityWorkCenterId,'Registered utility location'):'';
+                const utilityCode=processSupplyKind==='UTILITY'?VALID_ID(c.utilityCode,'Registered utility'):'';
+                if(skuId===parentSkuId)throw new HttpError(400,'A SKU cannot consume itself.');
+                // Shared SKU keys prevent double demand when the same material is
+                // added once as an intermediate and again as inline supply.
+                const key=processSupplyKind==='SKU'?'SKU:'+skuId:
+                    processSupplyKind==='PROCUREMENT'?'PROCUREMENT:'+materialId:
+                        'UTILITY:'+utilityWorkCenterId+':'+utilityCode;
+                if(seen.has(key))throw new HttpError(400,'Duplicate process supply '+key+'. Combine quantities or choose one delivery method.');
+                seen.add(key);
+                return {line:i+1,source:'PROCESS_SUPPLY',processSupplyKind,
+                    skuId,materialId,warehouseId:'',utilityWorkCenterId,utilityCode,
+                    quantity,uom,scrapPct,quantityMethod,deliveryMode,
+                    requiredFlowPerHour,bufferCapacity,bufferUsable};
             }
             const skuId=VALID_ID(c.skuId,'Component SKU');
             if(skuId===parentSkuId)throw new HttpError(400,'A SKU cannot consume itself.');
