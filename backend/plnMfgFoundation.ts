@@ -218,9 +218,14 @@ export function normalizeMaster(kind:MasterKind, raw:unknown): Obj {
         return {...core,costCenterId,bomId,processClass,
             stageType:ENUM(o.stageType||'PRODUCE',['PRODUCE','INSPECT','TRANSFER','OTHER'] as const,'stage type'),
             capacityBasis:ENUM(o.capacityBasis||'RESOURCE_RATE',
-                ['PHYSICAL_CONTAINER','RESOURCE_RATE','BATCH_CYCLE','TIME_PER_UNIT'] as const,'capacity basis'),
+                ['PHYSICAL_CONTAINER','RESOURCE_RATE','BATCH_CYCLE','TIME_PER_UNIT','CONTINUOUS_FLOW'] as const,'capacity basis'),
             batchSize:NONNEGATIVE(o.batchSize??0,'Batch size'),
-            cycleMinutes:NONNEGATIVE(o.cycleMinutes??0,'Batch cycle minutes',100000)};
+            cycleMinutes:NONNEGATIVE(o.cycleMinutes??0,'Batch cycle minutes',100000),
+            flowRatePerHour:NONNEGATIVE(o.flowRatePerHour??0,'Continuous hourly output rate',1e12),
+            flowRateUom:str(o.flowRateUom).trim()?UOM(o.flowRateUom):'',
+            flowInputFactor:POSITIVE(o.flowInputFactor??1,'Upstream input required per downstream output unit'),
+            flowBufferAvailable:o.flowBufferAvailable===null||o.flowBufferAvailable===undefined||o.flowBufferAvailable===''?
+                null:NONNEGATIVE(o.flowBufferAvailable,'Usable upstream buffer quantity',1e12)};
     });
     // A shared route keeps one master process while SKU-specific records supply
     // their own BOM/output identities and optional stage timings.
@@ -255,11 +260,15 @@ export function normalizeMaster(kind:MasterKind, raw:unknown): Obj {
                 ['runMinutesPerUnit','Minutes per unit',100000],
                 ['batchSize','Batch size',1e12],
                 ['cycleMinutes','Cycle minutes',100000],
-            ] as const)if(Object.hasOwn(o,field))
+                ['flowRatePerHour','Continuous output units per hour',1e12],
+                ['flowBufferAvailable','Usable flow buffer',1e12],
+            ] as const)if(Object.hasOwn(o,field)&&o[field]!==null&&o[field]!=='')
                 result[field]=NONNEGATIVE(o[field],label,max);
             if(Object.hasOwn(o,'capacityBasis'))
                 result.capacityBasis=ENUM(o.capacityBasis,
-                    ['PHYSICAL_CONTAINER','RESOURCE_RATE','BATCH_CYCLE','TIME_PER_UNIT'] as const,'capacity basis');
+                    ['PHYSICAL_CONTAINER','RESOURCE_RATE','BATCH_CYCLE','TIME_PER_UNIT','CONTINUOUS_FLOW'] as const,'capacity basis');
+            if(Object.hasOwn(o,'flowRateUom'))result.flowRateUom=str(o.flowRateUom).trim()?UOM(o.flowRateUom):'';
+            if(Object.hasOwn(o,'flowInputFactor'))result.flowInputFactor=POSITIVE(o.flowInputFactor,'Upstream input per output');
             return result;
         });
         return {skuId:mappedSkuId,stages};
