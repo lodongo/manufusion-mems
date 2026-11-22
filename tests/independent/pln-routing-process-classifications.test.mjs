@@ -15,12 +15,14 @@ const stage={code:'STG-000000001',name:'Generic processing step',resourceId:'RSC
  dependsOn:[],setupMinutes:0,runMinutesPerUnit:0};
 test('Manufacturing process classifications are organization-managed, not a fixed industry enumeration',()=>{
  assert.equal(SKU_PARAMETERS.processClasses,'PRC');
- const a=normalizeSkuParameter('processClasses',{name:'Custom process family A',description:'Any shared process'});
- const b=normalizeSkuParameter('processClasses',{name:'Custom process family B',description:'Unrelated manufacturing method'});
+ const a=normalizeSkuParameter('processClasses',{name:'Custom process family A',processCode:'process_A',description:'Any shared process'});
+ const b=normalizeSkuParameter('processClasses',{name:'Custom process family B',processCode:'process_B',description:'Unrelated manufacturing method'});
  assert.equal(a.kind,'processClasses');
  assert.equal(a.name,'Custom process family A');
+ assert.equal(a.processCode,'PROCESS_A');
  assert.equal(b.name,'Custom process family B');
  assert.throws(()=>normalizeSkuParameter('processClasses',{name:''}),/parameter name/);
+ assert.throws(()=>normalizeSkuParameter('processClasses',{name:'Missing business code'}),/classification code/);
 });
 test('Classification is independent of flavor, site, SKU type and product family',()=>{
  const raw=normalizeMaster('items',{...sku,processClassId:'PRC_000000001',siteId:'SITE-01'});
