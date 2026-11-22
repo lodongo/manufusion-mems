@@ -99,8 +99,17 @@ async function sourceRows(ctx: OrgContext, id: string, node: Doc, def: Obj) {
 async function assetSupplies(ctx:OrgContext, defs:Obj[], adopted:Set<string>) {
     const asset=await checkedAsset(ctx,str(ctx.body.assetTag));
     await requireAt(ctx,PERMS.utilitiesView,str(asset.data.nodeId),'read','You cannot view this source asset.');
-    const docs=await listDocs('organizations/'+ctx.orgId+'/equipment_utilities');
-    const linked=new Set(docs.flatMap(d=>rowsOf(d).filter(r=>r.sourceAssetTag===asset.id).map(r=>str(r.code))));
+    const [docs,costCentres]=await Promise.all([
+        listDocs('organizations/'+ctx.orgId+'/equipment_utilities'),
+        listDocs('organizations/'+ctx.orgId+'/cost_center_utility_supplies'),
+    ]);
+    const allocated=costCentres.flatMap(d=>rowsOf(d).flatMap(r=>
+        Array.isArray(r.sources)?r.sources.filter(isObj).filter(src=>str(src.assetTag)===asset.id)
+            .map(src=>({costCenterId:d.id,code:str(r.code),allocatedCapacity:Number(src.allocatedCapacity)||0})):[]));
+    const linked=new Set([
+        ...docs.flatMap(d=>rowsOf(d).filter(r=>r.sourceAssetTag===asset.id).map(r=>str(r.code))),
+        ...allocated.map(a=>a.code),
+    ]);
     const ratings=ratingsOf(asset);
     const available=defs.filter(d=>adopted.has(str(d.code))||linked.has(str(d.code))||Object.prototype.hasOwnProperty.call(ratings,str(d.code)));
     const summaries=await Promise.all(available.filter(d=>linked.has(str(d.code))||Object.prototype.hasOwnProperty.call(ratings,str(d.code))).map(async d=>{
@@ -110,7 +119,11 @@ async function assetSupplies(ctx:OrgContext, defs:Obj[], adopted:Set<string>) {
             const n=await getDoc('organizations/'+ctx.orgId+'/structure/'+c.workCenterId);
             return {name:str(n?.data.name)||c.workCenterId,code:str(n?.data.code),demand:c.demand};
         }));
-        return {...publicSummary(s),consumers};
+        return {...publicSummary(s),consumers,
+            costCentreAllocations:allocated.filter(x=>x.code===str(d.code)),
+            allocatedToCostCentres:allocated.filter(x=>x.code===str(d.code))
+                .reduce((total,x)=>total+x.allocatedCapacity,0),
+        };
     }));
     return {supplies:summaries,catalogue:available.filter(d=>adopted.has(str(d.code))).map(d=>({code:str(d.code),label:str(d.label),determinant:capacityDeterminant(d)})),
       canEdit:eligibleStatus(asset)&&await allowedAt(ctx,ratingPermissions(asset),str(asset.data.nodeId),'write')};
@@ -124,6 +137,16 @@ async function saveRating(ctx:OrgContext, defs:Obj[], adopted:Set<string>){
     if(!def)throw new HttpError(400,'Select an adopted utility.');
     const det=capacityDeterminant(def),capacity=positive(ctx.body.capacity);
     if(det&&!capacity)throw new HttpError(400,'Enter a positive usable supply capacity in '+det.unit+'.');
+    if(det){
+        const allocations=await listDocs('organizations/'+ctx.orgId+'/cost_center_utility_supplies');
+        const committed=allocations.flatMap(d=>rowsOf(d).filter(r=>str(r.code)===code))
+            .flatMap(r=>Array.isArray(r.sources)?r.sources.filter(isObj):[])
+            .filter(src=>str(src.assetTag)===asset.id)
+            .reduce((total,src)=>total+(positive(src.allocatedCapacity)||0),0);
+        if(capacity!+1e-8<committed)
+            throw new HttpError(409,'This asset is already allocated '+committed+' '+det.unit+
+                ' to cost centres. Reduce those allocations before lowering its rated supply capacity.');
+    }
     const ratings=ratingsOf(asset);
     const prior=ratings[code];
     if(stableJson(prior??null)!==stableJson(ctx.body.expectedRating??null))throw new HttpError(409,'Supply rating changed. Reload before editing.');
@@ -154,8 +177,15 @@ export async function utilityLinkIssue(org:string,node:Doc,row:Obj,def:Obj|undef
     return '';
 }
 export async function assertUtilitySourceUnlinked(org:string,tag:string){
-    const docs=await listDocs('organizations/'+org+'/equipment_utilities');
-    if(docs.some(d=>rowsOf(d).some(r=>r.sourceAssetTag===tag)))throw new HttpError(409,'This asset supplies equipment utilities. Reassign or remove those connections first.');
+    const [docs,costCentres]=await Promise.all([
+        listDocs('organizations/'+org+'/equipment_utilities'),
+        listDocs('organizations/'+org+'/cost_center_utility_supplies'),
+    ]);
+    if(docs.some(d=>rowsOf(d).some(r=>r.sourceAssetTag===tag)))
+        throw new HttpError(409,'This asset supplies legacy equipment utilities. Reassign those links first.');
+    if(costCentres.some(d=>rowsOf(d).some(row=>Array.isArray(row.sources)&&
+        row.sources.filter(isObj).some(src=>str(src.assetTag)===tag))))
+        throw new HttpError(409,'This asset supplies a cost-centre utility network. Reassign its cost-centre allocation before deleting or unlinking the asset.');
 }
 
 export const utilityRoutes = {
