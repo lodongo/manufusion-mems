@@ -101,7 +101,15 @@ const guide:Chapter[]=[
    'Existing SKU names remain unchanged unless explicitly regenerated through their authorized edit process.',
   ],example:'Fictional: DEMO_ORANGE_400mL_PET_12PACK. Internal SKU_######### remains database-generated.'},
  ]},
- {id:'skus',title:'6. Materials & Products',phase:'Master data',summary:'Create finished and intermediate SKUs and connect them to configured product parameters.',screen:'Materials & Products',topics:[
+ {id:'skus',title:'6. Materials & Products',phase:'Master data',summary:'Create manufactured, continuous, bulk and sourced materials without losing existing site allocations.',screen:'Materials & Products',topics:[
+  {title:'Continuous and multi-source supply configuration',purpose:'Use one material identity for equivalent material from different sources, with separate source costs.',steps:[
+   'Create or edit a manufactured or purchased material SKU; an internal continuously produced material can remain non-stocked when appropriate.',
+   'Expand Material supply, continuous flow & buffers. Choose its production method and physical handling independently.',
+   'Use Add source to enter each source, site, meter reference, approved unit, currency and tariff.',
+   'Keep Inventory stock treatment in the existing material setup. Source profiles do not create receipts, actual metering or invoice charges.',
+   'If two sources supply equivalent material specifications, keep one material SKU unless a quality or regulatory distinction requires separation.',
+  ],example:'Two measured water intakes with distinct rates may feed one treated-water SKU; one gas specification may be supplied by a generator or bulk delivery.'},
+
   {title:'Create a manufactured SKU',purpose:'Establish the exact SKU identity and packaged output relationship.',steps:[
    'Open Materials & Products, then Add SKU.',
    'Select Finished or Intermediate and choose the manufacturing process classification. SKUs are organization-wide, not tied to a single site.',
@@ -173,6 +181,13 @@ const guide:Chapter[]=[
    'Keep the alternative code distinct. Add only SKUs that follow this route.',
    'Save and submit the alternative separately. An approved route alternative must be selected where more than one applies.',
   ],example:'Fictional: A fabricated part needing additional heat treatment or a product needing an extra sterilization stage can require another route.'},
+  {title:'Continuous flow, yield and usable buffers',purpose:'Model continuously flowing material without inventing a batch cycle.',steps:[
+   'Choose Continuous flow (quantity/hour) in a manufacturing stage.',
+   'Enter its hourly rated output and its published UoM; include resource and predecessor links.',
+   'Configure upstream material required per unit of output when process yield or recipe conversion differs from one-to-one.',
+   'Enter usable buffer above minimum operating level, or leave it blank if unknown. Buffer depletion estimates need this value.',
+   'Observe the capacity opportunity in Stages and the confirmed result in Review.',
+  ],example:'Illustrative: 30,000 L/h mixer feeding 35,000 L/h filling demand creates a 5,000 L/h deficit, or 14.29% of demand.'},
   {title:'Review and approve',purpose:'Protect stage accuracy and existing maker-checker governance.',steps:[
    'Configure each stage’s resource, cost centre, output and predecessors.',
    'Use commissioned line speed, resource rate, batch cycle or time per unit as appropriate.',
@@ -180,6 +195,17 @@ const guide:Chapter[]=[
    'Publish only through the independent technical approval workflow. Approved routing records remain immutable.',
   ],example:'Fictional: Preparation + bottle blowing → filling → packaging.'},
  ]},
+ {id:'flowOverview',title:'Capacity Overview: all process flows',phase:'Capacity & process',
+  summary:'Compare upstream and downstream capacities, percentage gaps and buffer constraints for permitted routes.',
+  screen:'Production Capacity Overview',topics:[
+   {title:'Capacity and improvement opportunities',purpose:'Inspect every permitted process and SKU-specific variant.',steps:[
+    'Open Capacity overview in Configuration and select the permitted site or all permitted sites.',
+    'Review each routing and the individual SKU variants, using the page controls when there are many flows.',
+    'Read the shortfall as a percentage of required downstream input, hourly deficit and available-buffer coverage.',
+    'Unmatched units or multiple independent feed branches are not silently added; resolve them with verified conversion ratios.',
+    'Recalculate after changing capacities. This does not read live equipment telemetry or calculate invoiced source costs.',
+   ],example:'Illustrative: 2,500 L usable buffer with a 5,000 L/h flow gap lasts about 30 minutes.'},
+  ]},
  {id:'planning',title:'10. Planning Configuration',phase:'Planning',summary:'Set planning rules after the manufacturing masters are established.',screen:'Planning Configuration',topics:[
   {title:'Horizon and freeze period',purpose:'Provide a reproducible date horizon and constraints.',steps:[
    'Open Planning Configuration.',
@@ -238,7 +264,7 @@ const guide:Chapter[]=[
 ];
 const pageTargets:Record<string,string>={
  manufacturing:'materialPolicy',product:'skuSetup',primary:'skuSetup',packs:'skuSetup',naming:'skuSetup',
- skus:'items',bom:'boms',resources:'resources',capacity:'resources',routing:'routings',
+ skus:'items',bom:'boms',resources:'resources',capacity:'resources',routing:'routings',flowOverview:'capacityOverview',
  planning:'config',demand:'demand',
 };
 function ExampleScreen(){
