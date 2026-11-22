@@ -80,7 +80,7 @@ const label='mb-1 block text-xs font-medium text-soft';
 const newRecord=(tab:Tab,policy:MaterialPolicy=defaultMaterialPolicy,
     defaults:FormDefaults=DEFAULT_FORM_DEFAULTS,sites:References['sites']=[]):Row=>{
     const siteId=preferredSiteId(defaults.defaultSiteId,sites);
-    if(tab==='items')return {id:'',name:'',category:defaults.skuCategory,processClassId:'',family:'',uom:'',siteId:'',packQty:1,
+    if(tab==='items')return {id:'',name:'',category:defaults.skuCategory,processClassId:'',uom:'',siteId:'',packQty:1,
         stockPolicy:policy.defaultIntermediateTracking,sourceMode:'INVENTORY',inventoryMaterialId:'',utilityCode:'',utilityWorkCenterId:'',skuComponents:{}};
     if(tab==='boms')return {id:'',name:'',classificationCode:'PRODUCTION',alternativeCode:defaults.routingAlternativeCode,routingId:'',siteId,
         parentSkuId:'',outputQty:defaults.bomOutputQty,outputUom:'EA',components:[]};
@@ -292,14 +292,13 @@ function MasterEditor({tab,draft,onChange,items,boms,resources,refs,skuSetup,mat
             {!(tab==='items'&&str(draft.category)==='FINISHED')&&<Field title='Name' value={draft.name} required onChange={v=>update('name',v)}/>}
             {tab==='items'&&<>
                 <Choice title='SKU type' value={str(draft.category)} options={ [['FINISHED','Finished goods'],['INTERMEDIATE','Intermediate/WIP'],['RAW','Raw/input material'],['PACKAGING','Packaging component']] } onChange={v=>update('category',v)}/>
-                <Field title='Product family' value={str(draft.family)} required onChange={v=>update('family',v)}/>
                 {['FINISHED','INTERMEDIATE'].includes(str(draft.category))&&<>
                     <Choice title='Manufacturing process classification' value={str(draft.processClassId)}
                         options={[['','Choose production process group'],...skuSetup.parameters.filter(p=>
                             p.kind==='processClasses'&&(p.enabled!==false||p.id===str(draft.processClassId)))
                             .map(p=>[p.id,(p.processCode?p.processCode+' · ':'')+p.name] as [string,string])]}
                         onChange={v=>update('processClassId',v)}/>
-                    <p className='text-xs text-muted'>Classify by how the SKU is manufactured, not by flavor, recipe or product family. Different SKUs in one process group can use the same routes. Manage the available groups in Product Configuration.</p>
+                    <p className='text-xs text-muted'>Select the manufacturing process used for this SKU. Different products following the same process can share routing stages and equipment, while retaining their own BOMs and recipes. Configure process groups under Product Configuration.</p>
                 </>}
                 {str(draft.category)!=='FINISHED'&&<div className='md:col-span-2'>
                     <UnitChoice key={draft.id||'new-sku'} title='Unit of measure'
@@ -534,7 +533,6 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
     const save=async()=>{
         if(!draft||!canSave)return;
         if(active==='items'){
-            if(!str(draft.family).trim()){setError('Product family is required before saving this SKU.');return;}
             if(str(draft.category)!=='FINISHED'&&!skuSetup.units.some(u=>u.code===str(draft.uom)||u.symbol.toLowerCase()===str(draft.uom).toLowerCase())){
                 setError('Choose a unit category and unit of measure from the MEMS unit registry.');return;
             }
@@ -551,6 +549,7 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
         setBusy(true);setError('');setNotice('');
         try{
             const body={...draft};
+            if(active==='items')delete body.family; // Drop obsolete, unreferenced free-text SKU family on save.
             if(active==='routings'&&!str(body.name).trim()){
                 const group=skuSetup.parameters.find(p=>p.kind==='processClasses'&&p.id===str(body.processClassId));
                 body.name=(group?.name||'Manufacturing')+' · Process route';
