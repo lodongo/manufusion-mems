@@ -798,7 +798,10 @@ export const plnMfgFoundationRoutes={
             const old=creating?null:await getDoc(DOC(ctx.orgId,kind,VALID_ID(requestedId,'Master code')));
             if(kind==='routings'&&creating&&!str(raw.processClassId))
                 throw new HttpError(400,'Select a manufacturing process classification before creating a routing. Create process groups in Product Configuration.');
-            if(kind==='items'&&creating&&['FINISHED','INTERMEDIATE'].includes(str(raw.category))&&
+            // Require the governed process classification for manufactured SKUs
+            // on both new and edited drafts once the organization has configured it.
+            // Existing active SKU IDs, approvals and historical revisions are untouched.
+            if(kind==='items'&&['FINISHED','INTERMEDIATE'].includes(str(raw.category))&&
                 !str(raw.processClassId)){
                 const configured=await skuParametersForOrg(ctx.orgId);
                 if(configured.some(x=>x.kind==='processClasses'&&x.enabled!==false))
