@@ -76,13 +76,16 @@ test('wizard refreshes the published PRC catalog, resets new material and loads 
 test('proprietary supplier sourcing is selection-only and removes stale supplier or equipment details',()=>{
     const wizard=read('src/org/MaterialsMaster.tsx');
     assert.match(wizard,/code: 'PROPRIETARY_SUPPLIER', title: 'Proprietary Supplier'/);
-    assert.match(wizard,/supply==='PROPRIETARY_SUPPLIER'\?null:/);
+    assert.match(wizard,/id='mm-proprietary-part'/);
+    assert.match(wizard,/label='Proprietary part number \(optional\)'/);
+    assert.match(wizard,/supply==='PROPRIETARY_SUPPLIER'\?/);
+    assert.match(wizard,/!supplierless&&!registration\[partKey\]/);
     assert.match(wizard,/supplierless\?\{vendorId:''/);
     assert.match(wizard,/!supplierless&&mode==='registered'/);
     assert.match(wizard,/!supplierless&&mode==='manual'/);
     assert.match(wizard,/!supplierless&&!registration\[partKey\]/);
     const original={
-        supplyType:'PROPRIETARY_SUPPLIER',name:'Private concentrate',uom:'L',
+        supplyType:'PROPRIETARY_SUPPLIER',name:'Private concentrate',uom:'L',proprietaryPartNumber:'PRIVATE-REF-123',
         partyEntryMode:'registered',vendorId:'vendor-1',partyName:'SECRET',
         oemPartNumber:'A',ocmPartNumber:'B',generalPartNumber:'C',
         model:'M1',versionNumber:'V1',costCenterId:'CC1',assetId:'AS1',
@@ -96,5 +99,11 @@ test('proprietary supplier sourcing is selection-only and removes stale supplier
     assert.deepEqual(clean.assemblyIds,[]);
     assert.equal(clean.name,original.name);
     assert.equal(clean.uom,'L');
+    assert.equal(clean.proprietaryPartNumber,'PRIVATE-REF-123');
+    assert.equal(materialSourcingPolicy({...original,proprietaryPartNumber:''}).proprietaryPartNumber,'','The proprietary part number is optional');
+    assert.equal(materialSourcingPolicy({...original,supplyType:'BIDDED'}).proprietaryPartNumber,'','Bidded must not retain proprietary details');
     assert.equal(materialSourcingPolicy({...original,supplyType:'OEM'}).vendorId,'vendor-1','OEM sourcing remains unchanged');
+    assert.equal(materialSourcingPolicy({...original,supplyType:'OEM'}).proprietaryPartNumber,'','OEM must not retain a proprietary part number');
+    assert.match(read('backend/procurement.ts'),/\['OEM','OCM','BIDDED','PROPRIETARY_SUPPLIER'\]\.includes\(str\(d\.supplyType\)\)/,'server must permit proprietary submission');
+    assert.match(read('backend/procurement.ts'),/\['OEM','OCM'\]\.includes\(str\(d\.supplyType\)\)&&!str\(d\[partField\]\)/,'part number stays optional for proprietary');
 });
