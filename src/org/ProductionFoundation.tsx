@@ -297,7 +297,7 @@ function MasterEditor({tab,draft,onChange,items,boms,resources,refs,skuSetup,mat
                     <Choice title='Manufacturing process classification' value={str(draft.processClassId)}
                         options={[['','Choose production process group'],...skuSetup.parameters.filter(p=>
                             p.kind==='processClasses'&&(p.enabled!==false||p.id===str(draft.processClassId)))
-                            .map(p=>[p.id,p.name] as [string,string])]}
+                            .map(p=>[p.id,(p.processCode?p.processCode+' · ':'')+p.name] as [string,string])]}
                         onChange={v=>update('processClassId',v)}/>
                     <p className='text-xs text-muted'>Classify by how the SKU is manufactured, not by flavor, recipe or product family. Different SKUs in one process group can use the same routes. Manage the available groups in Product Configuration.</p>
                 </>}
@@ -738,7 +738,7 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
                     <Choice title='Manufacturing process classification' value={classSelected}
                         options={[['','Select a process classification'],...skuSetup.parameters
                             .filter(p=>p.kind==='processClasses'&&p.enabled!==false)
-                            .map(p=>[p.id,p.name] as [string,string])]}
+                            .map(p=>[p.id,(p.processCode?p.processCode+' · ':'')+p.name] as [string,string])]}
                         onChange={setClassSelected}/>
                     <p className='text-xs text-muted'>Only process classification metadata changes. This keeps the existing SKU ID, BOMs, site allocation and commissioned rates intact.</p>
                     <div className='flex flex-wrap gap-2'>
