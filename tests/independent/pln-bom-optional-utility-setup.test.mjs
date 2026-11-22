@@ -34,5 +34,5 @@ test('BOM save/submit use advisory instead of mandatory capacity setup',()=>{
     assert.ok(!b.includes("Complete the asset, rated capacity and equipment demand setup on this cost-centre utility before using it in a BOM."));
     assert.ok(ui.includes('<strong>Highly recommended · Optional:</strong>'));
     assert.ok(ui.includes('You can save and submit this BOM without completing those details.'));
-    assert.ok(ui.includes("capacity setup recommended"));
+    assert.ok(ui.includes("capacity configuration recommended"));
 });
