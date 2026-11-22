@@ -126,6 +126,50 @@ function TextField({title,value,onChange}:{title:string;value:string;onChange:(v
     return <label className='block'><span className={label}>{title}</span><textarea rows={2} className={fld} value={value} onChange={e=>onChange(e.target.value)}/></label>;
 }
 
+
+/** The unit registry's measurement system is the unit subcategory. Both are
+ * selectors only; physical quantities and conversion remain owned by BomEditor. */
+function BomMaterialUnitSelector({setup,value,allowedUnitCodes,onChange}:{
+    setup:SkuSetup;value:string;allowedUnitCodes:string[];onChange:(code:string)=>void;
+}){
+    const [categoryChoice,setCategoryChoice]=useState('');
+    const [subcategoryChoice,setSubcategoryChoice]=useState('');
+    const allowedUnits=setup.units.filter(unit=>
+        allowedUnitCodes.some(code=>code===unit.code||code.toLowerCase()===unit.symbol.toLowerCase()));
+    const current=setup.units.find(unit=>unit.code===value||unit.symbol.toLowerCase()===value.toLowerCase());
+    const categoryKeys=[...new Set(allowedUnits.map(unit=>unit.categoryCode))];
+    const category=categoryChoice||current?.categoryCode||
+        (categoryKeys.length===1?categoryKeys[0]:'');
+    const categoryOptions=categoryKeys.map(code=>{
+        const registered=setup.categories.find(item=>item.code===code);
+        return [code,registered?.name||allowedUnits.find(u=>u.categoryCode===code)?.category||code] as [string,string];
+    });
+    const categoryUnits=allowedUnits.filter(unit=>unit.categoryCode===category);
+    const subcategories=[...new Set(categoryUnits.map(unit=>unit.system||'Other'))];
+    const subcategory=subcategoryChoice||
+        (current?.categoryCode===category?(current.system||'Other'):'')||
+        (subcategories.length===1?subcategories[0]:'');
+    const matchingUnits=categoryUnits.filter(unit=>(unit.system||'Other')===subcategory);
+    const selectedValue=matchingUnits.some(unit=>unit.code===current?.code)?current?.code||'':'';
+    return <div className='grid gap-3'>
+        <Choice title='Unit category' value={category}
+            options={[['','Choose unit category'],...categoryOptions]}
+            onChange={next=>{setCategoryChoice(next);setSubcategoryChoice('');}}/>
+        <Choice title='Unit subcategory (measurement system)' value={subcategory}
+            options={[['','Choose subcategory'],...subcategories.map(system=>[system,system] as [string,string])]}
+            onChange={setSubcategoryChoice}/>
+        <Choice title='Material quantity unit' value={selectedValue}
+            options={[['','Choose unit'],...matchingUnits.map(unit=>[
+                unit.code,bomUomName(unit.code,setup.units),
+            ] as [string,string])]}
+            onChange={code=>{if(code)onChange(code);}}/>
+        <p className='text-xs text-muted'>Selected unit: {bomUomName(value,setup.units)}. Changing between compatible units converts quantities and related flow and buffer values.</p>
+        {!allowedUnits.length&&<p role='alert' className='text-xs text-amber-600'>
+            No compatible units are available in the active MEMS unit registry for this material.
+        </p>}
+    </div>;
+}
+
 /** A clear output → inputs flow; technical versioning controls are optional. */
 function BomEditor({draft,onChange,items,refs,skuSetup,materialPolicy}:{
  draft:Row;onChange:(v:Row)=>void;items:Row[];refs:References;skuSetup:SkuSetup;materialPolicy:MaterialPolicy;
@@ -566,15 +610,12 @@ function BomEditor({draft,onChange,items,refs,skuSetup,materialPolicy}:{
                             <Field title={processSupply?'Planned material quantity for BOM output':'Required quantity'}
                                 type='number' value={c.quantity}
                                 onChange={v=>updateComponent(i,{quantity:Number(v)})}/>
-                            {processSupply?
-                                <Choice title='Material quantity unit' value={c.uom}
-                                    options={units(c.skuId,c.uom,unitBasis)}
-                                    onChange={v=>changeComponentUnit(i,v)}/>:
-                                <div className='rounded-xl border border-line bg-panel p-3'>
-                                    <p className='text-xs text-muted'>Unit of measure</p>
-                                    <p className='mt-1 break-words text-sm font-semibold'>{bomUomName(c.uom,skuSetup.units)}</p>
-                                </div>}
                         </div>
+                        <BomMaterialUnitSelector
+                            key={[i,c.source,c.skuId,c.materialId,c.warehouseId,c.processSupplyKind,c.supplyUtilityCode,unitBasis].join(':')}
+                            setup={skuSetup} value={c.uom}
+                            allowedUnitCodes={units(c.skuId,c.uom,unitBasis).map(([code])=>code).filter(Boolean)}
+                            onChange={code=>changeComponentUnit(i,code)}/>
                         {processSupply&&<div className='space-y-2 rounded-lg border border-line bg-panel p-3'>
                             <p className='text-xs font-semibold'>Continuous / on-demand quantity planning</p>
                             <p className='text-xs text-muted'>The quantity above is required for {quantity} {bomUomName(outputUom,skuSetup.units)} of output, regardless of whether supply is metered or buffered. It is the planning basis for BOM demand, NOT a buffer volume or equipment rate.</p>
@@ -594,8 +635,7 @@ function BomEditor({draft,onChange,items,refs,skuSetup,materialPolicy}:{
                             !!c.skuId)&&<details className='text-xs text-muted'>
                             <summary className='cursor-pointer py-2'>Consumption options</summary>
                             <div className='grid gap-2 pt-2 sm:grid-cols-2'>
-                                {!processSupply&&<Choice title='Alternate compatible unit' value={c.uom}
-                                    options={units(c.skuId,c.uom,unitBasis)} onChange={v=>changeComponentUnit(i,v)}/>}
+                                <p className='text-xs text-muted'>Compatible units are selected above by category and subcategory.</p>
                                 <Field title='Scrap / process loss allowance (%)' type='number' value={c.scrapPct}
                                     onChange={v=>updateComponent(i,{scrapPct:Number(v)})}/>
                             </div>

@@ -31,3 +31,23 @@ test('BOM create and edit show names across output, input, quantity descriptions
     assert.equal(ui.includes("{c.uom||'Select a material'}"),false);
     assert.equal(ui.includes(">{outputUom}</p>"),false);
 });
+
+test('BOM material unit category and subcategory use the published measurement-system hierarchy',()=>{
+    const ui=read('src/org/ProductionFoundation.tsx');
+    const setup=read('backend/mfgSkuConfiguration.ts');
+    const sku=read('src/org/MfgSkuSetup.tsx');
+    assert.ok(ui.includes("function BomMaterialUnitSelector"));
+    assert.ok(ui.includes("title='Unit category'"));
+    assert.ok(ui.includes("title='Unit subcategory (measurement system)'"));
+    assert.ok(ui.includes("title='Material quantity unit'"));
+    assert.ok(ui.includes("onChange={code=>changeComponentUnit(i,code)}"));
+    assert.ok(ui.includes("allowedUnitCodes={units(c.skuId,c.uom,unitBasis)"));
+    assert.ok(setup.includes("multiplier:x.multiplier,system:x.system"));
+    assert.ok(sku.includes("system?:string"));
+    const volume=PROCUREMENT_UNITS.filter(u=>u.category==='Volume');
+    assert.ok(volume.some(u=>u.system==='Metric'));
+    assert.ok(volume.some(u=>u.system==='Imperial/US'));
+    const litre=volume.find(u=>u.label==='Litre');
+    assert.equal(litre?.system,'Metric');
+    assert.ok(volume.every(u=>u.baseUnit==='L'));
+});

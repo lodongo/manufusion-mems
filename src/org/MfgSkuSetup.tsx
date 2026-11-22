@@ -17,7 +17,7 @@ export type SkuParameter={
     packagingTypeCode?:string;level?:string;containedUnit?:string;containedPackagingId?:string;
     containersPerLayer?:number;numberOfLayers?:number;
 };
-export type MeasureUnit={code:string;label:string;symbol:string;category:string;categoryCode:string;baseUnit:string;multiplier:number};
+export type MeasureUnit={code:string;label:string;symbol:string;category:string;categoryCode:string;baseUnit:string;multiplier:number;system?:string};
 export type MeasureCategory={code:string;name:string};
 export type ContainerAttr={key:string;label:string;required:boolean;choices:string[]};
 export type ContainerMetadataType={

@@ -122,7 +122,7 @@ export const mfgSkuConfigurationRoutes={
                 categories:skuUnitCategories(),
                 units:PROCUREMENT_UNITS.filter(x=>x.active&&x.selectable)
                     .map(x=>({code:x.code,label:x.label,symbol:x.symbol,category:x.category,
-                        categoryCode:x.categoryCode,baseUnit:x.baseUnit,multiplier:x.multiplier})),
+                        categoryCode:x.categoryCode,baseUnit:x.baseUnit,multiplier:x.multiplier,system:x.system})),
                 conventions:{
                     items:'SKU',boms:'BOM',resources:'RSC',
                     routings:'RTG',batches:'BTH',digits:9,
