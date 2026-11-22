@@ -98,7 +98,7 @@ const menuGroups:{title:string;hint:string;keys:MenuKey[]}[]=[
         keys:['normalizationUnits']},
 ];
 /** Consistent language at Product Configuration and Materials & Products. */
-export function SkuIdentityGuide({inSkuForm=false}:{inSkuForm?:boolean}){
+export function SkuIdentityGuide({inSkuForm=false,onOpenSkus}:{inSkuForm?:boolean;onOpenSkus?:()=>void}){
  return <div className='space-y-2 rounded-xl border border-line bg-page p-3'>
   <p className='text-sm font-semibold text-ink'>How do these link to an SKU?</p>
   <p className='text-xs text-muted'>
@@ -121,7 +121,9 @@ export function SkuIdentityGuide({inSkuForm=false}:{inSkuForm?:boolean}){
     <p><strong>Intermediate/WIP:</strong> Product/Variant can be optional, while Production Form is needed when physical SKU composition and conversions are configured.</p>
    </div>
   </details>
-  {inSkuForm&&<p className='text-xs text-muted'>Choose the process group above, then use SKU composition below for Product/Variant and Production Form when applicable. These shared catalogue values do not create new SKUs by themselves.</p>}
+  {inSkuForm&&<p className='text-xs text-muted'>Choose the process group above, then use SKU composition below for Product/Variant and Production Form when applicable. These catalogue records never create a new SKU by themselves.</p>}
+  {onOpenSkus&&<button type='button' className='min-h-11 rounded-lg border border-line bg-panel px-3 text-sm font-semibold text-ink'
+   onClick={onOpenSkus}>Open Materials &amp; Products to create or edit an SKU</button>}
  </div>;
 }
 const identityHints:Partial<Record<MenuKey,string>>={
@@ -436,7 +438,7 @@ export function SkuConfigurationFields({value,onChange,setup,variantLabel='Produ
     </section>;
 }
 
-export function SkuSetupPanel({setup,canEdit,onSaved,variantLabel='Product/Variant'}:{setup:SkuSetup;canEdit:boolean;onSaved:()=>Promise<void>;variantLabel?:string}){
+export function SkuSetupPanel({setup,canEdit,onSaved,variantLabel='Product/Variant',onOpenSkus}:{setup:SkuSetup;canEdit:boolean;onSaved:()=>Promise<void>;variantLabel?:string;onOpenSkus?:()=>void}){
     const [active,setActive]=useState<MenuKey|null>(null);
     const [draft,setDraft]=useState<Partial<SkuParameter>|null>(null);
     const [namingDraft,setNamingDraft]=useState<SkuNamingSequence|null>(null);
@@ -558,7 +560,7 @@ export function SkuSetupPanel({setup,canEdit,onSaved,variantLabel='Product/Varia
                         {i+1}. {group.title}
                         <span className='mt-1 block text-xs font-normal text-muted'>{group.hint}</span>
                     </summary>
-                    {i===0&&<div className='mt-3'><SkuIdentityGuide/></div>}
+                    {i===0&&<div className='mt-3'><SkuIdentityGuide onOpenSkus={onOpenSkus}/></div>}
                     <div className='mt-3 space-y-2'>
                         {group.keys.map(key=>{
                             const entry=menu.find(m=>m.key===key);
