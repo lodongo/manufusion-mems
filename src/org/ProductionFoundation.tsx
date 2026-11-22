@@ -205,10 +205,6 @@ function BomEditor({draft,onChange,items,refs,skuSetup,materialPolicy}:{
     {key:'settings',title:'3. Settings'},
  ] as const;
  return <div className='space-y-4'>
-    <div className='rounded-xl bg-page p-3 text-sm text-soft'>
-        <p className='font-semibold text-ink'>Bill of materials</p>
-        <p className='mt-1'>First choose what is produced, then add its ingredients and materials. Use a manufactured intermediate for an internal output, a warehouse material for stock-issued items, or Process supply for metered, inline, buffered and bulk inputs such as water or gases. MEMS creates the BOM code and name automatically.</p>
-    </div>
     <div role='tablist' aria-label='BOM creation sections' className='grid grid-cols-3 gap-1 rounded-xl border border-line bg-page p-1'>
         {sectionTabs.map(section=>
             <button key={section.key} id={'bom-tab-'+section.key} type='button' role='tab'
@@ -928,14 +924,17 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
         </Card>:<>
             <div className='flex min-w-0 flex-wrap items-center justify-between gap-2'><p className='text-xs text-muted sm:text-sm'>{active==='routings'?'Choose or create a process route. A route can serve multiple SKUs.':filtered.length+' saved master records · draft versions'}</p>{canSave&&!viewSkuId&&<Button onClick={()=>{setDraft(newRecord(active,materialPolicy,formDefaults,refs.sites));setError('');setNotice('');}}>Add {active==='items'?'SKU':active==='boms'?'BOM':active==='routings'?'new route':'resource'}</Button>}</div>
             {draft?<Card className='space-y-4'>
-                <div className='flex items-center justify-between gap-2'><h2 className='font-semibold'>{active==='routings'?(draft.revision?'Edit routing draft':'Create manufacturing route'):(draft.revision?'Edit draft':'New master record')}</h2><Button variant='secondary' onClick={()=>setDraft(null)}>Cancel</Button></div>
+                <div className='flex items-center justify-between gap-2'><h2 className='font-semibold'>{active==='routings'?(draft.revision?'Edit routing draft':'Create manufacturing route'):(draft.revision?'Edit draft':'New master record')}</h2>{active!=='boms'&&<Button variant='secondary' disabled={busy} onClick={()=>setDraft(null)}>Cancel</Button>}</div>
                 {draft.revision&&<div className='flex flex-wrap gap-2 text-xs text-soft'><span className='font-semibold'>Immutable revisions:</span>{history.map(h=><span key={String(h.revision)} className='rounded-md border border-line px-2 py-1'>r{h.revision} · {str(h.updatedAt).slice(0,10)}</span>)}</div>}
                 <MasterEditor tab={active} draft={draft} onChange={setDraft} items={rows.items}
                     boms={rows.boms} resources={rows.resources} refs={refs} skuSetup={skuSetup} materialPolicy={materialPolicy}/>
                 {active==='items'&&draft.id&&['FINISHED','INTERMEDIATE'].includes(str(draft.category))&&
                     <PlnSkuCostCenterRatings skuId={draft.id}/>}
 
-                <div className='flex justify-end'><Button disabled={busy||!canSave} onClick={()=>void save()}>{busy?'Saving...':'Save draft'}</Button></div>
+                <div className='flex flex-wrap justify-end gap-2'>
+                    {active==='boms'&&<Button variant='secondary' disabled={busy} onClick={()=>setDraft(null)}>Cancel</Button>}
+                    <Button disabled={busy||!canSave} onClick={()=>void save()}>{busy?'Saving...':'Save draft'}</Button>
+                </div>
             </Card>:active==='items'&&viewSkuId?<Card className='space-y-4'>
                 <div className='flex flex-wrap items-center justify-between gap-2'>
                     <h2 className='font-semibold'>Manufactured SKU detail</h2>
