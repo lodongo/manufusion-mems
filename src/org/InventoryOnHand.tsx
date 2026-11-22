@@ -196,7 +196,7 @@ export default function InventoryOnHand() {
                                 </section>
                             )}
                             <p className='px-1 text-xs text-slate-400'>
-                                {rows.length} materials · {warehouses.length} warehouses · {tracked} with reconciled stock ledger
+                                {rows.length} materials · {warehouses.length} warehouses · {tracked} with stock ledger (reconciled)
                                 <span className='mt-1 block'>Overstock: red · Understock: yellow · Empty bin: orange. Net available excludes reserved, quarantined, damaged and expired stock.</span>
                             </p>
                             <button
