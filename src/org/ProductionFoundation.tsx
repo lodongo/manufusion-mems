@@ -7,6 +7,7 @@ import PlnSkuCostCenterRatings from './PlnSkuCostCenterRatings';
 import ManufacturingResources from './ManufacturingResources';
 import PlnProcessRoutingEditor from './PlnProcessRoutingEditor';
 import PlnMaterialSupplyProfile, {type SupplyProfile} from './PlnMaterialSupplyProfile';
+import PlnCapacityOverview from './PlnCapacityOverview';
 import PlnDocumentation from './PlnDocumentation';
 import {configurationProgress,type SetupRow,type SetupStep} from './plnSetupDependencies';
 import {DEFAULT_FORM_DEFAULTS,formDefaultsFor,preferredSiteId,type FormDefaults} from './plnFormDefaults';
@@ -29,7 +30,7 @@ import { callBackend } from '../lib/backend';
 import { hasPerm } from '../types';
 
 type Kind='items'|'boms'|'resources'|'routings';
-type Tab=Kind|'skuSetup'|'materialPolicy'|'formDefaults'|'config'|'demand'|'documentation';
+type Tab=Kind|'skuSetup'|'materialPolicy'|'formDefaults'|'config'|'demand'|'capacityOverview'|'documentation';
 type Row=Record<string,unknown>&{id:string;name:string;revision?:number;type?:string};
 type Component={source?:'INTERMEDIATE'|'WAREHOUSE';skuId:string;warehouseId?:string;materialId?:string;quantity:number;uom:string;scrapPct:number};
 type Operation={code:string;name:string;resourceId:string;setupMinutes:number;runMinutesPerUnit:number;producesSkuId?:string;dependsOn?:string[]};
@@ -68,6 +69,7 @@ const tabs:{key:Tab;label:string;shortLabel:string;phase:Phase;hint:string}[]=[
     {key:'boms',label:'Bills of Materials',shortLabel:'Bills of materials',phase:'masters',hint:'Define the materials and quantities consumed by each product'},
     {key:'resources',label:'Manufacturing Resources',shortLabel:'Manufacturing resources',phase:'masters',hint:'Register manufacturing resources used by routings'},
     {key:'routings',label:'Process Routings',shortLabel:'Process routings',phase:'capacity',hint:'Define operation sequences using configured resources and outputs'},
+    {key:'capacityOverview',label:'Production Capacity Overview',shortLabel:'Capacity overview',phase:'capacity',hint:'Compare all authorized process flows, capacities and buffer constraints'},
     {key:'config',label:'Planning Configuration',shortLabel:'Planning rules',phase:'planning',hint:'Configure planning horizon, frozen period and lot-sizing defaults'},
     {key:'demand',label:'Demand & S&OP',shortLabel:'Demand & S&OP',phase:'planning',hint:'Maintain forecast and firm demand after the relevant masters are configured'},
     {key:'documentation',label:'Documentation & Setup Guide',shortLabel:'Documentation',phase:'guide',hint:'Search guided setup, topics, troubleshooting and fictional examples'},
@@ -413,7 +415,7 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
         resources:rows.resources as SetupRow[],routings:rows.routings as SetupRow[],
         capacityMappings,capacityLoaded,planningConfigurationRevision:configRevision,
     });
-    const prerequisiteNames=(step:Tab)=>setupProgress[step].missing
+    const prerequisiteNames=(step:Tab)=>(step==='capacityOverview'?[]:setupProgress[step as SetupStep]?.missing||[])
         .map(key=>key==='costCenterSku'?'SKU allocation in Manufacturing Resources':
             tabs.find(t=>t.key===key)?.shortLabel||key);
     // Read-only users may have a different first accessible step.
@@ -472,7 +474,7 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
         if(enforceSetup){
             const missing=prerequisiteNames(tab);
             if(missing.length){
-                const detail=setupProgress[tab].missing.map(step=>setupProgress[step].detail).join(' ');
+                const detail=(tab==='capacityOverview'?[]:setupProgress[tab as SetupStep]?.missing||[]).map(step=>setupProgress[step].detail).join(' ');
                 setBlockedTarget(tab);
                 setSetupBlocked('Complete these configuration dependencies before continuing to '+
                     (tabs.find(t=>t.key===tab)?.label||tab)+': '+missing.join(', ')+'. '+detail);
@@ -664,7 +666,9 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
                 </div>
             </details>
             <div className='flex justify-end'><Button disabled={!canSkuConfig||busy} onClick={()=>void saveMaterialPolicy()}>Save manufacturing setup</Button></div>
-        </Card>:active==='resources'?<ManufacturingResources onChanged={()=>{void load();}}/>:active==='config'?<Card className='space-y-4'>
+        </Card>:active==='resources'?<ManufacturingResources onChanged={()=>{void load();}}/>:active==='capacityOverview'?
+        <PlnCapacityOverview sites={refs.sites} processClasses={skuSetup.parameters.filter(p=>p.kind==='processClasses')}
+            items={rows.items}/>:active==='config'?<Card className='space-y-4'>
             <p className='text-sm text-muted'>Initial organization-level planning defaults. Further rule sets and site overrides use the same configuration model in subsequent phases.</p>
             <div className='grid gap-3 sm:grid-cols-2'>
                 <Field title='Planning horizon (days)' type='number' value={config.horizonDays} onChange={v=>setConfig(s=>({...s,horizonDays:Number(v)}))}/>
