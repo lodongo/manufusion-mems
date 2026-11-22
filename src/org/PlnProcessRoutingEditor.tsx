@@ -257,7 +257,7 @@ export default function PlnProcessRoutingEditor({value,onChange,items,boms,resou
       onChange({...value,processClassId});
       setSkuToAdd('');setReview(null);
      }}/>
-    <p className='sm:col-span-2 text-xs text-muted'>Select the process family configured under Product Configuration. SKUs in the same family can share this route even when their recipes differ. Classifications are organization-managed, not limited to any particular industry.</p>
+    <p className='sm:col-span-2 text-xs text-muted'>Choose the governed Manufacturing Process Classification configured under Product Configuration. SKUs in the same classification can share routes even when their recipes differ. No separate free-text Product family is required.</p>
     {!classOptions.length&&<p role='status' className='sm:col-span-2 text-xs text-amber-700'>No manufacturing process classifications have been configured. Open Product Configuration → Manufacturing Process Classifications to create one before saving a new route.</p>}
     {!!classOptions.length&&!value.processClassId&&<p className='sm:col-span-2 text-xs text-muted'>Select a process classification before saving this route. You can then define its stages and assign SKUs under SKUs.</p>}
     {value.skuId&&<div className='sm:col-span-2 rounded-xl border border-line p-3 text-xs'>
