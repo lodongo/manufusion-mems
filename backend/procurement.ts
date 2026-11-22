@@ -1621,21 +1621,101 @@ export const procurementRoutes = {
     })],
     'POST /api/org/inventory/dashboard': [orgRoute('org.inventory.dashboard',null,async ctx=>{if(ctx.role!=='org_super_admin'&&!hasPerm(ctx.permissions,'INV.view')&&!hasPerm(ctx.permissions,'PRC.view'))throw new HttpError(403,'Inventory viewing permission required.');const root='organizations/'+ctx.orgId;const [user,warehouses,occupancies,journal,infos,procurements]=await Promise.all([getDoc('users/'+ctx.uid),listDocs(root+'/warehouses'),listDocs(root+'/warehouse_bin_occupancy'),listDocs(root+'/material_journal'),listDocs(root+'/inventory_material_info'),listDocs(root+'/procurement_material_info')]);const allowed=ctx.role==='org_super_admin'?'all':user?await allowedNodeIds(ctx.orgId,user,true):new Set<string>();const visible=new Set(warehouses.filter(w=>allowed==='all'||allowed.has(w.id)).map(w=>w.id));const infoMap=new Map(infos.map(x=>[x.id,x.data]));const priceMap=new Map(procurements.map(x=>[x.id,x.data]));const balances=new Map<string,{physical:number;valid:boolean;seen:boolean}>();for(const row of journal){const d=row.data,w=str(d.warehouseId);if(!visible.has(w))continue;const key=str(d.materialId)+'_'+w;const b=balances.get(key)||{physical:0,valid:true,seen:false};b.seen=true;if(str(d.status)!=='posted'||d.reconciled!==true)b.valid=false;else b.physical+=Number(isObj(d.balancesDelta)?d.balancesDelta.physicalStock:0)||0;balances.set(key,b);}let emptyBins=0,overstockQuantity=0,overstockCount=0,unvalued=0,unreconciled=0;const byCurrency:Record<string,{stockValue:number;overstockValue:number;stockQuantity:number;overstockQuantity:number}>={};const stockKeys=new Set<string>();for(const [key,b] of balances){if(!b.valid||!b.seen){unreconciled++;continue;}stockKeys.add(key);const info=infoMap.get(key),proc=priceMap.get(key);const price=Number(proc?.unitPrice),currency=str(proc?.priceCurrency)||'Unspecified';const q=Math.max(0,b.physical),max=Number(info?.maximumLevel);const excess=info?.maximumLevel!==undefined&&info?.maximumLevel!==null&&str(info.maximumLevel)!==''&&Number.isFinite(max)?Math.max(0,q-max):0;if(excess>0){overstockCount++;overstockQuantity+=excess;}if(!Number.isFinite(price)||price<0){if(q>0)unvalued++;continue;}const c=byCurrency[currency]||(byCurrency[currency]={stockValue:0,overstockValue:0,stockQuantity:0,overstockQuantity:0});c.stockValue+=q*price;c.stockQuantity+=q;c.overstockValue+=excess*price;c.overstockQuantity+=excess;}for(const occ of occupancies){const d=occ.data,w=str(d.warehouseId);if(!visible.has(w))continue;const key=str(d.materialId)+'_'+w,b=balances.get(key);if(b?.valid&&b.seen&&b.physical===0)emptyBins++;}return {emptyBins,overstockQuantity,overstockCount,byCurrency,unvalued,unreconciled};})],
     'POST /api/org/inventory/on-hand': [orgRoute('org.inventory.onhand', null, async ctx => {
-        if(ctx.role!=='org_super_admin'&&!hasPerm(ctx.permissions,'INV.view')&&!hasPerm(ctx.permissions,'INV.')&&!hasPerm(ctx.permissions,'PRC.view'))throw new HttpError(403,'Inventory viewing permission required.');
+        if(ctx.role!=='org_super_admin'&&!hasPerm(ctx.permissions,'INV.view')&&!hasPerm(ctx.permissions,'INV.')&&!hasPerm(ctx.permissions,'PRC.view'))
+            throw new HttpError(403,'Inventory viewing permission required.');
         const root='organizations/'+ctx.orgId;
-        const [user,warehouses,materials,extensions,nodes]=await Promise.all([getDoc('users/'+ctx.uid),listDocs(root+'/warehouses'),listDocs(root+'/materials'),listDocs(root+'/material_extensions'),listDocs(root+'/structure')]);
+        const [user,warehouses,materials,extensions,nodes,journal,inventoryInfo,procurementInfo,occupancies]=await Promise.all([
+            getDoc('users/'+ctx.uid),listDocs(root+'/warehouses'),listDocs(root+'/materials'),
+            listDocs(root+'/material_extensions'),listDocs(root+'/structure'),
+            listDocs(root+'/material_journal'),listDocs(root+'/inventory_material_info'),
+            listDocs(root+'/procurement_material_info'),listDocs(root+'/warehouse_bin_occupancy'),
+        ]);
         const allowed=ctx.role==='org_super_admin'?'all':user?await allowedNodeIds(ctx.orgId,user,true):new Set<string>();
         const nodeMap=new Map(nodes.map(x=>[x.id,x]));
         const visible=warehouses.filter(x=>allowed==='all'||allowed.has(x.id));
-        const whMap=new Map(visible.map(w=>[w.id,{id:w.id,name:str(nodeMap.get(w.id)?.data.name)||str(w.data.name)||w.id,code:str(nodeMap.get(w.id)?.data.code)||str(w.data.code)||w.id}]));
+        const whMap=new Map(visible.map(w=>[w.id,{
+            id:w.id,name:str(nodeMap.get(w.id)?.data.name)||str(w.data.name)||w.id,
+            code:str(nodeMap.get(w.id)?.data.code)||str(w.data.code)||w.id,
+        }]));
+        // Never present a zero or a financial value when the journal is missing or
+        // any stock movement has not been posted and reconciled.
+        type Balance={physical:number;reserved:number;quarantined:number;damaged:number;expired:number;other:number;seen:boolean;valid:boolean};
+        const balances=new Map<string,Balance>();
+        const ledgerKey=(materialId:string,warehouseId:string)=>JSON.stringify([materialId,warehouseId]);
+        for(const row of journal){
+            const d=row.data,materialId=str(d.materialId),warehouseId=str(d.warehouseId);
+            if(!materialId||!whMap.has(warehouseId))continue;
+            const key=ledgerKey(materialId,warehouseId);
+            const b=balances.get(key)||{physical:0,reserved:0,quarantined:0,damaged:0,expired:0,other:0,seen:false,valid:true};
+            b.seen=true;
+            if(str(d.status)!=='posted'||d.reconciled!==true)b.valid=false;
+            else {
+                const delta=isObj(d.balancesDelta)?d.balancesDelta:{};
+                for(const [field,source] of [
+                    ['physical','physicalStock'],['reserved','reservedStock'],['quarantined','quarantinedStock'],
+                    ['damaged','damagedStock'],['expired','expiredStock'],['other','other'],
+                ] as const){
+                    if(delta[source]!==undefined&&(!Number.isFinite(Number(delta[source])))){
+                        b.valid=false;continue;
+                    }
+                    b[field]+=Number(delta[source])||0;
+                }
+            }
+            balances.set(key,b);
+        }
+        const inv=new Map(inventoryInfo.map(x=>[x.id,x.data]));
+        const purchasing=new Map(procurementInfo.map(x=>[x.id,x.data]));
+        const occupied=new Set(occupancies.filter(x=>whMap.has(str(x.data.warehouseId))&&
+            !!str(x.data.materialId)).map(x=>ledgerKey(str(x.data.materialId),str(x.data.warehouseId))));
+        const level=(value:unknown):number|null=>value===null||value===undefined||str(value).trim()===''?
+            null:Number.isFinite(Number(value))?Number(value):null;
         const items:Array<Record<string,unknown>>=[];
         const unique=new Set<string>();
         for(const m of materials){
             if(!['active','approved'].includes(str(m.data.status))||!str(m.data.materialNumber))continue;
             const linked=Array.isArray(m.data.warehouseIds)?m.data.warehouseIds.map(str):[];
             if(str(m.data.pushedAt)&&str(m.data.warehouseId))linked.push(str(m.data.warehouseId));
-            for(const ex of extensions){if(str(ex.data.sourceId)===m.id&&str(ex.data.status)==='approved')linked.push(str(ex.data.warehouseId));}
-            for(const warehouseId of new Set(linked)){const wh=whMap.get(warehouseId);if(!wh||unique.has(m.id+'|'+warehouseId))continue;unique.add(m.id+'|'+warehouseId);items.push({id:m.id,materialNumber:str(m.data.materialNumber),name:str(m.data.name),shortText:str(m.data.shortText),categoryCode:str(m.data.categoryCode),subcategoryCode:str(m.data.subcategoryCode),familyCode:str(m.data.familyCode),materialCode:str(m.data.materialCode),uom:str(m.data.uom),supplyType:str(m.data.supplyType),partNumber:str(m.data.oemPartNumber)||str(m.data.ocmPartNumber)||str(m.data.proprietaryPartNumber)||str(m.data.generalPartNumber),warehouseId,warehouseName:wh.name,warehouseCode:wh.code,status:str(m.data.status),quantityOnHand:0,stockLedgerAvailable:false,createdAt:str(m.data.createdAt)});}
+            for(const ex of extensions)if(str(ex.data.sourceId)===m.id&&str(ex.data.status)==='approved')
+                linked.push(str(ex.data.warehouseId));
+            for(const warehouseId of new Set(linked)){
+                const wh=whMap.get(warehouseId),key=ledgerKey(m.id,warehouseId);
+                if(!wh||unique.has(key))continue;
+                unique.add(key);
+                const stock=balances.get(key);
+                const ready=!!stock&&stock.seen&&stock.valid;
+                const physical=ready?stock.physical:null;
+                const net=ready?stock.physical-stock.reserved-stock.quarantined-
+                    stock.damaged-stock.expired-stock.other:null;
+                const settings=inv.get(m.id+'_'+warehouseId);
+                const min=level(settings?.minimumLevel)??level(settings?.reorderPoint);
+                const max=level(settings?.maximumLevel);
+                const emptyBin=occupied.has(key)&&ready&&physical===0;
+                const stockStatus=!stock?.seen?'Not yet tracked':
+                    !ready?'Unreconciled':emptyBin?'Empty bin':
+                    max!==null&&physical!==null&&physical>max?'Overstock':
+                    min!==null&&net!==null&&net<min?'Understock':'Within limits';
+                const purchase=purchasing.get(m.id+'_'+warehouseId),unitPrice=level(purchase?.unitPrice);
+                const priceUom=str(purchase?.purchaseUom),stockUom=str(m.data.uom);
+                // Purchase price is per purchase UOM. Only multiply without
+                // conversion when it exactly equals the stock UOM.
+                const comparable=ready&&unitPrice!==null&&unitPrice>=0&&
+                    priceUom!==''&&stockUom!==''&&priceUom===stockUom;
+                const netStockValue=comparable&&net!==null?net*unitPrice!:null;
+                items.push({
+                    id:m.id,materialNumber:str(m.data.materialNumber),name:str(m.data.name),
+                    shortText:str(m.data.shortText),categoryCode:str(m.data.categoryCode),
+                    subcategoryCode:str(m.data.subcategoryCode),familyCode:str(m.data.familyCode),
+                    materialCode:str(m.data.materialCode),uom:stockUom,
+                    supplyType:str(m.data.supplyType),
+                    partNumber:str(m.data.oemPartNumber)||str(m.data.ocmPartNumber)||
+                        str(m.data.proprietaryPartNumber)||str(m.data.generalPartNumber),
+                    warehouseId,warehouseName:wh.name,warehouseCode:wh.code,
+                    status:str(m.data.status),quantityOnHand:physical,netAvailable:net,
+                    netStockValue,stockCurrency:comparable?str(purchase?.priceCurrency):'',
+                    stockLedgerAvailable:ready,stockStatus,emptyBin,
+                    minimumLevel:min,maximumLevel:max,createdAt:str(m.data.createdAt),
+                });
+            }
         }
         return {warehouses:Array.from(whMap.values()),items};
     })],
