@@ -455,6 +455,38 @@ export async function referenceChecks(ctx:OrgContext,kind:MasterKind,item:Obj,ex
             }
         }
         for(const component of components.filter(c=>str(c.source)!=='WAREHOUSE')){
+            if(str(component.source)==='PROCESS_SUPPLY'){
+                const reference=str(component.processSupplyKind);
+                if(reference==='SKU'){
+                    const child=await getDoc(DOC(ctx.orgId,'items',str(component.skuId)));
+                    if(!child||!['RAW','INTERMEDIATE'].includes(str(child.data.category)))
+                        throw new HttpError(400,'Choose a real process-input or intermediate SKU for metered/bulk supply.');
+                    if(['deleted','removed','disabled'].includes(str(child.data.status)))
+                        throw new HttpError(400,'The selected process material SKU is no longer available.');
+                    materialUnitFactor(str(component.uom),str(child.data.uom));
+                }else if(reference==='PROCUREMENT'){
+                    const material=await getDoc('organizations/'+ctx.orgId+'/materials/'+str(component.materialId));
+                    if(!material||!publishedProcurementMaterial(material.data))
+                        throw new HttpError(400,'Select an approved and numbered Procurement material for direct/bulk supply.');
+                    if(str(material.data.uom))materialUnitFactor(str(component.uom),str(material.data.uom));
+                    // Deliberately no warehouse stock issue or material extension:
+                    // direct/bulk supply cost and metering are handled by source masters.
+                }else if(reference==='UTILITY'){
+                    const workCenterId=str(component.utilityWorkCenterId),utilityCode=str(component.utilityCode);
+                    const utility=await getDoc('organizations/'+ctx.orgId+'/equipment_utilities/'+workCenterId);
+                    const configured=utility&&ARR(utility.data.items).find(x=>str(x.code)===utilityCode);
+                    if(!configured)throw new HttpError(400,'The selected metered utility must exist in the equipment utility register.');
+                    const utilityPath=await nodePath(ctx.orgId,workCenterId);
+                    if(!utilityPath.length||(str(item.siteId)&&!utilityPath.includes(str(item.siteId))))
+                        throw new HttpError(400,'The utility supply is outside this BOM production site.');
+                    if(!canAt(ctx,'MFG.view',utilityPath,await scopeOf(ctx)))
+                        throw new HttpError(403,'This utility source is outside your authorized scope.');
+                    const referenceUnit=str(configured.uom)||str(configured.unitCode);
+                    if(referenceUnit&&skuUnitConversion(referenceUnit,referenceUnit)!==null)
+                        materialUnitFactor(str(component.uom),referenceUnit);
+                }else throw new HttpError(400,'Unsupported metered/bulk material reference.');
+                continue;
+            }
             const child=await getDoc(DOC(ctx.orgId,'items',str(component.skuId)));
             if(!child)throw new HttpError(400,'Component '+str(component.skuId)+' is missing from SKU master.');
             if(str(component.source)==='INTERMEDIATE'&&str(child.data.category)!=='INTERMEDIATE')
