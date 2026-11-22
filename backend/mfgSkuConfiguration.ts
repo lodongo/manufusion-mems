@@ -149,7 +149,7 @@ export const mfgSkuConfigurationRoutes={
                         throw new HttpError(400,'Select an active production form from this organization.');
                     // The canonical reference UoM comes from the production form, not
                     // a free-text conversion factor or a second independently edited unit.
-                    input.baseUom=refForm.uom;
+                    input.baseUom=str(refForm.uom);
                 }
             }
             const normalized=normalizeSkuParameter(kind,input,
