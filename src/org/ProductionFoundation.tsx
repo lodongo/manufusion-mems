@@ -732,7 +732,7 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
                         <Button variant='secondary' disabled={busy} onClick={()=>{setClassEditingSku('');setClassSelected('');}}>Cancel</Button>
                     </div>
                 </div>}
-                {str(row.status)==='draft'&&canSubmit&&<Button variant='secondary' disabled={busy} onClick={()=>void release(row.id,'submit')}>Submit for technical approval</Button>
+                {str(row.status)==='draft'&&canSubmit&&<Button variant='secondary' disabled={busy} onClick={()=>void release(row.id,'submit')}>Submit for technical approval</Button>}
                 {str(row.status)==='pending_approval'&&canApprove&&<div className='space-y-2'>
                     <Field title='Decision note / rejection reason' value={decisionReason} onChange={setDecisionReason}/>
                     <div className='flex flex-wrap gap-2'>
