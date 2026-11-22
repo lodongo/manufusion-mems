@@ -12,7 +12,7 @@ export type SkuParameter={
     id:string;kind:SkuParameterKind;name:string;enabled?:boolean;description?:string;
     quantity?:number;uom?:string;baseUom?:string;quantityPerUnit?:number;revision?:number;
     referenceProductionFormId?:string;normalizationOperator?:'DIVIDE'|'MULTIPLY';
-    categoryCode?:string;unitCode?:string;unitCount?:number;productCode?:string;
+    categoryCode?:string;unitCode?:string;unitCount?:number;productCode?:string;processCode?:string;
     metadataCode?:string;subcategoryCode?:string;containerAttributes?:Record<string,string>;ratingCountUnitCode?:string;ratingOutputCode?:string;
     packagingTypeCode?:string;level?:string;containedUnit?:string;containedPackagingId?:string;
     containersPerLayer?:number;numberOfLayers?:number;
@@ -174,8 +174,8 @@ export function UnitChoice({title,value,setup,onChange}:{title:string;value:stri
     </div>;
 }
 
-export function SkuConfigurationFields({value,onChange,setup,variantLabel='Product/Variant'}:{
-    value:SkuSelections;onChange:(next:SkuSelections)=>void;setup:SkuSetup;variantLabel?:string;
+export function SkuConfigurationFields({value,onChange,setup,variantLabel='Product/Variant',processClassId=''}:{
+    value:SkuSelections;onChange:(next:SkuSelections)=>void;setup:SkuSetup;variantLabel?:string;processClassId?:string;
 }){
     const form=getParam(setup,'productionForms',value.productionFormId);
     const needs=skuContainmentNeeds(value);
@@ -221,6 +221,7 @@ export function SkuConfigurationFields({value,onChange,setup,variantLabel='Produ
         ?(normalizedOperator==='MULTIPLY'?unitRatio/norm.quantityPerUnit:norm.quantityPerUnit*unitRatio):null;
     const factor=normalBase&&contentPerPackage!==null?contentPerPackage/normalBase:null;
     const productRecord=getParam(setup,'productNames',value.productNameId);
+    const processRecord=getParam(setup,'processClasses',processClassId);
     const product=productRecord?.name||'Select product';
     const capacityTitle=enteredCapacity!==undefined
         ?String(enteredCapacity)+' '+(enteredUnit?.symbol||value.containerCapacityUom||'')
@@ -234,6 +235,7 @@ export function SkuConfigurationFields({value,onChange,setup,variantLabel='Produ
     }:undefined;
     const namingValues:SkuNameValues={
         productName:token(productRecord,productRecord?.productCode),
+        manufacturingProcess:processRecord?{name:processRecord.name,code:processRecord.processCode||''}:undefined,
         productionForm:token(form),
         primaryContainer:token(container,container?.metadataCode),
         containerSize:enteredCapacity!==undefined
@@ -635,7 +637,7 @@ export function SkuSetupPanel({setup,canEdit,onSaved,variantLabel='Product/Varia
                     <div className='min-w-0'>
                         <p className='text-sm font-medium'>{row.name}
                             {row.enabled===false&&<span className='ml-2 text-xs text-muted'>Inactive</span>}</p>
-                        <p className='text-xs text-muted'>{active==='productNames'&&row.productCode?row.productCode+' · ':''}{row.id}
+                        <p className='text-xs text-muted'>{active==='productNames'&&row.productCode?row.productCode+' · ':''}{active==='processClasses'&&row.processCode?row.processCode+' · ':''}{row.id}
                             {row.subcategoryCode?' · '+row.subcategoryCode:''}
                             {(active==='packages'||active==='transportPackages')&&row.packagingTypeCode?' · '+row.packagingTypeCode:''}</p>
                     </div>
@@ -650,9 +652,13 @@ export function SkuSetupPanel({setup,canEdit,onSaved,variantLabel='Product/Varia
                 {active==='processClasses'&&<>
                     <TextInput title='Manufacturing process classification name' value={draft.name||''}
                         onChange={v=>update('name',v)} required/>
+                    <TextInput title='Classification code' value={draft.processCode||''}
+                        onChange={v=>update('processCode',v.toUpperCase().replace(/\s+/g,'_'))}
+                        hint='A unique 2–30 character business code. It can be added to your SKU naming sequence.'
+                        required/>
                     <TextInput title='What manufacturing method does this group share?' value={draft.description||''}
                         onChange={v=>update('description',v)}/>
-                    <p className='text-xs text-muted'>Group SKUs by their common production process, not their product name, recipe, flavor or material family. You define the classifications for your organization; there are no industry-specific defaults. Different routes may still be used within a classification when processing differs.</p>
+                    <p className='text-xs text-muted'>Group SKUs by their common production process, not flavor or material family. The classification code can be used in the SKU naming sequence (Code mode). The internal PRC number remains unchanged. Editing a classification does not rename existing SKUs.</p>
                 </>}
                 {active==='productNames'&&<>
                     <TextInput title={variantLabel+' name'} value={draft.name||''} onChange={v=>update('name',v)} required/>
