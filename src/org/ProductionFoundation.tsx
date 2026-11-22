@@ -474,7 +474,8 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
     };
     const copyVersion=(row:Row)=>{setViewSkuId('');const cloned={...row,id:'',name:String(row.name)+' — new revision',revision:undefined,status:'draft',effectiveFrom:'',createdBy:undefined,submittedBy:undefined,approvedBy:undefined,approvedAt:undefined};setDraft(cloned);setHistory([]);setError('');setNotice('Give this version a new unique code and effective date. The approved original remains unchanged.');};
     const createAlternativeRoute=(row:Row)=>{
-        const used=new Set(rows.routings.filter(r=>str(r.siteId)===str(row.siteId))
+        const used=new Set(rows.routings.filter(r=>str(r.siteId)===str(row.siteId)&&
+            str(r.processClassId)===str(row.processClassId))
             .map(r=>str(r.alternativeCode).toUpperCase()));
         let index=1,alternativeCode='ALTERNATIVE_'+index;
         while(used.has(alternativeCode)){index++;alternativeCode='ALTERNATIVE_'+index;}
