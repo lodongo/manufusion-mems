@@ -219,11 +219,11 @@ function BomEditor({draft,onChange,items,refs,skuSetup,materialPolicy}:{
                     const processSupply=c.source==='PROCESS_SUPPLY';
                     const supplyRef=c.processSupplyKind||'SKU';
                     const processMaterial=refs.materials.find(m=>m.id===c.materialId);
-                    const materialSupplyProfile=(selected?.supplyProfile||{}) as SupplyProfile;
                     const processUtility=refs.utilities.find(u=>u.workCenterId===c.utilityWorkCenterId&&u.code===c.utilityCode);
                     const material=refs.warehouseMaterials.find(m=>m.warehouseId===c.warehouseId&&m.id===c.materialId);
                     const warehouse=refs.warehouses.find(w=>w.id===c.warehouseId);
                     const selected=items.find(item=>item.id===c.skuId);
+                    const materialSupplyProfile=(selected?.supplyProfile||{}) as SupplyProfile;
                     const unitBasis=fromWarehouse?material?.uom:processSupply?
                         (supplyRef==='SKU'?str(selected?.uom):supplyRef==='PROCUREMENT'?processMaterial?.uom:processUtility?.uom):
                         str(selected?.uom);
