@@ -231,6 +231,16 @@ export const utilityRoutes = {
             const version=Number(existing?.data.version)||0;
             if(ctx.body.version!==undefined&&Number(ctx.body.version)!==version)throw new HttpError(409,'Utility register changed. Reload.');
             const before=(Array.isArray(existing?.data.items)?existing.data.items:[]).filter(isObj);
+            // A shared cost-centre update is CAS-locked alongside the equipment
+            // write, preventing two simultaneous equipment edits from each
+            // accepting spare capacity that only one can consume.
+            const needsDistributionGuard=rows.some(r=>isObj(r)&&r.supplyLinkRule===3)||
+                before.some(r=>r.supplyLinkRule===3);
+            const distributionId=str(node.data.parentId);
+            const distributionPath='organizations/'+ctx.orgId+'/cost_center_utility_supplies/'+distributionId;
+            const distribution=needsDistributionGuard?await getDoc(distributionPath):null;
+            if(needsDistributionGuard&&!distribution)
+                throw new HttpError(409,'Configure this cost centre\'s external utility supply before editing the distributed equipment requirements.');
             const [defs,adopted]=await Promise.all([definitions(),effectiveSafetyItems(ctx.orgId,'externalEnergySources')]);
             const allowed=new Set(adopted.map(x=>str(x.code)));
             if (!defs.length) throw new HttpError(409, 'AST utility metadata is not loaded');
@@ -304,7 +314,17 @@ export const utilityRoutes = {
                 return { code, label: str(def.label), values, isInternalSupply:false, supplyLinkRule:2, sourceAssetTag, connectionId };
             }));
 
-            if(!await writeDoc(path, { ...(existing?.data ?? {}), items, version:version+1, updatedAt: nowIso(), updatedBy: ctx.uid },existing?{updateTime:existing.updateTime}:{exists:false}))throw new HttpError(409,'Utility register changed. Reload.');
+            const data={...(existing?.data??{}),items,version:version+1,updatedAt:nowIso(),updatedBy:ctx.uid};
+            if(distribution){
+                const committed=await commitChecked([
+                    {path,data,precondition:existing?{updateTime:existing.updateTime}:{exists:false}},
+                    {path:distributionPath,
+                        data:{...distribution.data,distributionWriteRevision:Number(distribution.data.distributionWriteRevision||0)+1},
+                        precondition:{updateTime:distribution.updateTime}},
+                ]);
+                if(!committed)throw new HttpError(409,'Equipment or cost-centre utility demand changed. Refresh and review the combined capacity before saving again.');
+            }else if(!await writeDoc(path,data,existing?{updateTime:existing.updateTime}:{exists:false}))
+                throw new HttpError(409,'Utility register changed. Reload.');
             const diff = diffByKey(before, items, (x: any) => str(x.code));
             await audited(ctx, 'ast.utilities.save', `Utilities of ${str(node.data.code) || id}`, diff);
             return { saved: items.length,version:version+1 };
