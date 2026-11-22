@@ -2,6 +2,7 @@ import {useEffect,useState,type ReactNode} from 'react';
 import {callBackend} from '../lib/backend';
 import {Alert,Field,SelectField} from '../components/ui';
 import PlnCostCenterSkuSetup from './PlnCostCenterSkuSetup';
+import {COST_CENTER_CATEGORIES,costCenterCategoryLabel,costCenterSubcategories,costCenterSubcategoriesLabel} from '../shared/costCenterTaxonomy';
 
 type ScopePart={id:string;name:string;code:string;level:string};
 type Unit={code:string;name:string;symbol:string;category:string};
@@ -9,10 +10,12 @@ type Resource={id:string;name:string;rateUom:string;notes:string;revision:number
 type CostCenter={
  costCenterId:string;costCenterCode:string;costCenterName:string;
  siteId:string;legalEntityId:string;departmentId:string;
+ costCenterCategory:string;costCenterSubcategories:string[];
  path:ScopePart[];resource:Resource|null;canConfigure:boolean;
 };
 type ListData={costCenters:CostCenter[];highestPermittedScope:ScopePart|null;unitOptions:Unit[];testOverride?:boolean};
-type DetailData={location:{costCenterId:string;code:string;name:string;siteId:string};
+type DetailData={location:{costCenterId:string;code:string;name:string;siteId:string;
+ costCenterCategory:string;costCenterSubcategories:string[]};
  resource:Resource|null;canConfigure:boolean;unitOptions:Unit[];testOverride?:boolean};
 const fieldClass='min-h-11 w-full rounded-xl border border-line bg-panel px-3 py-2 text-sm text-ink';
 const actionClass='min-h-11 rounded-xl border border-line px-4 py-2 text-sm font-semibold disabled:opacity-50';
@@ -61,6 +64,7 @@ export function ManufacturingResourceDetail({costCenterId,initialTab='core',init
    <div className='min-w-0'>
     <h2 className='break-words text-lg font-semibold text-ink'>{title}</h2>
     <Text>Production cost centre {data?.location.code||costCenterId} · One shared SKU allocation and rating configuration</Text>
+    {data&&<Text>Category: {costCenterCategoryLabel(data.location.costCenterCategory)} · Subcategories: {costCenterSubcategoriesLabel(data.location.costCenterCategory,{costSubcategories:data.location.costCenterSubcategories})}</Text>}
    </div>
    {onBack&&<button type='button' className={actionClass} onClick={onBack}>Back to resources</button>}
   </div>
@@ -125,15 +129,19 @@ function ScopeChoice({label,value,items,onChange}:{
 
 /** Scope-filtered manufacturing resources. Newly added cost centres disappear
  * from the available list and open the same shared detail editor as an asset. */
-export default function ManufacturingResources({onChanged}:{onChanged?:()=>void}={}){
+export default function ManufacturingResources({onChanged,defaultCategory='MFG',defaultSubcategory=''}:{
+ onChanged?:()=>void;defaultCategory?:string;defaultSubcategory?:string;
+}={}){
  const [data,setData]=useState<ListData|null>(null),[busy,setBusy]=useState(false),[loading,setLoading]=useState(true);
  const [error,setError]=useState(''),[notice,setNotice]=useState('');
  const [le,setLe]=useState(''),[site,setSite]=useState(''),[department,setDepartment]=useState(''),[cc,setCc]=useState('');
+ const [category,setCategory]=useState(defaultCategory),[subcategory,setSubcategory]=useState(defaultSubcategory);
  const [selected,setSelected]=useState<string[]>([]);
  const [showAdd,setShowAdd]=useState(false);
  const [opened,setOpened]=useState('');
  const closeAdd=()=>{
   setShowAdd(false);setLe('');setSite('');setDepartment('');setCc('');setSelected([]);
+  setCategory(defaultCategory);setSubcategory(defaultSubcategory);
  };
  const load=async()=>{
   setLoading(true);setError('');
@@ -146,7 +154,14 @@ export default function ManufacturingResources({onChanged}:{onChanged?:()=>void}
  const overrideOutline=data?.testOverride?' border-2 border-blue-500':'';
  const filtered=all.filter(x=>
     (!le||x.legalEntityId===le)&&(!site||x.siteId===site)&&
-    (!department||x.departmentId===department)&&(!cc||x.costCenterId===cc));
+    (!department||x.departmentId===department)&&(!cc||x.costCenterId===cc)&&
+    (!category||x.costCenterCategory===category)&&
+    (!subcategory||x.costCenterSubcategories.includes(subcategory)));
+ const categoryCodes=[...new Set([defaultCategory,...all.map(x=>x.costCenterCategory)].filter(Boolean))];
+ const categoryChoices=categoryCodes.map(code=>({
+  code,label:COST_CENTER_CATEGORIES.find(x=>x.code===code)?.label||code,
+ }));
+ const subcategoryChoices=category?costCenterSubcategories(category):[];
  const scope=(level:string,parent?:string):ScopePart[]=>{
   const seen=new Map<string,ScopePart>();
   for(const center of all){
@@ -211,7 +226,7 @@ export default function ManufacturingResources({onChanged}:{onChanged?:()=>void}
     <Text>Adopt resources from production cost centres within your authorized organization scope.</Text></div>
    <div className='flex flex-wrap gap-2'>
     {!showAdd&&<button type='button' disabled={loading||busy} className={actionClass+' bg-brand text-onbrand'+overrideOutline}
-     onClick={()=>{setShowAdd(true);setError('');setNotice('');}}>Add resources</button>}
+     onClick={()=>{setCategory(defaultCategory);setSubcategory(defaultSubcategory);setShowAdd(true);setError('');setNotice('');}}>Add resources</button>}
     <button type='button' disabled={loading||busy} className={actionClass} onClick={()=>void load()}>Refresh resources</button>
    </div>
   </div>
@@ -227,6 +242,16 @@ export default function ManufacturingResources({onChanged}:{onChanged?:()=>void}
    <div className='space-y-3 rounded-2xl border border-line bg-panel p-3'>
     <p className='text-sm font-semibold text-ink'>Highest permitted scope: {data.highestPermittedScope?.name||'Accessible organization locations'}</p>
     <div className='grid grid-cols-1 gap-3 sm:grid-cols-2'>
+     <SelectField id='resource-cost-category' label='Cost-centre category' value={category}
+      onChange={e=>{setCategory(e.target.value);setSubcategory('');setCc('');setSelected([]);}}>
+      <option value=''>All production categories</option>
+      {categoryChoices.map(c=><option key={c.code} value={c.code}>{c.code} · {c.label}</option>)}
+     </SelectField>
+     <SelectField id='resource-cost-subcategory' label='Cost-centre subcategory' value={subcategory}
+      onChange={e=>{setSubcategory(e.target.value);setCc('');setSelected([]);}}>
+      <option value=''>All subcategories</option>
+      {subcategoryChoices.map(c=><option key={c.code} value={c.code}>{c.label} · {c.code}</option>)}
+     </SelectField>
      <ScopeChoice label='Legal entity' value={le} items={scope('legal_entity')}
       onChange={v=>{setLe(v);setSite('');setDepartment('');setCc('');}}/>
      <ScopeChoice label='Site' value={site} items={scope('site',le||undefined)}
@@ -236,7 +261,7 @@ export default function ManufacturingResources({onChanged}:{onChanged?:()=>void}
      <ScopeChoice label='Production cost centre' value={cc} items={scope('cost_center',department||undefined)}
       onChange={setCc}/>
     </div>
-    <Text>Only cost centres classified Production / Manufacturing by the Finance cost-centre master are listed.</Text>
+    <Text>Category and subcategory come from the same Finance cost-centre classification used in Organization Design. A cost centre may have multiple subcategories. These filters only change the selection list, never existing cost-centre or SKU records.</Text>
    </div>
    <section className='space-y-3 rounded-2xl border border-line bg-panel p-3'>
     <div className='flex flex-wrap items-center justify-between gap-2'>
@@ -255,6 +280,7 @@ export default function ManufacturingResources({onChanged}:{onChanged?:()=>void}
      <span className='min-w-0'>
       <span className='block break-words text-sm font-semibold'>{x.costCenterName} · {x.costCenterCode}</span>
       <span className='block text-xs text-muted'>{x.path.map(p=>p.name).join(' / ')}</span>
+      <span className='block text-xs text-muted'>{costCenterCategoryLabel(x.costCenterCategory)} · {costCenterSubcategoriesLabel(x.costCenterCategory,{costSubcategories:x.costCenterSubcategories})}</span>
      </span>
     </label>)}
     {!available.length&&<Text>All production cost centres in this scope are already added, or none are accessible.</Text>}
@@ -273,6 +299,7 @@ export default function ManufacturingResources({onChanged}:{onChanged?:()=>void}
       <button type='button' className='w-full text-left' onClick={()=>setOpened(x.costCenterId)}>
        <p className='font-semibold text-ink'>{x.resource!.name}</p>
        <Text>{x.costCenterName} · {x.costCenterCode} · {x.resource!.id}</Text>
+       <Text>{costCenterCategoryLabel(x.costCenterCategory)} · {costCenterSubcategoriesLabel(x.costCenterCategory,{costSubcategories:x.costCenterSubcategories})}</Text>
        <Text>Click to open Core information and SKU allocation</Text>
       </button>
       <div className='mt-3 flex flex-wrap gap-2'>
