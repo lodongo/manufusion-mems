@@ -116,9 +116,9 @@ function Field({title,value,onChange,type='text',placeholder='',required=false,d
     return <MemsField id={id} label={title} type={type} value={value} placeholder={placeholder}
         required={required} disabled={disabled} onChange={e=>onChange(e.target.value)}/>;
 }
-function Choice({title,value,options,onChange}:{title:string;value:string;options:Array<[string,string]>;onChange:(v:string)=>void}){
+function Choice({title,value,options,onChange,disabled=false}:{title:string;value:string;options:Array<[string,string]>;onChange:(v:string)=>void;disabled?:boolean}){
     const id=useId();
-    return <SelectField id={id} label={title} value={value} onChange={e=>onChange(e.target.value)}>
+    return <SelectField id={id} label={title} value={value} disabled={disabled} onChange={e=>onChange(e.target.value)}>
         {options.map(([v,t])=><option key={v} value={v}>{t}</option>)}
     </SelectField>;
 }
@@ -158,6 +158,36 @@ function BomMaterialUnitSelector({setup,value,allowedUnitCodes,onChange}:{
         {!allowedUnits.length&&<p role='alert' className='text-xs text-amber-600'>
             No compatible units are available in the active MEMS unit registry.
         </p>}
+    </div>;
+}
+
+/** Category-first BOM output unit picker. The same outputUom is shared by
+ * Settings and Output, so both views remain in sync. No metric/imperial step. */
+function BomOutputUnitSelector({draft,setup,allowedCodes,onCategoryChange,onChange,title}:{
+    draft:Row;setup:SkuSetup;allowedCodes:string[];
+    onCategoryChange:(category:string)=>void;onChange:(code:string)=>void;title:string;
+}){
+    const value=str(draft.outputUom);
+    const current=setup.units.find(unit=>unit.code===value||unit.symbol.toLowerCase()===value.toLowerCase());
+    const allowed=setup.units.filter(unit=>allowedCodes.some(code=>code===unit.code||
+        code.toLowerCase()===unit.symbol.toLowerCase()));
+    const keys=[...new Set(allowed.map(unit=>unit.categoryCode))];
+    const requested=str(draft.outputUnitCategory);
+    const category=requested&&keys.includes(requested)?requested:current?.categoryCode||
+        (keys.length===1?keys[0]:'');
+    const available=allowed.filter(unit=>unit.categoryCode===category);
+    const unitValue=available.some(unit=>unit.code===current?.code)?current?.code||'':'';
+    return <div className='grid gap-3'>
+        <Choice title='Output unit category' value={category}
+            options={[['','Choose unit category'],...keys.map(code=>{
+                const record=setup.categories.find(c=>c.code===code);
+                return [code,record?.name||allowed.find(unit=>unit.categoryCode===code)?.category||code] as [string,string];
+            })]} onChange={onCategoryChange}/>
+        <Choice title={title} value={unitValue} disabled={!category}
+            options={[['','Choose output unit'],...available.map(unit=>[
+                unit.code,bomUomName(unit.code,setup.units),
+            ] as [string,string])]}
+            onChange={onChange}/>
     </div>;
 }
 
@@ -217,6 +247,36 @@ function BomEditor({draft,onChange,items,refs,skuSetup,materialPolicy}:{
  const quantity=number(draft.outputQty,1);
  const outputUom=str(draft.outputUom)||str(output?.uom)||'EA';
  const update=(key:string,value:unknown)=>onChange({...draft,[key]:value});
+ const outputUnitOptions=skuSetup.units.filter(unit=>{
+    if((str(draft.applicability)||'SKU')!=='SKU'||!output)return true;
+    const base=skuSetup.units.find(candidate=>candidate.code===str(output.uom)||
+        candidate.symbol.toLowerCase()===str(output.uom).toLowerCase());
+    return !!base&&unit.baseUnit===base.baseUnit&&unit.categoryCode===base.categoryCode;
+ });
+ const chooseOutputUnitCategory=(category:string)=>{
+    const previous=skuSetup.units.find(unit=>unit.code===str(draft.outputUom)||
+        unit.symbol.toLowerCase()===str(draft.outputUom).toLowerCase());
+    if(category===previous?.categoryCode){
+        onChange({...draft,outputUnitCategory:category});
+        return;
+    }
+    if(previous&&components.length&&
+        !window.confirm('Changing the output unit category changes the BOM measurement basis. Review the output quantity and material requirements afterwards. Continue?'))return;
+    // Require an explicit unit choice in the new category; never silently relabel
+    // a quantity using a physically incompatible unit.
+    onChange({...draft,outputUnitCategory:category,outputUom:''});
+ };
+ const chooseOutputUnit=(code:string)=>{
+    const before=skuSetup.units.find(unit=>unit.code===str(draft.outputUom)||
+        unit.symbol.toLowerCase()===str(draft.outputUom).toLowerCase());
+    const after=skuSetup.units.find(unit=>unit.code===code||
+        unit.symbol.toLowerCase()===code.toLowerCase());
+    const conversion=before&&after&&before.categoryCode===after.categoryCode&&
+        before.baseUnit===after.baseUnit&&after.multiplier>0?
+        before.multiplier/after.multiplier:null;
+    onChange({...draft,outputUom:code,outputUnitCategory:after?.categoryCode||'',
+        ...(conversion!==null&&conversion!==1?{outputQty:quantity*conversion}:{})});
+ };
  const updateComponent=(i:number,patch:Partial<Component>)=>
    update('components',components.map((c,j)=>i===j?{...c,...patch}:c));
  const beginAddMaterial=()=>{
@@ -388,7 +448,7 @@ function BomEditor({draft,onChange,items,refs,skuSetup,materialPolicy}:{
         {(str(draft.applicability)||'SKU')==='SKU'&&<Choice title='Output material or finished product' value={str(draft.parentSkuId)}
             options={outputChoices} onChange={v=>{
                 const selected=items.find(i=>i.id===v);
-                onChange({...draft,parentSkuId:v,outputUom:str(selected?.uom)||'EA',
+                onChange({...draft,parentSkuId:v,outputUom:str(selected?.uom)||'EA',outputUnitCategory:'',
                     siteId:str(draft.siteId),productVariantId:'',routingId:'',
                     components:components.filter(c=>c.skuId!==v)});
                 setMaterialsView('list');
@@ -405,9 +465,10 @@ function BomEditor({draft,onChange,items,refs,skuSetup,materialPolicy}:{
                 {(str(draft.applicability)||'SKU')==='SKU'?
                     <><p className='text-xs text-muted'>Output unit (from selected material)</p>
                     <p className='mt-1 text-sm font-semibold'>{bomUomName(outputUom,skuSetup.units)}</p></>:
-                    <Choice title='Output quantity unit' value={outputUom}
-                        options={skuSetup.units.map(unit=>[unit.code,bomUomName(unit.code,skuSetup.units)] as [string,string])}
-                        onChange={v=>update('outputUom',v)}/>}
+                    <BomOutputUnitSelector draft={draft} setup={skuSetup}
+                        allowedCodes={outputUnitOptions.map(unit=>unit.code)}
+                        onCategoryChange={chooseOutputUnitCategory}
+                        onChange={chooseOutputUnit} title='Output quantity unit'/>}
             </div>
         </div>
     </section>
@@ -550,6 +611,7 @@ function BomEditor({draft,onChange,items,refs,skuSetup,materialPolicy}:{
                                         });
                                     }}/>
                                 <Choice title='Utility supplied by selected cost centre'
+                                    disabled={!c.supplyCostCenterId}
                                     value={c.supplyUtilityCode||''}
                                     options={[['','Choose utility from this cost centre'],
                                         ...relevantSupplies.filter(s=>s.costCenterId===c.supplyCostCenterId)
@@ -713,13 +775,14 @@ function BomEditor({draft,onChange,items,refs,skuSetup,materialPolicy}:{
             onChange={v=>onChange({...draft,applicability:v,
                 processClassId:v==='PROCESS_CLASS'?str(draft.processClassId):'',
                 parentSkuId:v==='SKU'?str(draft.parentSkuId):'',
-                outputUom:v==='SKU'?str(draft.outputUom):'EA'})}/>
+                outputUom:v==='SKU'?str(draft.outputUom):'',
+                outputUnitCategory:''})}/>
         {(str(draft.applicability)||'SKU')==='SKU'&&
             <Choice title='Applicable SKU' value={str(draft.parentSkuId)} options={outputChoices}
                 onChange={v=>{
                     const selected=items.find(i=>i.id===v);
                     onChange({...draft,parentSkuId:v,outputUom:str(selected?.uom)||'EA',
-                        components:components.filter(c=>c.skuId!==v)});
+                        outputUnitCategory:'',components:components.filter(c=>c.skuId!==v)});
                 }}/>}
         {str(draft.applicability)==='PROCESS_CLASS'&&
             <Choice title='Manufacturing process classification' value={str(draft.processClassId)}
@@ -734,8 +797,10 @@ function BomEditor({draft,onChange,items,refs,skuSetup,materialPolicy}:{
                 options={classes} onChange={v=>update('classificationCode',v)}/>
             <Field title='Alternative method identifier' value={str(draft.alternativeCode)||'STANDARD'}
                 onChange={v=>update('alternativeCode',v.toUpperCase())}/>
-            <Choice title='Output unit override' value={outputUom} options={units(str(draft.parentSkuId),outputUom)}
-                onChange={v=>update('outputUom',v)}/>
+            <BomOutputUnitSelector draft={draft} setup={skuSetup}
+                allowedCodes={outputUnitOptions.map(unit=>unit.code)}
+                onCategoryChange={chooseOutputUnitCategory}
+                onChange={chooseOutputUnit} title='Output unit override'/>
             <Choice title='Applicable site' value={str(draft.siteId)} options={siteChoices}
                 onChange={v=>update('siteId',v)}/>
             <Field title='Effective from' type='date' value={str(draft.effectiveFrom)}
