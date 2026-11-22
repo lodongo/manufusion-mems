@@ -5,6 +5,7 @@
  */
 export const SKU_NAME_FIELDS=[
     {key:'productName',label:'Product/Variant',modes:['NAME','CODE']},
+    {key:'manufacturingProcess',label:'Manufacturing process classification',modes:['NAME','CODE']},
     {key:'productionForm',label:'Production form',modes:['NAME','CODE']},
     {key:'primaryContainer',label:'Physical container',modes:['NAME','CODE']},
     {key:'containerSize',label:'Container size',modes:['NAME','CODE','QUANTITY','QUANTITY_UNIT']},
