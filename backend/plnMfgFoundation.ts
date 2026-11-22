@@ -162,7 +162,9 @@ export function normalizeMaster(kind:MasterKind, raw:unknown): Obj {
         const alternativeCode=bomAlternative(raw.alternativeCode);
         const routingId=str(raw.routingId).trim();
         if(routingId)VALID_ID(routingId,'Optional process routing');
-        const parentSkuId=VALID_ID(raw.parentSkuId,'Parent SKU');
+        const applicability=ENUM(raw.applicability||'SKU',['SKU','PROCESS_CLASS','ALL'] as const,'BOM applicability');
+        const processClassId=applicability==='PROCESS_CLASS'?VALID_ID(raw.processClassId,'Manufacturing process classification'):'';
+        const parentSkuId=applicability==='SKU'?VALID_ID(raw.parentSkuId,'Parent SKU'):'';
         const components=ARR(raw.components);
         if(!components.length||components.length>150)throw new HttpError(400,'A BOM must have 1–150 components.');
         const seen=new Set<string>();
@@ -232,7 +234,7 @@ export function normalizeMaster(kind:MasterKind, raw:unknown): Obj {
             seen.add(key);
             return {line:i+1,...(source?{source:'INTERMEDIATE'}:{}),skuId,quantity,uom,scrapPct};
         });
-        return {...base,classificationCode,productVariantId,alternativeCode,routingId,parentSkuId,outputQty:POSITIVE(raw.outputQty??1,'Output basis'),outputUom:UOM(raw.outputUom),components:lines as unknown as Plain,effectiveFrom:effectiveDate(raw.effectiveFrom),versionNote:str(raw.versionNote).slice(0,300)};
+        return {...base,classificationCode,productVariantId,alternativeCode,routingId,applicability,processClassId,parentSkuId,outputQty:POSITIVE(raw.outputQty??1,'Output basis'),outputUom:UOM(raw.outputUom),components:lines as unknown as Plain,effectiveFrom:effectiveDate(raw.effectiveFrom),versionNote:str(raw.versionNote).slice(0,300)};
     }
     const processClassId=str(raw.processClassId).trim();
     if(processClassId)VALID_ID(processClassId,'Manufacturing process classification');
@@ -441,14 +443,19 @@ export async function referenceChecks(ctx:OrgContext,kind:MasterKind,item:Obj,ex
             if(!variant||str(variant.data.kind)!=='productNames'||variant.data.enabled===false)
                 throw new HttpError(400,'Select an active Product/Variant from SKU Configuration.');
         }
-        const parent=await getDoc(DOC(ctx.orgId,'items',str(item.parentSkuId)));
-        if(!parent)throw new HttpError(400,'Parent SKU does not exist in Manufacturing master data.');
-        // Output material is global; BOM site applicability is controlled by the BOM itself.
-        materialUnitFactor(str(item.outputUom),str(parent.data.uom));
+        const applicability=str(item.applicability)||'SKU';
+        const parent=applicability==='SKU'?await getDoc(DOC(ctx.orgId,'items',str(item.parentSkuId))):null;
+        if(applicability==='SKU'&&!parent)throw new HttpError(400,'Parent SKU does not exist in Manufacturing master data.');
+        if(parent)materialUnitFactor(str(item.outputUom),str(parent.data.uom));
+        if(applicability==='PROCESS_CLASS'){
+            const processClass=await getDoc('organizations/'+ctx.orgId+'/mfg_sku_parameters/'+str(item.processClassId));
+            if(!processClass||str(processClass.data.kind)!=='processClasses'||processClass.data.enabled===false)
+                throw new HttpError(400,'Choose an active manufacturing process classification.');
+        }
         // Upstream intermediate BOMs are not prerequisites for saving or releasing this BOM.
         // The referenced material records must exist; a later planning-readiness check
         // reports missing approved upstream formulations without blocking authoring.
-        if(productVariantId&&isObj(parent.data.skuComponents)){
+        if(productVariantId&&parent&&isObj(parent.data.skuComponents)){
             const assigned=str((parent.data.skuComponents as Obj).productNameId);
             if(assigned&&assigned!==productVariantId)
                 throw new HttpError(400,'BOM Product/Variant conflicts with the output material identity.');
@@ -558,7 +565,7 @@ export async function referenceChecks(ctx:OrgContext,kind:MasterKind,item:Obj,ex
         const others=(await listDocs(ROOT(ctx.orgId,'boms')))
             .filter(d=>d.id!==existingId)
             .map(d=>({parentSkuId:str(d.data.parentSkuId),components:ARR(d.data.components).map(c=>({skuId:str(c.skuId)}))}));
-        if(detectBomCycle(others,str(item.parentSkuId),components.map(c=>({skuId:str(c.skuId)}))))
+        if(str(item.parentSkuId)&&detectBomCycle(others,str(item.parentSkuId),components.map(c=>({skuId:str(c.skuId)}))))
             throw new HttpError(400,'The BOM introduces a circular manufacturing dependency.');
     }
     if(kind==='routings'){
