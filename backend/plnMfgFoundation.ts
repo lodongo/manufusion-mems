@@ -140,7 +140,7 @@ export function normalizeMaster(kind:MasterKind, raw:unknown): Obj {
         const processClassId=str(raw.processClassId).trim();
         if(processClassId)VALID_ID(processClassId,'Manufacturing process classification');
         return {...base,category,sourceMode,stockPolicy,utilityCode,utilityWorkCenterId,
-            processClassId,family:str(raw.family).slice(0,100),uom:UOM(raw.uom),inventoryMaterialId,
+            processClassId,uom:UOM(raw.uom),inventoryMaterialId,
             supplyProfile:normalizeMaterialSupplyProfile(raw.supplyProfile, UOM(raw.uom)),
             packQty:POSITIVE(raw.packQty??1,'Pack quantity'),skuComponents:isObj(raw.skuComponents)?raw.skuComponents:{},
             skuConversion:isObj(raw.skuConversion)?raw.skuConversion:{},skuNamingSnapshot:isObj(raw.skuNamingSnapshot)?raw.skuNamingSnapshot:{}};
@@ -782,7 +782,9 @@ export const plnMfgFoundationRoutes={
                 // A SKU is an organization master; production-site mappings remain
                 // exclusively in the shared manufacturing resource allocation.
                 raw.siteId='';
-                if(!str(raw.family).trim())throw new HttpError(400,'Product family is required.');
+                // The organization-managed process classification replaces the
+                // old ungoverned SKU family field; it is never persisted on new revisions.
+                delete raw.family;
             }
             if(kind==='routings'&&!str(raw.alternativeCode).trim())
                 throw new HttpError(400,'Enter an alternative route code, such as STANDARD or an organization-defined method. The field can be cleared and edited before saving.');
