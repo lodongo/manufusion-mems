@@ -88,7 +88,7 @@ export default function PlnCapacityOverview({sites,processClasses,items,units}:{
       {sku.stages.map(stage=><div key={stage.code} className='rounded-lg bg-page p-2 text-xs'>
        <p className='font-semibold'>{stage.name||stage.code}</p>
        <p className='mt-1'>{stage.capacity?
-        fmt(stage.capacity.quantity)+' '+(units.find(u=>u.code===stage.capacity?.unitCode)?.symbol||stage.capacity.unit):'Rate not configured or comparable'}</p>
+        fmt(stage.capacity.quantity)+' '+(units.find(u=>u.code===stage.capacity?.unitCode)?.symbol?units.find(u=>u.code===stage.capacity?.unitCode)!.symbol+'/hour':stage.capacity.unit):'Rate not configured or comparable'}</p>
        <p className='text-muted'>Depends on: {stage.dependsOn.length?stage.dependsOn.join(', '):'No predecessors'} ·
         {' '+(stage.capacity?.source||'Missing master-data basis')}</p>
       </div>)}
