@@ -217,9 +217,12 @@ export function normalizeMaster(kind:MasterKind, raw:unknown): Obj {
                 if(!isBuffered&&hasUsable)throw new HttpError(400,'A usable buffer can only be specified for buffered or bulk-storage supply.');
                 const skuId=processSupplyKind==='SKU'?VALID_ID(c.skuId,'Process supply SKU'):'';
                 const materialId=processSupplyKind==='PROCUREMENT'?VALID_ID(c.materialId,'Approved process supply material'):'';
-                // New process-supply lines reference the cost-centre utility,
-                // while historical direct-to-equipment references remain readable.
-                const supplyCostCenterId=str(c.supplyCostCenterId).trim(),supplyUtilityCode=str(c.supplyUtilityCode).trim();
+                // Only direct utility references need cost-centre distribution.
+                // SKU and Procurement references adopt their registered source
+                // masters; stale utility picker fields must not be persisted.
+                // Historical direct-to-equipment utility references remain readable.
+                const supplyCostCenterId=processSupplyKind==='UTILITY'?str(c.supplyCostCenterId).trim():'',
+                    supplyUtilityCode=processSupplyKind==='UTILITY'?str(c.supplyUtilityCode).trim():'';
                 if(supplyCostCenterId)VALID_ID(supplyCostCenterId,'Supplying cost centre');
                 if(supplyUtilityCode)VALID_ID(supplyUtilityCode,'Cost-centre utility');
                 if(!!supplyCostCenterId!==!!supplyUtilityCode)
@@ -234,7 +237,8 @@ export function normalizeMaster(kind:MasterKind, raw:unknown): Obj {
                 // added once as an intermediate and again as inline supply.
                 const key=processSupplyKind==='SKU'?'SKU:'+skuId:
                     processSupplyKind==='PROCUREMENT'?'PROCUREMENT:'+materialId:
-                        'UTILITY:'+utilityWorkCenterId+':'+utilityCode;
+                        'UTILITY:'+(supplyCostCenterId?supplyCostCenterId+':'+supplyUtilityCode:
+                            utilityWorkCenterId+':'+utilityCode);
                 if(seen.has(key))throw new HttpError(400,'Duplicate process supply '+key+'. Combine quantities or choose one delivery method.');
                 seen.add(key);
                 return {line:i+1,source:'PROCESS_SUPPLY',processSupplyKind,
@@ -523,7 +527,9 @@ export async function referenceChecks(ctx:OrgContext,kind:MasterKind,item:Obj,ex
         }
         for(const component of components.filter(c=>str(c.source)!=='WAREHOUSE')){
             if(str(component.source)==='PROCESS_SUPPLY'){
-                const ccId=str(component.supplyCostCenterId),supplyCode=str(component.supplyUtilityCode);
+                const reference=str(component.processSupplyKind);
+                const ccId=reference==='UTILITY'?str(component.supplyCostCenterId):'',
+                    supplyCode=reference==='UTILITY'?str(component.supplyUtilityCode):'';
                 if(ccId&&supplyCode){
                     const cc=await getDoc('organizations/'+ctx.orgId+'/structure/'+ccId);
                     if(!cc||str(cc.data.level)!=='cost_center'||str(cc.data.status)==='inactive')
@@ -555,7 +561,6 @@ export async function referenceChecks(ctx:OrgContext,kind:MasterKind,item:Obj,ex
                             throw new HttpError(409,'Required BOM flow exceeds this cost-centre utility allocation.');
                     }
                 }
-                const reference=str(component.processSupplyKind);
                 if(reference==='SKU'){
                     const child=await getDoc(DOC(ctx.orgId,'items',str(component.skuId)));
                     if(!child||!['RAW','INTERMEDIATE'].includes(str(child.data.category)))

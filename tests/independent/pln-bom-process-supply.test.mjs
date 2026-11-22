@@ -88,3 +88,38 @@ test('BOM editor offers a third supply type, flow and buffer settings with real 
  assert.ok(api.includes("getDoc('organizations/'+ctx.orgId+'/equipment_utilities/'"));
  assert.ok(api.includes("if(!canAt(ctx,'MFG.view',utilityPath,await scopeOf(ctx)))"));
 });
+
+test('SKU process supply adopts its master without another cost-centre utility setup',()=>{
+ const line=normalize([process({supplyCostCenterId:'CC-STALE',supplyUtilityCode:'WATER',utilityCode:'OLD',utilityWorkCenterId:'WC-OLD'})]).components[0];
+ assert.equal(line.skuId,'SKU-WATER');
+ assert.equal(line.supplyCostCenterId,undefined);
+ assert.equal(line.supplyUtilityCode,undefined);
+ assert.equal(line.utilityCode,'');
+ assert.equal(line.utilityWorkCenterId,'');
+});
+test('Direct Procurement process materials do not create duplicate utility source references',()=>{
+ const line=normalize([process({processSupplyKind:'PROCUREMENT',skuId:'',materialId:'MAT-WATER',
+     supplyCostCenterId:'CC-STALE',supplyUtilityCode:'WATER'})]).components[0];
+ assert.equal(line.materialId,'MAT-WATER');
+ assert.equal(line.supplyCostCenterId,undefined);
+ assert.equal(line.supplyUtilityCode,undefined);
+});
+test('Direct utility still adopts configured centre and utility and distinguishes duplicate sources',()=>{
+ const bom=normalize([
+    process({processSupplyKind:'UTILITY',skuId:'',supplyCostCenterId:'CC-001',supplyUtilityCode:'WATER'}),
+    process({processSupplyKind:'UTILITY',skuId:'',supplyCostCenterId:'CC-002',supplyUtilityCode:'WATER'}),
+ ]).components;
+ assert.deepEqual(bom.map(c=>c.supplyCostCenterId),['CC-001','CC-002']);
+ assert.throws(()=>normalize([
+   process({processSupplyKind:'UTILITY',skuId:'',supplyCostCenterId:'CC-001',supplyUtilityCode:'WATER'}),
+   process({processSupplyKind:'UTILITY',skuId:'',supplyCostCenterId:'CC-001',supplyUtilityCode:'WATER'}),
+ ]),/Duplicate process supply/);
+});
+test('SKU picker removes extra utility configuration from its material editor',()=>{
+ const ui=file('src/org/ProductionFoundation.tsx'),backend=file('backend/plnMfgFoundation.ts');
+ assert.ok(ui.includes("supplyRef==='UTILITY'&&<div className='space-y-2"));
+ assert.ok(ui.includes("source==='PROCESS_SUPPLY'&&kind==='UTILITY'&&"));
+ assert.ok(ui.includes("c.source==='PROCESS_SUPPLY'&&c.processSupplyKind==='UTILITY'&&"));
+ assert.ok(ui.includes('This BOM uses its registered material identity, unit and supply setup directly.'));
+ assert.ok(backend.includes("const ccId=reference==='UTILITY'?str(component.supplyCostCenterId):''"));
+});

@@ -322,7 +322,8 @@ function BomEditor({draft,onChange,items,refs,skuSetup,materialPolicy}:{
         setMaterialEditorError('Select the required material or utility and enter a positive quantity and valid unit before adding it to the BOM.');
         return;
     }
-    if(source==='PROCESS_SUPPLY'&&!(c.supplyCostCenterId&&c.supplyUtilityCode)&&
+    if(source==='PROCESS_SUPPLY'&&kind==='UTILITY'&&
+        !(c.supplyCostCenterId&&c.supplyUtilityCode)&&
         !(c.utilityWorkCenterId&&c.utilityCode)){
         setMaterialEditorError('Choose a configured supplying cost-centre utility for this process material.');
         return;
@@ -586,16 +587,19 @@ function BomEditor({draft,onChange,items,refs,skuSetup,materialPolicy}:{
                                     ['UTILITY','Registered metered equipment utility'],
                                     ['PROCUREMENT','Approved Procurement material · direct/bulk (not a warehouse stock issue)']]}
                                 onChange={v=>updateComponent(i,{processSupplyKind:v as Component['processSupplyKind'],
-                                    skuId:'',materialId:'',warehouseId:'',utilityWorkCenterId:'',utilityCode:'',uom:''})}/>
+                                    skuId:'',materialId:'',warehouseId:'',utilityWorkCenterId:'',utilityCode:'',
+                                    supplyCostCenterId:'',supplyUtilityCode:'',uom:''})}/>
                             {supplyRef==='SKU'&&<Choice title='Process material / intermediate SKU' value={c.skuId}
                                 options={processMaterialChoices}
                                 onChange={v=>updateComponent(i,{skuId:v,materialId:'',warehouseId:'',
-                                    utilityWorkCenterId:'',utilityCode:'',uom:str(items.find(x=>x.id===v)?.uom)})}/>}
+                                    utilityWorkCenterId:'',utilityCode:'',supplyCostCenterId:'',supplyUtilityCode:'',
+                                    uom:str(items.find(x=>x.id===v)?.uom)})}/>}
                             {supplyRef==='PROCUREMENT'&&<Choice title='Direct / bulk purchased material' value={c.materialId||''}
                                 options={processProcurementChoices}
                                 onChange={v=>updateComponent(i,{materialId:v,skuId:'',warehouseId:'',
-                                    utilityWorkCenterId:'',utilityCode:'',uom:str(refs.materials.find(m=>m.id===v)?.uom)})}/>}
-                            <div className='space-y-2 rounded-lg border border-line bg-panel p-3'>
+                                    utilityWorkCenterId:'',utilityCode:'',supplyCostCenterId:'',supplyUtilityCode:'',
+                                    uom:str(refs.materials.find(m=>m.id===v)?.uom)})}/>}
+                            {supplyRef==='UTILITY'&&<div className='space-y-2 rounded-lg border border-line bg-panel p-3'>
                                 <div className='flex flex-wrap items-center justify-between gap-2'>
                                     <p className='text-xs font-semibold'>Supplying cost centre &amp; utility</p>
                                     <button type='button' className='min-h-9 rounded-lg border border-line px-2 text-xs'
@@ -656,17 +660,20 @@ function BomEditor({draft,onChange,items,refs,skuSetup,materialPolicy}:{
                                     onClick={()=>navigate(c.supplyCostCenterId?'organization_admin/structure/'+c.supplyCostCenterId:'organization_admin/structure')}>
                                     Open cost-centre setup / add missing utility or source asset
                                 </button>
-                            </div>
+                            </div>}
                             {supplyRef==='UTILITY'&&<p className='text-xs text-muted'>
                                 A registered cost-centre utility supplies this process. Select its consumption UoM below;
                                 the utility source's capacity and conditions are pulled from the cost centre.
                             </p>}
-                            {supplyRef==='SKU'&&selected&&<p className='text-xs text-muted'>
-                                Source SKU {selected.id} · {selected.name}.
-                                {materialSupplyProfile.handlingMode?' Handling: '+materialSupplyProfile.handlingMode.replaceAll('_',' ').toLowerCase()+'.':''}
-                                {materialSupplyProfile.sources?.length?' '+materialSupplyProfile.sources.length+' configured supply source(s).':''}
-                                Supply origin and tariffs belong to the material's shared supply profile, not another BOM line.
-                            </p>}
+                            {supplyRef==='SKU'&&selected&&<div className='rounded-lg border border-line bg-page p-3 text-xs text-soft'>
+                                <p className='font-semibold text-ink'>Adopted process material · {selected.name}</p>
+                                <p className='mt-1'>Source SKU {selected.id} · {str(selected.category)}. This BOM uses its registered material identity, unit and supply setup directly. No extra supplying cost centre or utility needs to be selected here.</p>
+                                {materialSupplyProfile.handlingMode&&<p className='mt-1'>Handling: {materialSupplyProfile.handlingMode.replaceAll('_',' ').toLowerCase()}</p>}
+                                {materialSupplyProfile.sources?.length>0&&<p className='mt-1'>{materialSupplyProfile.sources.length} material supply source(s) are already configured.</p>}
+                                {str(selected.utilitySourceCostCenterId)&&str(selected.utilitySourceSubcategoryCode)&&
+                                    <p className='mt-1'>Adopted utility origin: cost centre {str(selected.utilitySourceCostCenterId)} · activated source {str(selected.utilitySourceSubcategoryCode)}</p>}
+                                <p className='mt-1'>Changes to the source master stay managed under Materials &amp; Products rather than being duplicated in this BOM.</p>
+                            </div>}
                             {supplyRef==='PROCUREMENT'&&processMaterial&&<p className='text-xs text-muted'>
                                 {processMaterial.materialNumber} · {processMaterial.name}. Direct process use does not create a warehouse stock issue or purchase.
                             </p>}
@@ -1189,7 +1196,7 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
                     c.source==='PROCESS_SUPPLY'?(c.processSupplyKind==='SKU'?!str(c.skuId):
                         c.processSupplyKind==='UTILITY'?false:
                         c.processSupplyKind==='PROCUREMENT'?!str(c.materialId):true):!str(c.skuId);
-                const missingDistribution=c.source==='PROCESS_SUPPLY'&&
+                const missingDistribution=c.source==='PROCESS_SUPPLY'&&c.processSupplyKind==='UTILITY'&&
                     (!str(c.supplyCostCenterId)||!str(c.supplyUtilityCode))&&
                     // Keep historical read-only-ish process links visible; the
                     // backend allows only unchanged legacy lines during migration.
@@ -1204,7 +1211,7 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
                 return missing||missingDistribution||!str(c.uom)||!Number.isFinite(c.quantity)||c.quantity<=0||
                     invalidBuffer||invalidRate;
             })){
-                setError('Every BOM material needs a valid source, unit and positive planned consumption. For process supplies select a SKU, utility or Procurement material, and check hourly rates and buffer size where used.');return;
+                setError('Every BOM material needs its selected SKU, utility or Procurement material, a valid unit and positive planned consumption. Supplying cost-centre details are required only for direct utility references; check rates and buffer sizes where used.');return;
             }
         }
         setBusy(true);setError('');setNotice('');
