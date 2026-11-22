@@ -534,7 +534,7 @@ export default function MaterialsMaster() {
                         </span>
                     </button>)}
                 {registration.clusterCode&&<p className='text-xs text-soft'>Material will be associated with cluster {registration.clusterCode} when the draft is saved. Physical stock and bin allocation still require material approval.</p>}
-                {!registration.clusterCode&&restrictionCodes.length>0&&!clustersLoading&&!clusterOptions.some(c=>c.adoptable)&&
+                {!registration.clusterCode&&restrictionCodes.length>0&&!clustersLoading&&
                     <div className='rounded-xl border border-dashed border-line p-3'>
                         <p className='text-sm font-semibold text-ink'>Create a matching cluster?</p>
                         <p className='text-xs text-soft'>{matchingClusters.length?'Existing matches are available above, but you may create a separate cluster. ':'No matching cluster is configured. '}Save this material as a draft and open cluster configuration with the subcategory and restrictions prefilled.</p>
