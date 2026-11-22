@@ -96,7 +96,8 @@ const newRecord=(tab:Tab,policy:MaterialPolicy=defaultMaterialPolicy,
     defaults:FormDefaults=DEFAULT_FORM_DEFAULTS,sites:References['sites']=[]):Row=>{
     const siteId=preferredSiteId(defaults.defaultSiteId,sites);
     if(tab==='items')return {id:'',name:'',category:defaults.skuCategory,processClassId:'',uom:'',siteId:'',packQty:1,
-        stockPolicy:policy.defaultIntermediateTracking,sourceMode:'INVENTORY',inventoryMaterialId:'',utilityCode:'',utilityWorkCenterId:'',skuComponents:{}};
+        stockPolicy:policy.defaultIntermediateTracking,sourceMode:'INVENTORY',inventoryMaterialId:'',
+        utilityCode:'',utilityWorkCenterId:'',utilitySourceCostCenterId:'',utilitySourceSubcategoryCode:'',skuComponents:{}};
     if(tab==='boms')return {id:'',name:'',classificationCode:'PRODUCTION',alternativeCode:defaults.routingAlternativeCode,routingId:'',siteId,
         parentSkuId:'',outputQty:defaults.bomOutputQty,outputUom:'EA',components:[]};
     if(tab==='resources')return {id:'',name:'',siteId,assetId:''}; // Resource class and capacity are inherited from a cost centre and SKU mapping.
@@ -828,6 +829,61 @@ function BomEditor({draft,onChange,items,refs,skuSetup,materialPolicy}:{
     <p className='text-xs text-muted'>Save draft is available on every tab. You can define upstream BOMs later. Production release follows the approval workflow.</p>
  </div>;
 }
+
+type UtilityCostCentreChoice={
+ id:string;name:string;code:string;siteId:string;
+ sources:Array<{code:string;label:string}>;
+};
+/** A raw/input SKU belongs to the organization. This only links its utility
+ * consumption source to an authorized UTL cost centre and one of its own
+ * activated operational subcategories, without forcing equipment adoption. */
+function SkuUtilityCostCentreSource({draft,onChange}:{
+ draft:Row;onChange:(row:Row)=>void;
+}){
+ const [centres,setCentres]=useState<UtilityCostCentreChoice[]>([]);
+ const [loading,setLoading]=useState(true);
+ const [error,setError]=useState('');
+ const refresh=()=>{
+    setLoading(true);setError('');
+    void callBackend<{costCenters:UtilityCostCentreChoice[]}>(
+        '/api/org/pln-mfg/foundation/utility-source-options')
+      .then(data=>setCentres(data.costCenters))
+      .catch(e=>setError(e instanceof Error?e.message:'Could not load permitted utility cost centres.'))
+      .finally(()=>setLoading(false));
+ };
+ useEffect(()=>{refresh();},[]);
+ const costCentreId=str(draft.utilitySourceCostCenterId);
+ const selected=centres.find(c=>c.id===costCentreId);
+ const sourceCode=str(draft.utilitySourceSubcategoryCode);
+ const sourceOptions:Array<[string,string]>=[['','Choose an activated utility source'],
+    ...(selected?.sources||[]).map(s=>[s.code,s.label] as [string,string])];
+ return <div className='md:col-span-2 space-y-3 rounded-xl border border-line bg-page p-3'>
+    <h3 className='text-sm font-semibold'>Utilities supply source</h3>
+    <p className='text-xs text-muted'>Choose a Utilities (UTL) cost centre within your permitted scope, then select a source from its activated subcategories in Organization Design.</p>
+    <Choice title='Utilities cost centre' value={costCentreId}
+        options={[['','Choose an authorized Utilities cost centre'],
+            ...centres.map(c=>[c.id,(c.code?c.code+' · ':'')+c.name] as [string,string])]}
+        onChange={id=>onChange({...draft,utilitySourceCostCenterId:id,
+            utilitySourceSubcategoryCode:'',utilityCode:'',utilityWorkCenterId:''})}
+        disabled={loading}/>
+    <Choice title='Source (activated cost-centre subcategory)' value={sourceCode}
+        options={sourceOptions} disabled={!selected||!selected.sources.length}
+        onChange={code=>onChange({...draft,utilitySourceSubcategoryCode:code,
+            utilityCode:'',utilityWorkCenterId:''})}/>
+    {selected&&!selected.sources.length&&<p className='text-xs text-amber-600'>No active Utilities subcategories were found on this cost centre. Configure them in Organization Design.</p>}
+    {!selected&&costCentreId&&!loading&&!error&&<p className='text-xs text-amber-600'>This cost centre is not currently available to you. Select a permitted Utilities cost centre.</p>}
+    {loading&&<p role='status' className='text-xs text-muted'>Loading Utilities cost centres…</p>}
+    {error&&<div className='flex flex-wrap items-center gap-2'>
+        <p role='alert' className='text-xs text-red-500'>{error}</p>
+        <Button type='button' variant='secondary' onClick={refresh}>Retry</Button>
+    </div>}
+    {!loading&&!error&&!centres.length&&<p className='text-xs text-amber-600'>No accessible Utilities cost centres with activated subcategories are available. Configure one in Organization Design or request access.</p>}
+    {!costCentreId&&!!str(draft.utilityWorkCenterId)&&
+        <p className='text-xs text-muted'>Historical equipment-level source: {str(draft.utilityWorkCenterId)} · {str(draft.utilityCode)}. Choose a cost centre and source to migrate this material.</p>}
+    <p className='text-xs text-muted'>This selection identifies the material's utility source activity. Physical supply assets, rated capacity and distribution remain configured separately under the cost centre.</p>
+ </div>;
+}
+
 function MasterEditor({tab,draft,onChange,items,boms,resources,refs,skuSetup,materialPolicy}:{tab:Tab;draft:Row;onChange:(v:Row)=>void;items:Row[];boms:Row[];resources:Row[];refs:References;skuSetup:SkuSetup;materialPolicy:MaterialPolicy}){
     if(tab==='boms')return <BomEditor draft={draft} onChange={onChange} items={items} refs={refs} skuSetup={skuSetup} materialPolicy={materialPolicy}/>;
     if(tab==='routings')return <PlnProcessRoutingEditor value={draft} onChange={onChange}
@@ -837,8 +893,6 @@ function MasterEditor({tab,draft,onChange,items,boms,resources,refs,skuSetup,mat
     const update=(key:string,value:unknown)=>onChange({...draft,[key]:value});
     const siteOptions:Array<[string,string]>=[['','Organization-wide'],...refs.sites.map(r=>[r.id,r.name+(r.code?' · '+r.code:'')] as [string,string])];
     const materialOptions:Array<[string,string]>=[['','Select approved Inventory material'],...refs.materials.map(r=>[r.id,r.materialNumber+' · '+r.name] as [string,string])];
-    const utilityOptions:Array<[string,string]>=[['','Select registered equipment utility'],
-        ...refs.utilities.map(u=>[u.workCenterId+'::'+u.code,u.name+' · '+u.workCenterId] as [string,string])];
     return <div className='space-y-4'>
         <div className='grid gap-3 md:grid-cols-2'>
             <div className='rounded-xl border border-line bg-page p-3'>
@@ -878,17 +932,16 @@ function MasterEditor({tab,draft,onChange,items,boms,resources,refs,skuSetup,mat
                                 (str(draft.category)==='PACKAGING'&&materialPolicy.allowPackagingDirect)
                                 ?[['DIRECT','Non-stock direct consumption (no Inventory issue)'] as [string,string]]:[]),
                         ]}
-                        onChange={v=>onChange({...draft,sourceMode:v,inventoryMaterialId:'',utilityCode:'',utilityWorkCenterId:''})}/>}
+                        onChange={v=>onChange({...draft,sourceMode:v,inventoryMaterialId:'',
+                            utilityCode:'',utilityWorkCenterId:'',utilitySourceCostCenterId:'',
+                            utilitySourceSubcategoryCode:''})}/>}
                 {['RAW','PACKAGING'].includes(str(draft.category))&&str(draft.sourceMode)==='INVENTORY'&&
                     <Choice title='Published Inventory Material Master' value={str(draft.inventoryMaterialId)} options={materialOptions}
                         onChange={v=>{const found=refs.materials.find(m=>m.id===v);onChange({...draft,inventoryMaterialId:v,uom:found?.uom||draft.uom});}}/>}
                 {['RAW','PACKAGING'].includes(str(draft.category))&&str(draft.sourceMode)==='DIRECT'&&
                     <p className='text-xs text-muted'>Direct consumption tracks the material as a BOM input without creating stock issues. Purchasing, costing and consumption evidence still require downstream configuration.</p>}
                 {str(draft.category)==='RAW'&&str(draft.sourceMode)==='UTILITY'&&
-                    <Choice title='Adopted equipment utility supply'
-                        value={str(draft.utilityWorkCenterId)&&str(draft.utilityCode)?str(draft.utilityWorkCenterId)+'::'+str(draft.utilityCode):''}
-                        options={utilityOptions} onChange={v=>{const selected=refs.utilities.find(u=>u.workCenterId+'::'+u.code===v);
-                            onChange({...draft,utilityCode:selected?.code||'',utilityWorkCenterId:selected?.workCenterId||''});}}/>}
+                    <SkuUtilityCostCentreSource draft={draft} onChange={onChange}/>}
             </>}
             {tab!=='items'&&<Choice title='Site applicability' value={str(draft.siteId)} options={siteOptions} onChange={v=>update('siteId',v)}/>}
             {tab==='items'&&<p className='md:col-span-2 text-xs text-muted'>
@@ -1105,6 +1158,12 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
     const save=async()=>{
         if(!draft||!canSave)return;
         if(active==='items'){
+            if(str(draft.category)==='RAW'&&str(draft.sourceMode)==='UTILITY'&&
+                !(str(draft.utilitySourceCostCenterId)&&str(draft.utilitySourceSubcategoryCode))&&
+                !(str(draft.id)&&str(draft.utilityWorkCenterId)&&str(draft.utilityCode))){
+                setError('Select a Utilities (UTL) cost centre and one of its activated source subcategories before saving this raw/input material.');
+                return;
+            }
             if(['FINISHED','INTERMEDIATE'].includes(str(draft.category))&&
                 skuSetup.parameters.some(p=>p.kind==='processClasses'&&p.enabled!==false)&&
                 !str(draft.processClassId)){

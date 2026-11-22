@@ -12,7 +12,8 @@ import { calculateSkuConversion, composeConfiguredSkuName, composeSkuNameWithSeq
 import { commitGeneratedCode, skuParametersForOrg, namingSequenceForOrg } from './mfgSkuConfiguration';
 import { mfgMaterialPolicyForOrg, mfgMaterialPolicyPath, normalizeMfgMaterialPolicy, bomClassificationCode } from './mfgMaterialPolicy';
 import {eligibleManufacturingHierarchy,routingManufacturingCostCenter,routingCommissionedCapacity,isManufacturingCostType} from './plnCostCenterCapacity';
-import {costCenterSubcategories} from '../src/shared/costCenterTaxonomy';
+import {costCenterSubcategories,selectedCostCenterSubcategories} from '../src/shared/costCenterTaxonomy';
+import {allowedAt,PERMS} from './scopeGuard';
 import {physicalRatingUnits} from './plnPhysicalCapacity';
 import { allowedNodeIds } from './positions';
 import {reviewManufacturingRouting} from './mfgRoutingReadiness';
@@ -135,8 +136,18 @@ export function normalizeMaster(kind:MasterKind, raw:unknown): Obj {
         const stockPolicy=category==='INTERMEDIATE'
             ?ENUM(raw.stockPolicy??'NON_STOCKED',INTERMEDIATE_POLICIES,'intermediate stock policy')
             :sourceMode==='UTILITY'?'METERED':sourceMode==='DIRECT'?'DIRECT':'STOCKED';
-        const utilityCode=sourceMode==='UTILITY'?VALID_ID(raw.utilityCode,'Registered utility code'):'';
-        const utilityWorkCenterId=sourceMode==='UTILITY'?VALID_ID(raw.utilityWorkCenterId,'Utility work center'):'';
+        const newUtilitySource=sourceMode==='UTILITY'&&
+            (!!str(raw.utilitySourceCostCenterId)||!!str(raw.utilitySourceSubcategoryCode));
+        const legacyUtilitySource=sourceMode==='UTILITY'&&!newUtilitySource&&
+            !!str(raw.utilityCode)&&!!str(raw.utilityWorkCenterId);
+        if(sourceMode==='UTILITY'&&!newUtilitySource&&!legacyUtilitySource)
+            throw new HttpError(400,'Choose a Utilities cost centre and one of its activated source subcategories.');
+        const utilitySourceCostCenterId=newUtilitySource?
+            VALID_ID(raw.utilitySourceCostCenterId,'Utilities cost centre'):'';
+        const utilitySourceSubcategoryCode=newUtilitySource?
+            VALID_ID(raw.utilitySourceSubcategoryCode,'Activated utility source subcategory'):'';
+        const utilityCode=legacyUtilitySource?VALID_ID(raw.utilityCode,'Historical registered utility code'):'';
+        const utilityWorkCenterId=legacyUtilitySource?VALID_ID(raw.utilityWorkCenterId,'Historical utility work centre'):'';
         if((category==='RAW'||category==='PACKAGING')&&sourceMode==='INVENTORY'&&!inventoryMaterialId)
             throw new HttpError(400,'Inventory-sourced raw and packaging materials require an approved Inventory material reference.');
         if(sourceMode==='UTILITY'&&inventoryMaterialId)
@@ -146,6 +157,7 @@ export function normalizeMaster(kind:MasterKind, raw:unknown): Obj {
         const processClassId=str(raw.processClassId).trim();
         if(processClassId)VALID_ID(processClassId,'Manufacturing process classification');
         return {...base,category,sourceMode,stockPolicy,utilityCode,utilityWorkCenterId,
+            utilitySourceCostCenterId,utilitySourceSubcategoryCode,
             processClassId,uom:UOM(raw.uom),inventoryMaterialId,
             supplyProfile:normalizeMaterialSupplyProfile(raw.supplyProfile, UOM(raw.uom)),
             packQty:POSITIVE(raw.packQty??1,'Pack quantity'),skuComponents:isObj(raw.skuComponents)?raw.skuComponents:{},
@@ -399,14 +411,31 @@ export async function referenceChecks(ctx:OrgContext,kind:MasterKind,item:Obj,ex
         if(str(item.sourceMode)==='UTILITY'&&!policy.allowRawUtility)
             throw new HttpError(400,'Metered utility inputs are disabled in organization Manufacturing Setup.');
         if(str(item.sourceMode)==='UTILITY'){
-            const utility=await getDoc('organizations/'+ctx.orgId+'/equipment_utilities/'+str(item.utilityWorkCenterId));
-            if(!utility||!ARR(utility.data.items).some(x=>str(x.code)===str(item.utilityCode)))
-                throw new HttpError(400,'The metered utility input must reference a configured equipment utility supply.');
-            const utilityNodePath=await nodePath(ctx.orgId,str(item.utilityWorkCenterId));
-            if(!utilityNodePath.length||(siteId&&!utilityNodePath.includes(siteId)))
-                throw new HttpError(400,'The metered utility supply must belong to this production site.');
-            if(!canAt(ctx,'MFG.view',utilityNodePath,await scopeOf(ctx)))
-                throw new HttpError(403,'The selected utility is outside your authorized scope.');
+            const utilityCentreId=str(item.utilitySourceCostCenterId);
+            if(utilityCentreId){
+                const centre=await getDoc('organizations/'+ctx.orgId+'/structure/'+utilityCentreId);
+                const attrs=isObj(centre?.data.attributes)?centre.data.attributes:{};
+                if(!centre||str(centre.data.level)!=='cost_center'||
+                    str(centre.data.status)==='inactive'||str(attrs.costType)!=='UTL')
+                    throw new HttpError(400,'Choose an active cost centre categorized as Utilities (UTL).');
+                const activated=selectedCostCenterSubcategories(attrs);
+                const validTaxonomy=new Set(costCenterSubcategories('UTL').map(s=>s.code));
+                const chosen=str(item.utilitySourceSubcategoryCode);
+                if(!activated.includes(chosen)||!validTaxonomy.has(chosen))
+                    throw new HttpError(400,'Choose a source from the selected Utilities cost centre activated subcategories.');
+                if(!await allowedAt(ctx,['MFG.view',...PERMS.utilitiesView],utilityCentreId,'read'))
+                    throw new HttpError(403,'This Utilities cost centre is outside your permitted scope.');
+            }else{
+                // Historic direct equipment sources remain readable and editable.
+                const utility=await getDoc('organizations/'+ctx.orgId+'/equipment_utilities/'+str(item.utilityWorkCenterId));
+                if(!utility||!ARR(utility.data.items).some(x=>str(x.code)===str(item.utilityCode)))
+                    throw new HttpError(400,'Historical metered utility source no longer exists. Select a Utilities cost centre and source.');
+                const utilityNodePath=await nodePath(ctx.orgId,str(item.utilityWorkCenterId));
+                if(!utilityNodePath.length||(siteId&&!utilityNodePath.includes(siteId)))
+                    throw new HttpError(400,'The historical utility supply is outside this material production site.');
+                if(!canAt(ctx,'MFG.view',utilityNodePath,await scopeOf(ctx)))
+                    throw new HttpError(403,'The historical utility source is outside your authorized scope.');
+            }
         }
         const materialId=str(item.inventoryMaterialId);
         if(materialId){
@@ -692,6 +721,27 @@ export function fictionalLine11Demo(){
 }
 
 export const plnMfgFoundationRoutes={
+    'POST /api/org/pln-mfg/foundation/utility-source-options':[
+        orgRoute('org.mfg.foundation.utility_source_options','MFG.view',async ctx=>{
+            const docs=await listDocs('organizations/'+ctx.orgId+'/structure');
+            const valid=new Set(costCenterSubcategories('UTL').map(s=>s.code));
+            const visible=[];
+            for(const node of docs){
+                const attrs=isObj(node.data.attributes)?node.data.attributes:{};
+                if(str(node.data.level)!=='cost_center'||str(node.data.status)==='inactive'||
+                    str(attrs.costType)!=='UTL')continue;
+                if(!await allowedAt(ctx,['MFG.view',...PERMS.utilitiesView],node.id,'read'))continue;
+                const selected=selectedCostCenterSubcategories(attrs);
+                const sources=costCenterSubcategories('UTL')
+                    .filter(s=>valid.has(s.code)&&selected.includes(s.code))
+                    .map(s=>({code:s.code,label:s.label}));
+                if(!sources.length)continue;
+                visible.push({id:node.id,name:str(node.data.name)||node.id,
+                    code:str(node.data.code),sources});
+            }
+            return {costCenters:visible.sort((x,y)=>x.name.localeCompare(y.name))};
+        }),
+    ],
     'POST /api/org/pln-mfg/foundation/references':[
         orgRoute('org.mfg.foundation.references','MFG.view',async ctx=>{
             const orgRoot='organizations/'+ctx.orgId;

@@ -163,7 +163,8 @@ test('Release selection requires explicit BOM classification and alternative to 
  const ui=read('src/org/ProductionFoundation.tsx');
  assert.ok(ui.includes('Alternative method identifier'));
  assert.ok(ui.includes('Intermediate tracking'));
- assert.ok(ui.includes('Adopted equipment utility supply'));
+ assert.ok(ui.includes("title='Utilities cost centre'"));
+ assert.ok(ui.includes("title='Source (activated cost-centre subcategory)'"));
  assert.ok(ui.includes('Unit category'));
  assert.ok(ui.includes('Material quantity unit'));
  assert.ok(ui.includes('Consumption options'));
