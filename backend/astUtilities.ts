@@ -137,6 +137,10 @@ async function saveRating(ctx:OrgContext, defs:Obj[], adopted:Set<string>){
     if(!def)throw new HttpError(400,'Select an adopted utility.');
     const det=capacityDeterminant(def),capacity=positive(ctx.body.capacity);
     if(det&&!capacity)throw new HttpError(400,'Enter a positive usable supply capacity in '+det.unit+'.');
+    // Coordinated with cost-centre allocation saves: rating edits and
+    // allocation changes must see the same allocation revision.
+    const allocationLockPath='organizations/'+ctx.orgId+'/utility_supply_allocation_locks/global';
+    const allocationLock=await getDoc(allocationLockPath);
     if(det){
         const allocations=await listDocs('organizations/'+ctx.orgId+'/cost_center_utility_supplies');
         const committed=allocations.flatMap(d=>rowsOf(d).filter(r=>str(r.code)===code))
@@ -151,7 +155,14 @@ async function saveRating(ctx:OrgContext, defs:Obj[], adopted:Set<string>){
     const prior=ratings[code];
     if(stableJson(prior??null)!==stableJson(ctx.body.expectedRating??null))throw new HttpError(409,'Supply rating changed. Reload before editing.');
     const next={...ratings,[code]:{key:det?.key??'',unit:det?.unit??'',capacity:det?capacity:null}};
-    if(!await writeDoc(assetCol(ctx.orgId)+'/'+asset.id,{...asset.data,utilitySupplyRatings:next},{updateTime:asset.updateTime}))throw new HttpError(409,'Source asset changed. Reload.');
+    const committed=await commitChecked([
+        {path:assetCol(ctx.orgId)+'/'+asset.id,data:{...asset.data,utilitySupplyRatings:next},
+            precondition:{updateTime:asset.updateTime}},
+        {path:allocationLockPath,data:{version:Number(allocationLock?.data.version||0)+1,
+            updatedAt:nowIso(),updatedBy:ctx.uid},
+            precondition:allocationLock?{updateTime:allocationLock.updateTime}:{exists:false}},
+    ]);
+    if(!committed)throw new HttpError(409,'Source asset rating or cost-centre allocations changed. Refresh and retry.');
     await audited(ctx,'ast.utilities.supply_rating',asset.id,{code,before:prior??null,after:next[code]});
     return {saved:true};
 }
