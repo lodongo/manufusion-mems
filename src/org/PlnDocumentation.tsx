@@ -37,7 +37,13 @@ const guide:Chapter[]=[
    'Disable, rather than delete, classifications already referenced by saved BOMs.',
   ]},
  ]},
- {id:'product',title:'2. Product identity and production form',phase:'Foundation',summary:'Define a product name/variant and what base production quantity means.',screen:'Product Configuration',topics:[
+ {id:'product',title:'2. Product identity and production form',phase:'Foundation',summary:'Define product identity, manufacturing-process groups and production units.',screen:'Product Configuration',topics:[
+  {title:'Manufacturing process classifications',purpose:'Group different SKUs by their shared manufacturing method, not their product variant or recipe.',steps:[
+   'Open Product Configuration → Manufacturing Process Classifications and create the process groups relevant to your organization.',
+   'Name each classification and describe the common manufacturing method it represents. No industry list is hard-coded.',
+   'Assign the classification when creating or editing a manufactured SKU; existing SKU IDs and site allocations are preserved.',
+   'One process classification can offer different approved routing alternatives when a production method or equipment changes.',
+  ],example:'Possible user-defined groups include continuous extrusion, batch blending, precision machining, textile weaving, industrial assembly and thermal processing. None are predefined classifications.'},
   {title:'Product/Variant',purpose:'Define reusable brand, flavour, grade or variant identity.',steps:[
    'Open Product Configuration → Product identity → Product/Variant.',
    'Add the product name and unique code; enter the description where useful.',
@@ -98,10 +104,10 @@ const guide:Chapter[]=[
  {id:'skus',title:'6. Materials & Products',phase:'Master data',summary:'Create finished and intermediate SKUs and connect them to configured product parameters.',screen:'Materials & Products',topics:[
   {title:'Create a manufactured SKU',purpose:'Establish the exact SKU identity and packaged output relationship.',steps:[
    'Open Materials & Products, then Add SKU.',
-   'Select Finished or Intermediate. Select the production site where applicable.',
+   'Select Finished or Intermediate and choose the manufacturing process classification. SKUs are organization-wide, not tied to a single site.',
    'For finished goods, choose Product/Variant, Production Form, Physical Container, Container Size, Commercial Packaging and size; transport packaging is optional.',
    'Check derived SKU name, physical size and packaged output conversion, then save the draft.',
-   'Open View SKU to review all authorized mapped manufacturing cost centres and commissioned speeds.',
+   'Open View SKU to inspect existing permitted site/cost-centre mappings and commissioned speeds. Classifying a SKU does not change these allocations.',
   ],example:'Fictional finished SKU: Demo Orange 400 mL PET, 12 bottles/case, 100 cases/pallet.'},
   {title:'Raw and packaging materials',purpose:'Create a properly sourced component reference for BOM use.',steps:[
    'Choose Raw/Input or Packaging Component.',
@@ -150,23 +156,23 @@ const guide:Chapter[]=[
  ]},
  {id:'routing',title:'9. Process Routings',phase:'Capacity & process',summary:'Create a process once, map compatible SKUs, or create a separate route when the process changes.',screen:'Process Routings',topics:[
   {title:'Create a routing',purpose:'Start a manufacturing method for one site.',steps:[
-   'Choose Add new route, select a site and one primary manufactured SKU.',
-   'Name the route and give it an alternative code, such as STANDARD or HEAT_TREATED.',
+   'Choose Add new route, select a site and manufacturing process classification, then select a primary SKU from that classification.',
+   'Name the route and freely edit its alternative code. Leave it blank while editing, but enter a valid code before saving. The internal routing master ID remains automatically generated.',
    'Open Stages to configure the common activity sequence, resources and dependencies.',
    'Save the draft. Saving does not execute production or issue materials.',
-  ],example:'Fictional: One beverage route with blending, bottle blowing, filling and packing.'},
+  ],example:'Fictional: An assembly process can involve material preparation, fitting and testing on shared resources.'},
   {title:'Same process, different recipes',purpose:'Reuse stages and resources instead of making duplicate routings.',steps:[
    'Open SKUs and select Map SKU for each additional compatible product.',
    'For each producing stage, choose that SKU’s actual output and corresponding BOM.',
    'Change the batch size or processing time only if it differs from the shared stage.',
    'Review every mapped SKU before submitting the route for approval.',
-  ],example:'Fictional: Orange and Lemon share the same line and process, each with its own BOM.'},
+  ],example:'Fictional: Different polymer grades may share extrusion equipment but use different recipes; beverage variants may share the same processing stages.'},
   {title:'Create a different route',purpose:'Use another route when the manufacturing process changes.',steps:[
    'Select Add new route to start from scratch or Create different route from this to copy an existing process.',
    'Change the stage order, resources or processing activities that genuinely differ.',
    'Keep the alternative code distinct. Add only SKUs that follow this route.',
    'Save and submit the alternative separately. An approved route alternative must be selected where more than one applies.',
-  ],example:'Fictional: A heat-treated beverage uses a different route because an additional processing stage is needed.'},
+  ],example:'Fictional: A fabricated part needing additional heat treatment or a product needing an extra sterilization stage can require another route.'},
   {title:'Review and approve',purpose:'Protect stage accuracy and existing maker-checker governance.',steps:[
    'Configure each stage’s resource, cost centre, output and predecessors.',
    'Use commissioned line speed, resource rate, batch cycle or time per unit as appropriate.',
