@@ -207,7 +207,7 @@ export function normalizeMaster(kind:MasterKind, raw:unknown): Obj {
                 if(!!supplyCostCenterId!==!!supplyUtilityCode)
                     throw new HttpError(400,'Choose both the cost centre and its configured utility supply.');
                 const utilityWorkCenterId=processSupplyKind==='UTILITY'&&!supplyCostCenterId?
-                    VALID_ID(c.utilityWorkCenterId,'Historical utility equipment location'):'';
+                    VALID_ID(c.utilityWorkCenterId,'Registered utility location'):'';
                 const utilityCode=processSupplyKind==='UTILITY'&&!supplyCostCenterId?
                     VALID_ID(c.utilityCode,'Historical registered utility'):'';
 
@@ -221,7 +221,7 @@ export function normalizeMaster(kind:MasterKind, raw:unknown): Obj {
                 seen.add(key);
                 return {line:i+1,source:'PROCESS_SUPPLY',processSupplyKind,
                     skuId,materialId,warehouseId:'',utilityWorkCenterId,utilityCode,
-                    supplyCostCenterId,supplyUtilityCode,
+                    ...(supplyCostCenterId?{supplyCostCenterId,supplyUtilityCode}:{}),
                     quantity,uom,scrapPct,quantityMethod,deliveryMode,
                     requiredFlowPerHour,bufferCapacity,bufferUsable};
             }
