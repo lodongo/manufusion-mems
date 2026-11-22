@@ -32,13 +32,13 @@ test('BOM create and edit show names across output, input, quantity descriptions
     assert.equal(ui.includes(">{outputUom}</p>"),false);
 });
 
-test('BOM material unit category and subcategory use the published measurement-system hierarchy',()=>{
+test('BOM material units are selected by category and unit without measurement-system filters',()=>{
     const ui=read('src/org/ProductionFoundation.tsx');
     const setup=read('backend/mfgSkuConfiguration.ts');
     const sku=read('src/org/MfgSkuSetup.tsx');
     assert.ok(ui.includes("function BomMaterialUnitSelector"));
     assert.ok(ui.includes("title='Unit category'"));
-    assert.ok(ui.includes("title='Unit subcategory (measurement system)'"));
+    assert.ok(!ui.includes("title='Unit subcategory (measurement system)'"));
     assert.ok(ui.includes("title='Material quantity unit'"));
     assert.ok(ui.includes("onChange={code=>changeComponentUnit(i,code)}"));
     assert.ok(ui.includes("allowedUnitCodes={units(c.skuId,c.uom,unitBasis)"));

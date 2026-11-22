@@ -245,9 +245,11 @@ test('approved versions honor effective dates and exclude unapproved drafts',()=
  assert.throws(()=>selectEffectiveRelease(versions,'not-a-date'),/Valid planning date/);
 });
 
-test('manufacturing release prevents editing of submitted and active versions',()=>{
+test('manufacturing release blocks submitted drafts, permits overwriting same-code BOMs and protects other active masters',()=>{
  const source=read('backend/plnMfgFoundation.ts'),release=read('backend/plnMfgRelease.ts');
- assert.ok(source.includes("['pending_approval','active'].includes"));
+ assert.ok(source.includes("str(old.data.status)==='pending_approval'"));
+ assert.ok(source.includes("kind!=='boms'&&str(old.data.status)==='active'"));
+ assert.ok(source.includes("kind==='boms'?'mfg.bom.overwrite'"));
  assert.ok(release.includes('Independent maker-checker approval is mandatory'));
  assert.ok(release.includes('ctx.uid===str(doc.data.createdBy)'));
  assert.ok(release.includes('referenceChecks(ctx,kind,doc.data,id)'));
