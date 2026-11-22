@@ -290,6 +290,14 @@ export async function referenceChecks(ctx:OrgContext,kind:MasterKind,item:Obj,ex
         if(str(site.data.level)!=='site'||str(site.data.status)==='inactive')throw new HttpError(400,'Choose an active organization site.');
     }
     if(kind==='items'){
+        const processClassId=str(item.processClassId);
+        if(processClassId){
+            if(!['FINISHED','INTERMEDIATE'].includes(str(item.category)))
+                throw new HttpError(400,'Manufacturing process classification applies only to produced SKUs.');
+            const processClass=await getDoc('organizations/'+ctx.orgId+'/mfg_sku_parameters/'+processClassId);
+            if(!processClass||str(processClass.data.kind)!=='processClasses'||processClass.data.enabled===false)
+                throw new HttpError(400,'Choose an active manufacturing process classification from Product Configuration.');
+        }
         const {policy}=await mfgMaterialPolicyForOrg(ctx.orgId);
         if(str(item.sourceMode)==='DIRECT'&&
             (str(item.category)==='RAW'?!policy.allowRawDirect:!policy.allowPackagingDirect))
@@ -395,10 +403,18 @@ export async function referenceChecks(ctx:OrgContext,kind:MasterKind,item:Obj,ex
             throw new HttpError(400,'The BOM introduces a circular manufacturing dependency.');
     }
     if(kind==='routings'){
+        const processClassId=str(item.processClassId);
+        if(processClassId){
+            const processClass=await getDoc('organizations/'+ctx.orgId+'/mfg_sku_parameters/'+processClassId);
+            if(!processClass||str(processClass.data.kind)!=='processClasses'||processClass.data.enabled===false)
+                throw new HttpError(400,'Routing process classification must exist and be active in Product Configuration.');
+        }
         for(const skuId of routingSkuIds(item)){
          const routed=await getDoc(DOC(ctx.orgId,'items',skuId));
          if(!routed||!['FINISHED','INTERMEDIATE'].includes(str(routed.data.category)))
              throw new HttpError(400,'Routing SKU '+skuId+' is not an eligible manufactured SKU.');
+         if(processClassId&&str(routed.data.processClassId)!==processClassId)
+             throw new HttpError(400,'SKU '+skuId+' does not belong to the routing manufacturing process classification.');
          const variant=routingForSku(item,skuId);
          if(!variant)throw new HttpError(400,'Cannot resolve the SKU allocation '+skuId+'.');
          for(const o of ARR(variant.operations)){
