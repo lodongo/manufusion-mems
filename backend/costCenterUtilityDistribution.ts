@@ -9,6 +9,8 @@ import {orgRoute,type OrgContext} from './guards';
 import {allowedAt,PERMS,requireAt,audited} from './scopeGuard';
 import {safetyCatalogue} from './safConfiguration';
 import {isInternalUtilitySupply} from './utilitySupplyPolicy';
+import {isManufacturingCostType} from './plnCostCenterCapacity';
+import {selectedCostCenterSubcategories,costCenterSubcategoryLabel} from '../src/shared/costCenterTaxonomy';
 import {reviewUtilityDistribution,type UtilityConsumer,type UtilityDefinition} from '../src/shared/utilityDistributionCapacity';
 
 const ID=/^[A-Za-z0-9_-]{1,120}$/;
@@ -168,13 +170,50 @@ export async function validateEquipmentUtilityDistribution(ctx:OrgContext,
  return {costCenterId,capability:cap};
 }
 /** Exposes only authorized, summary-level utility capabilities for BOM process supply. */
-export async function costCenterUtilityOptions(ctx:OrgContext){
- const [docs,defs]=await Promise.all([listDocs(root(ctx.orgId)),utilityDefinitions(ctx.orgId)]);
- const output=[];
+
+/** Match the category and manufactured product name against the cost-centre
+ * taxonomy. Unknown or legacy subcategories remain eligible as fallback; a
+ * specific taxonomy match takes precedence when it exists. */
+export function bomCostCenterRelevance(category:string,productName:string,subcategoryLabels:string[]):number {
+ const name=productName.toLowerCase(),cat=category.toUpperCase();
+ let score=0;
+ for(const label of subcategoryLabels){
+  const lower=label.toLowerCase();
+  if(name.includes('syrup')&&lower.includes('syrup'))score=Math.max(score,100);
+  if(name.includes('water')&&lower.includes('water treatment'))score=Math.max(score,100);
+  if(cat==='INTERMEDIATE'&&/(intermediate|ingredient preparation|batch mixing|blending|raw material preparation)/.test(lower))
+   score=Math.max(score,40);
+  if(cat==='FINISHED'&&/(filling|packaging|labelling|pallet|assembly|production)/.test(lower))
+   score=Math.max(score,40);
+  if(/(food and beverage processing|other manufacturing operations)/.test(lower))
+   score=Math.max(score,10);
+ }
+ return score;
+}
+export async function costCenterUtilityOptions(ctx:OrgContext,outputSkuId=''){
+ if(outputSkuId&&!ID.test(outputSkuId))throw new HttpError(400,'Invalid BOM output material.');
+ const [docs,defs,costTypeDoc,outputSku]=await Promise.all([
+   listDocs(root(ctx.orgId)),utilityDefinitions(ctx.orgId),
+   getDoc('module_workspaces/FIN/metadata/costCenterTypes'),
+   outputSkuId?getDoc('organizations/'+ctx.orgId+'/mfg_items/'+outputSkuId):Promise.resolve(null),
+ ]);
+ if(outputSkuId&&!outputSku)throw new HttpError(404,'Select an existing manufactured output.');
+ const costTypes=costTypeDoc?.data.items;
+ const output:{costCenterId:string;costCenterName:string;siteId:string;
+    code:string;label:string;capacity:number|null;capacityUnit:string;
+    determinantKey:string;demand:number;percentage:number|null;status:string;ready:boolean;
+    values:Record<string,unknown>;sourceCount:number;unknown:number;
+    costCenterSubcategories:string[];relevance:number}[]=[];
  for(const d of docs){
   const cc=await getDoc(structure(ctx.orgId,d.id));
   if(!cc||str(cc.data.level)!=='cost_center'||str(cc.data.status)==='inactive')continue;
+  const attrs=isObj(cc.data.attributes)?cc.data.attributes:{};
+  const costType=str(attrs.costType);
+  if(!isManufacturingCostType(costType,costTypes))continue;
   if(!await allowedAt(ctx,['MFG.view',...PERMS.utilitiesView],d.id,'read'))continue;
+  const subcategories=selectedCostCenterSubcategories(attrs);
+  const labels=subcategories.map(code=>costCenterSubcategoryLabel(costType,code));
+  const relevance=outputSku?bomCostCenterRelevance(str(outputSku.data.category),str(outputSku.data.name),labels):0;
   const siteId=await location(ctx.orgId,cc);
   for(const item of rows(d)){
    const def=defs.find(x=>str(x.code)===str(item.code));
@@ -184,10 +223,15 @@ export async function costCenterUtilityOptions(ctx:OrgContext){
     code:cap.code,label:cap.label,capacity:cap.capacity,
     capacityUnit:cap.review.determinant?.unit||'',determinantKey:cap.review.determinant?.key||'',
     demand:cap.review.demand,percentage:cap.review.percentage,status:cap.review.status,
-    ready:cap.ready,values:cap.values,sourceCount:cap.sources.length,unknown:cap.review.unknown});
+    ready:cap.ready,values:cap.values,sourceCount:cap.sources.length,unknown:cap.review.unknown,
+    costCenterSubcategories:labels,relevance});
   }
  }
- return output;
+ // Only show categorically matched manufacturing centres where a matching
+ // supply actually exists. If none match, do not hide legitimate legacy sites.
+ const matched=outputSku&&output.some(s=>s.relevance>0);
+ return output.filter(s=>!matched||s.relevance>0)
+   .sort((a,b)=>b.relevance-a.relevance||a.costCenterName.localeCompare(b.costCenterName));
 }
 async function listSourceAssets(ctx:OrgContext,siteId:string,code:string){
  const all=await listDocs(assetsRoot(ctx.orgId));
@@ -230,7 +274,7 @@ export const costCenterUtilityDistributionRoutes={
  ],
  'POST /api/org/ast/cost-center-utilities/options':[
   orgRoute('org.ast.cost_center_utilities.bom_options','MFG.view',async ctx=>({
-   supplies:await costCenterUtilityOptions(ctx)
+   supplies:await costCenterUtilityOptions(ctx,str(ctx.body.outputSkuId))
   })),
  ],
  'POST /api/org/ast/cost-center-utilities/save':[
