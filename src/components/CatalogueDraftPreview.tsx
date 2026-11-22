@@ -32,6 +32,9 @@ export default function CatalogueDraftPreview({ kind }: { kind: Kind }) {
     const rows = useMemo(() => array(fileData?.[ITEMS[kind]]), [fileData, kind]);
     const referenceOnly=!!fileData&&!!Object.keys(obj(fileData.financialDimensions)).length&&
         !Object.keys(obj(fileData.financialIntegration)).length;
+    const materialTemplatesReady=kind==='materials'&&
+        obj(fileData?.postingConfiguration).defaultFinancialApprovalRequired===false&&
+        text(obj(fileData?.postingRulesLayout).location)==='families[].postingRule';
     const selected = useMemo(() => rows.find(x => text(x.code) === selectedCode), [rows, selectedCode]);
     const statusOf = (x: Row) => text(kind === 'gl_accounts' ? obj(x.accountDetermination).mappingStatus :
         obj(obj(x.accounting).glResolution).mappingStatus)||
@@ -119,7 +122,7 @@ export default function CatalogueDraftPreview({ kind }: { kind: Kind }) {
         <Card>
             <div className='space-y-2'>
                 <h2 className='font-semibold text-white'>Preview new-model financial fields</h2>
-                <p className='text-xs text-slate-400'>Inspect an uploaded reference file locally before Finance approval. Preview never imports, enables, or posts a GL account.</p>
+                <p className='text-xs text-slate-400'>Inspect a catalogue locally before import. Preview does not activate GL accounts or post accounting entries.</p>
                 <label className='flex h-11 cursor-pointer items-center justify-center rounded-xl border border-slate-600 bg-slate-800 px-3 text-sm font-medium text-white'>
                     {busy ? 'Reading draft…' : 'Choose draft JSON to preview'}
                     <input type='file' accept='.json,application/json' className='sr-only' onChange={onFile} disabled={busy} />
@@ -128,9 +131,9 @@ export default function CatalogueDraftPreview({ kind }: { kind: Kind }) {
                 {fileData && (
                     <div className='space-y-3'>
                         <div className='rounded-xl border border-amber-700/50 bg-amber-900/20 p-3 text-sm text-amber-200'>
-                            <strong>{referenceOnly?'REFERENCE ONLY — FINANCE APPROVAL REQUIRED':
+                            <strong>{materialTemplatesReady?'GL POSTING TEMPLATES VALIDATED — TENANT SETUP REQUIRED':referenceOnly?'REFERENCE ONLY — FINANCE REVIEW REQUIRED':
                                 display(obj(fileData.financialIntegration).catalogueRelease)}</strong>
-                            · {referenceOnly?'Catalog candidates can be imported, but no GL posting authority is granted':'Integrated Finance review; not active or approved'} · {fileName}
+                            · {materialTemplatesReady?'No separate Finance approval is required by default; actual postings still require valid legal-entity accounting configuration.':referenceOnly?'Catalog candidates can be imported, but no GL posting authority is granted':'Integrated Finance review; not active or approved'} · {fileName}
                         </div>
                         <div className='flex flex-wrap gap-2 text-xs'>
                             <Badge>{rows.length.toLocaleString()} entries</Badge>
@@ -229,7 +232,7 @@ export default function CatalogueDraftPreview({ kind }: { kind: Kind }) {
                                         'Candidate inventory GLs': obj(obj(selected.accountingIntegration).defaultCandidates).inventoryGLCandidates,
                                         'Candidate consumption GLs': obj(obj(selected.accountingIntegration).defaultCandidates).consumptionGLCandidates,
                                         'Financial dimensions profile': acc.dimensionProfile,
-                                        'Financial release': referenceOnly?'REFERENCE_ONLY_FINANCE_REVIEW_REQUIRED':obj(fileData?.financialIntegration).catalogueRelease,
+                                        'Financial release': materialTemplatesReady?'VALIDATED_TEMPLATE_TENANT_ACTIVATION_PENDING':referenceOnly?'REFERENCE_ONLY_FINANCE_REVIEW_REQUIRED':obj(fileData?.financialIntegration).catalogueRelease,
                                     }).filter(([,v]) => v !== undefined).map(([label, value]) => (
                                         <div key={label} className='min-w-0 rounded-lg bg-slate-900 p-2'>
                                             <p className='text-slate-400'>{label}</p>
