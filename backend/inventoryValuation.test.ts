@@ -36,3 +36,14 @@ test('local and selected currency conversion uses configured USD-base quotations
     assert.equal(convertStockCurrency(50,'USD','EUR',{}),null);
     assert.equal(convertStockCurrency(50,'','EUR',rates),null);
 });
+
+test('admin UoM records without multipliers use matching canonical PRC conversion only',()=>{
+    const old=[
+        {code:'UOM-01-003',label:'Metric tonne',active:true},
+        {code:'UOM-01-002',label:'Kilogram',active:true},
+    ];
+    assert.equal(unitPricePerStockUnit(50000,'UOM-01-003','UOM-01-002',old),50);
+    assert.equal(unitPricePerStockUnit(50000,'UOM-01-003','UOM-01-002',[
+        {...old[0],active:false},old[1],
+    ]),null);
+});

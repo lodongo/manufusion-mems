@@ -36,11 +36,23 @@ export function unitPricePerStockUnit(
     if(purchaseUom.trim().toLowerCase()===stockUom.trim().toLowerCase())return price;
     const units=configuredUnits??PROCUREMENT_UNITS;
     const purchase=resolveUnit(purchaseUom,units), stock=resolveUnit(stockUom,units);
-    if(!purchase||!stock)return null;
-    const from=Number(purchase.multiplier),to=Number(stock.multiplier);
+    // The administered registry may contain older records with a label/code but no
+    // numeric multiplier. Enrich *matching enabled units only* from the canonical
+    // PRC registry; do not guess conversions for unknown or disabled units.
+    const canonical=(u:ValuationUnit|null):ValuationUnit|null=>{
+        if(!u)return null;
+        if(Number.isFinite(Number(u.multiplier))&&Number(u.multiplier)>0&&u.baseUnit)return u;
+        const match=PROCUREMENT_UNITS.find(x=>x.code.toLowerCase()===String(u.code||'').toLowerCase());
+        return match?{...match,...u,baseUnit:u.baseUnit||match.baseUnit,
+            multiplier:Number(u.multiplier)>0?u.multiplier:match.multiplier,
+            categoryCode:u.categoryCode||match.categoryCode}:u;
+    };
+    const fromUnit=canonical(purchase),toUnit=canonical(stock);
+    if(!fromUnit||!toUnit)return null;
+    const from=Number(fromUnit.multiplier),to=Number(toUnit.multiplier);
     if(!Number.isFinite(from)||from<=0||!Number.isFinite(to)||to<=0)return null;
-    if(!purchase.baseUnit||!stock.baseUnit||purchase.baseUnit!==stock.baseUnit)return null;
-    if(purchase.categoryCode&&stock.categoryCode&&purchase.categoryCode!==stock.categoryCode)return null;
+    if(!fromUnit.baseUnit||!toUnit.baseUnit||fromUnit.baseUnit!==toUnit.baseUnit)return null;
+    if(fromUnit.categoryCode&&toUnit.categoryCode&&fromUnit.categoryCode!==toUnit.categoryCode)return null;
     const cost=price*to/from;
     return Number.isFinite(cost)?cost:null;
 }

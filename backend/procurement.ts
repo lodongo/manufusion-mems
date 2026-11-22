@@ -1639,6 +1639,36 @@ export const procurementRoutes = {
         const entityById=new Map(legalEntities.map(x=>[x.id,x.data]));
         const customUnits=Array.isArray(uomDoc?.data.items)?uomDoc.data.items.filter(isObj):[];
         const configuredUnits=customUnits.length?customUnits:undefined;
+        // An entity's currency is normally stored on the Organization Design
+        // legal_entity structure node (attributes.currencyCode). Legacy
+        // installations may also have standalone legal_entities records.
+        const legalCurrency=(entityId:string):string=>{
+            const node=nodeMap.get(entityId)?.data;
+            const attr=isObj(node?.attributes)?node.attributes:{};
+            const legacy=entityById.get(entityId);
+            const legacyAttr=isObj(legacy?.attributes)?legacy.attributes:{};
+            return (str(attr.currencyCode)||str(attr.localCurrency)||
+                str(node?.currencyCode)||str(node?.localCurrency)||
+                str(legacyAttr.currencyCode)||str(legacy?.localCurrency)||
+                str(legacy?.currencyCode)).toUpperCase();
+        };
+        const owningLegalEntity=(warehouseId:string,materialEntityId:string):string=>{
+            const warehouse=warehouseById.get(warehouseId);
+            const explicit=str(warehouse?.legalEntityId)||materialEntityId;
+            if(explicit && legalCurrency(explicit))return explicit;
+            // Warehouses are attached to sites; follow the structure parents.
+            let current=warehouseId;
+            const seen=new Set<string>();
+            for(let i=0;i<20&&current&&!seen.has(current);i++){
+                seen.add(current);
+                const node=nodeMap.get(current)?.data;
+                if(str(node?.level)==='legal_entity')return current;
+                current=str(node?.parentId)||str(current===warehouseId?warehouse?.parentId:'');
+            }
+            // An explicit entity ID is retained even if its currency has not
+            // yet been entered. Never pick another entity's currency.
+            return explicit;
+        };
         const currencyEntries=(Array.isArray(currencyDoc?.data.items)?currencyDoc.data.items:[])
             .filter(isObj).map(c=>({code:str(c.code).toUpperCase(),rate:Number(c.unitsPerUsd),enabled:c.enabled!==false}))
             .filter(c=>/^[A-Z]{3}$/.test(c.code)&&c.enabled&&Number.isFinite(c.rate)&&c.rate>0);
@@ -1705,22 +1735,27 @@ export const procurementRoutes = {
                     max!==null&&physical!==null&&physical>max?'Overstock':
                     min!==null&&net!==null&&net<min?'Understock':'Within limits';
                 const purchase=purchasing.get(m.id+'_'+warehouseId),unitPrice=level(purchase?.unitPrice);
-                const priceUom=str(purchase?.purchaseUom),stockUom=str(m.data.uom);
-                const priceCurrency=str(purchase?.priceCurrency).toUpperCase();
-                const entityId=str(warehouseById.get(warehouseId)?.legalEntityId)||str(m.data.legalEntityId);
-                const entity=entityById.get(entityId);
-                const localCurrency=(str(entity?.localCurrency)||str(entity?.currencyCode)||
+                const stockUom=str(m.data.uom);
+                // Material registration defines its UoM as stocked, issued AND ordered.
+                // Procurement can override the purchase UoM; without an override
+                // the source UoM is the material's registered ordering unit.
+                const priceUom=str(purchase?.purchaseUom)||stockUom;
+                const entityId=owningLegalEntity(warehouseId,str(m.data.legalEntityId));
+                const localCurrency=(legalCurrency(entityId)||
                     str(org?.data.localCurrency)||str(org?.data.currencyCode)).toUpperCase();
+                // The detail page already defaults an unspecified supplier currency
+                // to the legal-entity currency. Preserve that same interpretation.
+                const priceCurrency=(str(purchase?.priceCurrency)||localCurrency).toUpperCase();
                 const unitCost=unitPrice!==null?unitPricePerStockUnit(unitPrice,priceUom,stockUom,configuredUnits):null;
                 const unitCostLocal=unitCost!==null?convertStockCurrency(unitCost,priceCurrency,localCurrency,rates):null;
                 const netStockValue=ready&&net!==null&&unitCostLocal!==null?net*unitCostLocal:null;
                 const valuationReason=!ready?'Stock journal must be posted and reconciled':
-                    unitPrice===null?'Procurement unit price is not configured':
-                    !priceUom||!stockUom?'Purchase or stock UoM is missing':
-                    unitCost===null?'No compatible, enabled UoM conversion in the Procurement units master':
-                    !priceCurrency?'Supplier price currency is not configured':
-                    !localCurrency?'Local currency is not configured for the legal entity':
-                    unitCostLocal===null?'Configured exchange rate is unavailable for this currency pair':'';
+                    unitPrice===null?'Set Unit Price in Procurement Information':
+                    !priceUom||!stockUom?'Configure the purchase and stock units of measure':
+                    unitCost===null?'Purchase and stock units need a compatible enabled conversion':
+                    !localCurrency?'Configure local currency in Organization Design → Legal entity':
+                    !priceCurrency?'Configure the supplier price currency':
+                    unitCostLocal===null?'Configure the exchange rate for '+priceCurrency+' → '+localCurrency:'';
                 items.push({
                     id:m.id,materialNumber:str(m.data.materialNumber),name:str(m.data.name),
                     shortText:str(m.data.shortText),categoryCode:str(m.data.categoryCode),
@@ -1732,7 +1767,9 @@ export const procurementRoutes = {
                     warehouseId,warehouseName:wh.name,warehouseCode:wh.code,
                     status:str(m.data.status),quantityOnHand:physical,netAvailable:net,
                     netStockValue,stockCurrency:localCurrency,unitCostLocal,priceCurrency,priceUom,
-                    purchaseUnitPrice:unitPrice,valuationReason,
+                    purchaseUnitPrice:unitPrice,valuationReason,valuationSource:'Procurement Information',
+                    valuationUnitSource:purchase?.purchaseUom?'procurement':'material master default',
+                    priceCurrencyDefaulted:!str(purchase?.priceCurrency),
                     stockLedgerAvailable:ready,stockStatus,emptyBin,
                     minimumLevel:min,maximumLevel:max,createdAt:str(m.data.createdAt),
                 });

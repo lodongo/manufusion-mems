@@ -42,6 +42,9 @@ interface Item {
     priceUom: string;
     priceCurrency: string;
     valuationReason: string;
+    valuationSource?: string;
+    valuationUnitSource?: string;
+    priceCurrencyDefaulted?: boolean;
     stockStatus: 'Not yet tracked'|'Unreconciled'|'Empty bin'|'Overstock'|'Understock'|'Within limits';
     stockLedgerAvailable: boolean;
     createdAt: string;
@@ -123,7 +126,14 @@ const COLUMNS = (selectedCurrency: string, rates: Record<string, number>, mixedL
             const cost=convertDisplayed(x.unitCostLocal,x.stockCurrency,selectedCurrency,rates);
             const curr=selectedCurrency||x.stockCurrency;
             return value===null ?
-                <span className='text-muted' title={x.valuationReason||'Configured exchange rate is unavailable'}>—</span> :
+                <span className='block max-w-44 text-xs leading-snug text-amber-700 dark:text-amber-300'
+                    title={x.valuationReason||'Valuation unavailable'}>
+                    {x.purchaseUnitPrice===null||x.purchaseUnitPrice===undefined?'Price not set':
+                        x.valuationReason?.includes('currency')?'Currency setup':
+                        x.valuationReason?.includes('exchange rate')?'FX rate missing':
+                        x.valuationReason?.includes('units')?'UoM mismatch':'Value unavailable'}
+                    <span className='mt-1 block text-[10px] font-normal opacity-80'>{x.valuationReason||'Open Procurement Information to review'}</span>
+                </span> :
                 <span className='font-semibold tabular-nums text-ink' title={`Procurement: ${x.priceCurrency} ${x.purchaseUnitPrice ?? '—'} per ${x.priceUom||'purchase unit'}. Normalized to ${x.uom||'stock unit'}.`}>
                     {curr} {value.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}
                     {cost!==null&&<span className='block text-xs font-normal text-slate-500'>@ {curr} {cost.toLocaleString(undefined,{maximumFractionDigits:4})}/{x.uom||'unit'}</span>}
@@ -152,6 +162,7 @@ export default function InventoryOnHand() {
     const chosen = warehouses.find((w) => w.id === warehouse);
     const rows = useMemo(() => (data?.items || []).filter((x) => !chosen || x.warehouseId === chosen.id), [data, chosen]);
     const tracked = rows.filter((x) => x.stockLedgerAvailable).length;
+    const valued=rows.filter((x)=>x.netStockValue!==null&&Number.isFinite(x.netStockValue)).length;
     const currencyOptions=data?.currencies||[];
     const rates=useMemo(()=>Object.fromEntries(currencyOptions.map(x=>[x.code,x.rate])),[data]);
     const mixedLocal=new Set(rows.map(x=>x.stockCurrency).filter(Boolean)).size>1;
@@ -240,8 +251,8 @@ export default function InventoryOnHand() {
                                 </section>
                             )}
                             <p className='px-1 text-xs text-slate-400'>
-                                {rows.length} materials · {warehouses.length} warehouses · {tracked} with stock ledger (reconciled)
-                                <span className='mt-1 block'>Overstock: red · Understock: yellow · Empty bin: orange. Net available excludes reserved, quarantined, damaged and expired stock.</span>
+                                {rows.length} materials · {warehouses.length} warehouses · {tracked} with stock ledger (reconciled) · {valued} valued
+                                <span className='mt-1 block'>Overstock: red · Understock: yellow · Empty bin: orange. Net available excludes reserved, quarantined, damaged and expired stock. Items without valuation show the exact configuration issue; tap the item to correct Procurement Information.</span>
                             </p>
                             <button
                                 type='button'

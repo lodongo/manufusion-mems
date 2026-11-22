@@ -28,3 +28,14 @@ test('inventory: configured currency rates convert local values without altering
     assert.equal(convertStockCurrency(50000,'KES','USD',fx),50000/130);
     assert.equal(convertStockCurrency(50,'USD','EUR',{}),null);
 });
+
+test('admin UoM records without multipliers use matching canonical PRC conversion only',()=>{
+    const old=[
+        {code:'UOM-01-003',label:'Metric tonne',active:true},
+        {code:'UOM-01-002',label:'Kilogram',active:true},
+    ];
+    assert.equal(unitPricePerStockUnit(50000,'UOM-01-003','UOM-01-002',old),50);
+    assert.equal(unitPricePerStockUnit(50000,'UOM-01-003','UOM-01-002',[
+        {...old[0],active:false},old[1],
+    ]),null);
+});
