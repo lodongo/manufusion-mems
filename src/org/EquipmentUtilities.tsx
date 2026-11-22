@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { utilityOptionLabel } from '../lib/iso8573Labels';
-import { AssetForm } from './AssetRegister';
-import { CapacityLine, type SupplySummary, type SourceOption } from './AssetUtilitySupplies';
+import { CapacityLine, type SupplySummary } from './AssetUtilitySupplies';
+import {reviewUtilityDistribution,type UtilityCapacityReview} from '../shared/utilityDistributionCapacity';
+import {navigate} from '../lib/route';
 import { ChevronRight, Plus, Save, Trash2, X, Zap } from 'lucide-react';
 import { callBackend } from '../lib/backend';
 import { Alert, Field, SelectField } from '../components/ui';
@@ -25,6 +26,8 @@ interface Entry {
     isInternalSupply?: boolean;
     supplyLinkRule?: number;
     sourceAssetTag?: string;
+    sourceCostCenterId?:string;
+    sourceCostCenterName?:string;
     energyTag?: string;
     energyColor?: string;
     sourceAssetName?: string;
@@ -62,7 +65,6 @@ function UtilityEditor({
     utility,
     initial,
     workCenterId,
-    initialSource,
     initialInternal,
     busy,
     error,
@@ -72,26 +74,37 @@ function UtilityEditor({
     utility: Utility;
     initial: Record<string, string | number>;
     workCenterId:string;
-    initialSource:string;
     initialInternal:boolean;
     busy: boolean;
     error: string;
     onCancel: () => void;
-    onSave: (values: Record<string, string | number>, sourceAssetTag:string,isInternalSupply:boolean) => void;
+    onSave: (values: Record<string, string | number>, sourceCostCenterId:string,isInternalSupply:boolean) => void;
 }) {
     const attrs = utility.attributes ?? [];
-    const sources=useLoad(()=>callBackend<{sources:SourceOption[];determinant:SupplySummary['determinant']}>('/api/org/ast/utilities/read',{workCenterId,code:utility.code}),[workCenterId,utility.code]);
-    const [source,setSource]=useState(initialSource);
+    const sources=useLoad(()=>callBackend<{
+        determinant:SupplySummary['determinant'];
+        costCenterSupply:{costCenterId:string;costCenterName:string;
+         equipmentHasAsset?:boolean;missingUtility:boolean;missingAsset:boolean;
+         supply:{code:string;label:string;capacity:number|null;ready:boolean;
+          values:Record<string,unknown>;sources:Array<{assetTag:string}>;
+          review:UtilityCapacityReview}|null};
+    }>('/api/org/ast/utilities/read',{workCenterId,code:utility.code}),[workCenterId,utility.code]);
     const [internal,setInternal]=useState(initialInternal);
-    const [creating,setCreating]=useState(false);
-    const [rating,setRating]=useState('');
-    const [ratingBusy,setRatingBusy]=useState(false);
-    const [ratingError,setRatingError]=useState('');
-    const option=sources.data?.sources.find(x=>x.tag===source);
     const determinant=sources.data?.determinant;
-    const [values, setValues] = useState<Record<string, string>>(() => Object.fromEntries(attrs.map((a) => [a.key, initial[a.key] === undefined || initial[a.key] === null ? '' : String(initial[a.key])])));
+    const allocation=sources.data?.costCenterSupply;
+    const supply=allocation?.supply;
+    const [values, setValues] = useState<Record<string, string>>(() =>
+        Object.fromEntries(attrs.map(a=>[a.key,initial[a.key]===undefined||initial[a.key]===null?'':String(initial[a.key])])));
     const demand=determinant?Number(values[determinant.key]):0;
-    const sourceReady=internal||!!option&&(!determinant||!!option.capacity&&Number.isFinite(demand)&&demand>0);
+    const localReview=supply?reviewUtilityDistribution(utility,supply.values,supply.capacity,
+        [...supply.review.consumers.filter(c=>c.equipmentId!==workCenterId).map(c=>({
+            equipmentId:c.equipmentId,name:c.name,values:
+                c.demand!==null&&determinant?{[determinant.key]:c.demand}:{} ,
+            legacy:c.legacy,hasAsset:c.hasAsset,
+        })),{equipmentId:workCenterId,name:'This equipment',values,legacy:false,hasAsset:true}]):null;
+    const sourceReady=internal||!!allocation&&!allocation.missingUtility&&
+        !!supply?.ready&&(!determinant||!!supply.capacity&&Number.isFinite(demand)&&demand>0)&&
+        localReview?.status!=='overload'&&localReview?.status!=='incompatible';
     const [touched, setTouched] = useState<string[]>([]);
     const [showAll, setShowAll] = useState(Object.keys(initial).length > 0);
 
@@ -108,11 +121,9 @@ function UtilityEditor({
             const v = (values[a.key] ?? '').trim();
             if (v) out[a.key] = a.type === 'number' ? Number(v) : v;
         }
-        onSave(out,internal?'':source,internal);
+        onSave(out,internal?'':allocation?.costCenterId||'',internal);
     };
 
-    const saveRating=async()=>{if(!option||!determinant)return;setRatingBusy(true);setRatingError('');try{await callBackend('/api/org/ast/utilities/save',{assetTag:source,code:utility.code,capacity:Number(rating),expectedRating:option.rating});setRating('');sources.reload();}catch(err){setRatingError(messageOf(err));}finally{setRatingBusy(false);}};
-    if(creating)return <AssetForm onCancel={()=>setCreating(false)} onDone={tag=>{setSource(tag);setCreating(false);sources.reload();}}/>;
     return (
         <Screen
             title={utility.label}
@@ -124,7 +135,7 @@ function UtilityEditor({
                         <X className='h-4 w-4' />
                         <span className='hidden sm:inline'>Cancel</span>
                     </Button>
-                    <Button busy={busy} disabled={problems.length > 0 || !sourceReady || (!internal&&sources.loading) || ratingBusy} onClick={save}>
+                    <Button busy={busy} disabled={problems.length > 0 || !sourceReady || (!internal&&sources.loading)} onClick={save}>
                         {!busy && <Save className='h-4 w-4' />}
                         Save
                     </Button>
@@ -141,27 +152,56 @@ function UtilityEditor({
                 <p className='text-xs text-muted'>Fields marked * are required. Save unlocks once they are filled in.</p>
             )}
             <Card className='space-y-3'>
-                <label className='flex min-h-11 items-center gap-3 font-semibold text-ink'><input type='checkbox' checked={internal} onChange={e=>{setInternal(e.target.checked);setRatingError('');}} className='h-5 w-5 accent-emerald-500'/> Is internal supply?</label>
-                <p className='text-xs text-muted'>{internal?'Generated within this equipment. No separate supplying asset is required; Safety requirements still apply.':'Supplied from outside this equipment. Link the registered supplying asset and configure its capacity.'}</p>
-                {!internal&&<><h3 className='font-semibold text-ink'>Supplying asset *</h3>
-                <p className='text-xs text-muted'>Select a registered source at this site. Multiple machines may use the same source.</p>
-                {sources.error&&<Alert tone='error'>{sources.error}</Alert>}
-                {sources.loading&&<Spinner/>}
-                <SelectField id='utility-source' label='Supply asset *' value={source} onChange={e=>{setSource(e.target.value);setRating('');setRatingError('');}}>
-                    <option value=''>Select registered asset…</option>
-                    {sources.data?.sources.map(a=><option key={a.tag} value={a.tag}>{a.tag} · {a.name} · {a.className} ({a.assetStatus})</option>)}
-                </SelectField>
-                <Button variant='secondary' onClick={()=>setCreating(true)}><Plus className='h-4 w-4'/> Create new supply asset</Button>
-                {source&&!option&&!sources.loading&&<Alert tone='warn'>Supply asset is unavailable or outside your scope. Select an eligible asset.</Alert>}
-                {option&&option.assetStatus!=='active'&&<Alert tone='warn'>The source asset is not fully approved. This is a configuration record, not an authorization to operate.</Alert>}
-                {option&&determinant&&<><CapacityLine supply={option} projected={option.total-option.ownDemand+(Number.isFinite(demand)&&demand>0?demand:0)}/>
-                    {!option.capacity&&option.canRate&&<><Field id='utility-source-rating' label={'Usable supply capacity ('+determinant.unit+') *'} inputMode='decimal' value={rating} onChange={e=>setRating(e.target.value)}/>
-                    <Button variant='secondary' busy={ratingBusy} disabled={!(Number(rating)>0)||!Number.isFinite(Number(rating))} onClick={()=>void saveRating()}>Save source capacity</Button></>}
-                    {!option.capacity&&!option.canRate&&<Alert tone='warn'>Ask an authorized asset editor to set the usable capacity.</Alert>}
-                    {ratingError&&<Alert tone='error'>{ratingError}</Alert>}
+                <label className='flex min-h-11 items-center gap-3 font-semibold text-ink'>
+                    <input type='checkbox' checked={internal} onChange={e=>setInternal(e.target.checked)}
+                        className='h-5 w-5 accent-emerald-500'/> Is internal supply?
+                </label>
+                <p className='text-xs text-muted'>{internal?
+                    'Generated within this equipment. Cost-centre external supply is not required; Safety requirements still apply.':
+                    'External utility is distributed through this equipment\'s parent cost centre, not linked directly to a supply asset.'}</p>
+                {!internal&&<>
+                    {sources.error&&<Alert tone='error'>{sources.error}</Alert>}
+                    {sources.loading&&<Spinner/>}
+                    {allocation&&<div className='space-y-2 rounded-lg border border-line bg-page p-3 text-sm'>
+                        <h3 className='font-semibold'>Supplying cost centre</h3>
+                        <p>{allocation.costCenterName} · {allocation.costCenterId}</p>
+                        {supply?<div className='space-y-2 text-xs'>
+                            <p>Utility: {supply.label} · {supply.sources.length} registered source asset(s)</p>
+                            <p>Allocated capacity: <strong>{supply.capacity??'Not rated'} {determinant?.unit||''}</strong></p>
+                            <p>Existing equipment demand: {supply.review.demand} {determinant?.unit||''}</p>
+                            {localReview?.percentage!==null&&<p>
+                                Projected demand after this equipment: <strong>{localReview?.percentage?.toFixed(1)}%</strong> of cost-centre capacity
+                            </p>}
+                            {localReview?.gaps.filter(g=>g.equipmentId===workCenterId&&g.key!=='asset').slice(0,5).map((g,i)=>
+                                <p key={i} className='text-amber-500'>{g.message}</p>)}
+                        </div>:<Alert tone='warn'>This utility has not been added to the cost-centre distribution catalogue yet.</Alert>}
+                    </div>}
+                    {allocation?.missingUtility&&<Alert tone='warn'>
+                        Add {utility.label} at the supplying cost centre first, then link a registered source asset and rated supply capacity.
+                    </Alert>}
+                    {allocation?.missingAsset&&<Alert tone='warn'>
+                        Cost-centre utility has no source asset. Create or select an asset, then configure its rating.
+                    </Alert>}
+                    {allocation?.equipmentHasAsset===false&&<Alert tone='warn'>
+                        This equipment has no assigned asset. Add or attribute an asset to complete its Asset Register configuration.
+                    </Alert>}
+                    {allocation&&<Button variant='secondary' onClick={()=>navigate('organization_admin/structure/'+allocation.costCenterId)}>
+                        Configure cost-centre utilities / add supply asset
+                    </Button>}
+                    {allocation?.equipmentHasAsset===false&&<Button variant='secondary'
+                        onClick={()=>navigate('organization_admin/structure/'+workCenterId+'/asset')}>
+                        Add or attribute equipment asset
+                    </Button>}
+                    {supply&&determinant&&(!Number.isFinite(demand)||demand<=0)&&
+                        <Alert tone='warn'>Enter the positive equipment requirement in {determinant.unit} below.</Alert>}
+                    {supply&&localReview?.status==='overload'&&<Alert tone='error'>
+                        The combined equipment requirement exceeds the cost-centre allocation. Increase supply capacity or reduce demand.
+                    </Alert>}
+                    {supply&&localReview?.status==='incompatible'&&<Alert tone='error'>
+                        Supply attributes do not match equipment requirements. Check voltage, pressure, phase and quality values.
+                    </Alert>}
+                    {!allocation&&!sources.loading&&<Alert tone='warn'>Link this equipment to an active cost centre and configure its utility supplies first.</Alert>}
                 </>}
-                {option&&determinant&&(!Number.isFinite(demand)||demand<=0)&&<Alert tone='warn'>Enter a positive equipment demand in {determinant.unit} below.</Alert>}
-                {option&&!determinant&&<p className='text-xs text-muted'>This utility has no additive capacity determinant in the catalogue. Asset linkage remains mandatory.</p>}</>}
             </Card>
             <Card className='space-y-3'>
                 {utility.description && <p className='text-sm text-soft'>{utility.description}</p>}
@@ -204,7 +244,7 @@ function UtilityEditor({
 export default function EquipmentUtilities({ workCenterId, onBack }: { workCenterId: string; onBack: () => void }) {
     const { data, setData, error, loading, reload } = useLoad(() => callBackend<{ catalogue: Utility[]; items: Entry[]; version:number }>('/api/org/ast/utilities/read', { workCenterId }), [workCenterId]);
     const [browse, setBrowse] = useState(false);
-    const [editing, setEditing] = useState<{ utility: Utility; values: Record<string, string | number>; sourceAssetTag:string; isInternalSupply:boolean } | null>(null);
+    const [editing, setEditing] = useState<{ utility: Utility; values: Record<string, string | number>; isInternalSupply:boolean } | null>(null);
     const [saving, setSaving] = useState(false);
     const [saveError, setSaveError] = useState('');
     const [notice, setNotice] = useState('');
@@ -222,16 +262,17 @@ export default function EquipmentUtilities({ workCenterId, onBack }: { workCente
         reload();
     };
 
-    const edit = (utility: Utility, values: Record<string, string | number>, sourceAssetTag='',isInternalSupply=false) => {
+    const edit = (utility: Utility, values: Record<string, string | number>, isInternalSupply=false) => {
         setNotice('');
         setSaveError('');
         setBrowse(false);
-        setEditing({ utility, values, sourceAssetTag, isInternalSupply });
+        setEditing({ utility, values, isInternalSupply });
     };
 
-    const saveUtility = async (values: Record<string, string | number>,sourceAssetTag:string,isInternalSupply:boolean) => {
+    const saveUtility = async (values: Record<string, string | number>,sourceCostCenterId:string,isInternalSupply:boolean) => {
         if (!editing) return;
-        const row: Entry = { code: editing.utility.code, label: editing.utility.label, values, sourceAssetTag, isInternalSupply,supplyLinkRule:2 };
+        const row: Entry = { code: editing.utility.code, label: editing.utility.label, values, sourceAssetTag:'',
+            sourceCostCenterId:isInternalSupply?'':sourceCostCenterId,isInternalSupply,supplyLinkRule:isInternalSupply?2:3 };
         const exists = entries.some((e) => e.code === row.code);
         setSaving(true);
         setSaveError('');
@@ -277,7 +318,6 @@ export default function EquipmentUtilities({ workCenterId, onBack }: { workCente
                 utility={editing.utility}
                 initial={editing.values}
                 workCenterId={workCenterId}
-                initialSource={editing.sourceAssetTag}
                 initialInternal={editing.isInternalSupply}
                 busy={saving}
                 error={saveError}
@@ -322,7 +362,7 @@ export default function EquipmentUtilities({ workCenterId, onBack }: { workCente
                     {stale.map((e) => e.label).join(', ')} {stale.length === 1 ? 'is' : 'are'} not currently adopted or active. Existing connections remain visible in the energy register; review adoption before editing.
                 </Alert>
             )}
-            {entries.some(e=>!e.configurationComplete)&&<Alert tone='warn'>Utility configuration incomplete: classify supplies and link externally supplied utilities to valid assets with required capacity.</Alert>}
+            {entries.some(e=>!e.configurationComplete)&&<Alert tone='warn'>Utility configuration incomplete: link external utilities through the supplying cost centre, configure source assets and verify aggregate capacity and compatibility.</Alert>}
             {full && <Alert tone='warn'>This unit has the maximum of {MAX_UTILITIES} utilities.</Alert>}
             {data && entries.length === 0 && <Empty>No utilities recorded for this unit yet. Tap Add to choose one from the catalogue.</Empty>}
             {entries.length > 0 && (
@@ -335,7 +375,7 @@ export default function EquipmentUtilities({ workCenterId, onBack }: { workCente
                                 <button
                                     type='button'
                                     disabled={!def}
-                                    onClick={() => def && edit(def, e.values,e.sourceAssetTag,e.isInternalSupply===true)}
+                                    onClick={() => def && edit(def, e.values,e.isInternalSupply===true)}
                                     aria-label={def ? `Edit ${e.label}` : `${e.label} (not in catalogue)`}
                                     className='flex min-h-[44px] min-w-0 flex-1 items-center gap-3 rounded-xl px-2 text-left active:bg-page disabled:opacity-80'
                                 >
@@ -346,7 +386,7 @@ export default function EquipmentUtilities({ workCenterId, onBack }: { workCente
                                             {!def && <Badge tone='warn'>Not in catalogue</Badge>}
                                         </span>
                                         <span className='block text-xs text-muted'>{text || 'No values recorded'}</span><span className='block text-xs text-soft'>{e.energyColor&&<span className='mr-1 inline-block h-3 w-3 rounded border border-line' style={{backgroundColor:e.energyColor}}/>}Isolation tag: {e.energyTag||'Configure in Hazardous Energy Sources'}</span>
-                                        <span className='block text-xs text-soft'>{e.isInternalSupply===true?'Internal supply · asset link not required':e.sourceAssetTag?'External supply: '+e.sourceAssetTag+' · '+(e.sourceAssetName||'Source not verified'):'External supply · asset not linked'}</span>
+                                        <span className='block text-xs text-soft'>{e.isInternalSupply===true?'Internal supply · external distribution not required':e.supplyLinkRule===3?'Cost-centre supply: '+(e.sourceCostCenterName||e.sourceCostCenterId||'Needs configuration'):e.sourceAssetTag?'Legacy direct asset supply: '+e.sourceAssetTag+' · reassign through cost centre':'External supply · configure cost-centre utility'}</span>
                                         {e.supply&&<CapacityLine supply={e.supply}/>}
                                         {e.sourceAssetStatus&&e.sourceAssetStatus!=='active'&&<span className='block text-xs text-amber-400'>Source approval: {e.sourceAssetStatus}</span>}
                                     </span>
