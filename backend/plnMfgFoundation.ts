@@ -19,6 +19,8 @@ import {reviewManufacturingRouting} from './mfgRoutingReadiness';
 import {analyzeFlowCapacity} from '../src/shared/mfgFlowCapacity';
 import {PROCUREMENT_UNITS} from './procurementUnits';
 import {normalizeMaterialSupplyProfile} from './mfgMaterialSupplyProfile';
+import {getCostCenterUtilityCapability} from './costCenterUtilityDistribution';
+import {normalizedMaterialFlow} from '../src/shared/utilityDistributionCapacity';
 import {routingSkuIds,routingForSku} from './mfgRoutingSkuMappings';
 
 export const MASTER_KINDS = ['items', 'boms', 'resources', 'routings'] as const;
@@ -197,8 +199,18 @@ export function normalizeMaster(kind:MasterKind, raw:unknown): Obj {
                 if(!isBuffered&&hasUsable)throw new HttpError(400,'A usable buffer can only be specified for buffered or bulk-storage supply.');
                 const skuId=processSupplyKind==='SKU'?VALID_ID(c.skuId,'Process supply SKU'):'';
                 const materialId=processSupplyKind==='PROCUREMENT'?VALID_ID(c.materialId,'Approved process supply material'):'';
-                const utilityWorkCenterId=processSupplyKind==='UTILITY'?VALID_ID(c.utilityWorkCenterId,'Registered utility location'):'';
-                const utilityCode=processSupplyKind==='UTILITY'?VALID_ID(c.utilityCode,'Registered utility'):'';
+                // New process-supply lines reference the cost-centre utility,
+                // while historical direct-to-equipment references remain readable.
+                const supplyCostCenterId=str(c.supplyCostCenterId).trim(),supplyUtilityCode=str(c.supplyUtilityCode).trim();
+                if(supplyCostCenterId)VALID_ID(supplyCostCenterId,'Supplying cost centre');
+                if(supplyUtilityCode)VALID_ID(supplyUtilityCode,'Cost-centre utility');
+                if(!!supplyCostCenterId!==!!supplyUtilityCode)
+                    throw new HttpError(400,'Choose both the cost centre and its configured utility supply.');
+                const utilityWorkCenterId=processSupplyKind==='UTILITY'&&!supplyCostCenterId?
+                    VALID_ID(c.utilityWorkCenterId,'Historical utility equipment location'):'';
+                const utilityCode=processSupplyKind==='UTILITY'&&!supplyCostCenterId?
+                    VALID_ID(c.utilityCode,'Historical registered utility'):'';
+
                 if(skuId===parentSkuId)throw new HttpError(400,'A SKU cannot consume itself.');
                 // Shared SKU keys prevent double demand when the same material is
                 // added once as an intermediate and again as inline supply.
@@ -209,6 +221,7 @@ export function normalizeMaster(kind:MasterKind, raw:unknown): Obj {
                 seen.add(key);
                 return {line:i+1,source:'PROCESS_SUPPLY',processSupplyKind,
                     skuId,materialId,warehouseId:'',utilityWorkCenterId,utilityCode,
+                    supplyCostCenterId,supplyUtilityCode,
                     quantity,uom,scrapPct,quantityMethod,deliveryMode,
                     requiredFlowPerHour,bufferCapacity,bufferUsable};
             }
@@ -456,6 +469,32 @@ export async function referenceChecks(ctx:OrgContext,kind:MasterKind,item:Obj,ex
         }
         for(const component of components.filter(c=>str(c.source)!=='WAREHOUSE')){
             if(str(component.source)==='PROCESS_SUPPLY'){
+                const ccId=str(component.supplyCostCenterId),supplyCode=str(component.supplyUtilityCode);
+                if(ccId&&supplyCode){
+                    const cc=await getDoc('organizations/'+ctx.orgId+'/structure/'+ccId);
+                    if(!cc||str(cc.data.level)!=='cost_center'||str(cc.data.status)==='inactive')
+                        throw new HttpError(400,'The process supply must reference an active cost centre.');
+                    if(!await recordAccess(ctx,'MFG.view',ccId))
+                        throw new HttpError(403,'This cost-centre utility is outside your authorized manufacturing scope.');
+                    const chain=await nodePath(ctx.orgId,ccId);
+                    const ancestorNodes=await Promise.all(chain.map(id=>getDoc('organizations/'+ctx.orgId+'/structure/'+id)));
+                    const siteId=ancestorNodes.find(n=>str(n?.data.level)==='site')?.id||'';
+                    if(!siteId||str(item.siteId)!==siteId)
+                        throw new HttpError(400,'Select the same production site as the supplying cost centre.');
+                    const cap=await getCostCenterUtilityCapability(ctx.orgId,ccId,supplyCode);
+                    if(!cap)throw new HttpError(409,'Utility missing at cost centre. Add it under Organization Design → Cost centre → Utility supply.');
+                    if(!cap.sources.length||!cap.ready||cap.review.unknown>0)
+                        throw new HttpError(409,'Complete the asset, rated capacity and equipment demand setup on this cost-centre utility before using it in a BOM.');
+                    if(['overload','incompatible'].includes(cap.review.status))
+                        throw new HttpError(409,'Resolve overloaded or incompatible cost-centre supply before using this process material.');
+                    if(num(component.requiredFlowPerHour)!==null&&Number(component.requiredFlowPerHour)>0&&
+                        cap.review.determinant?.key==='flow'){
+                        const converted=normalizedMaterialFlow(Number(component.requiredFlowPerHour),
+                            str(component.uom),str(cap.review.determinant.unit));
+                        if(converted!==null&&cap.capacity!==null&&converted>cap.capacity+1e-8)
+                            throw new HttpError(409,'Required BOM flow exceeds this cost-centre utility allocation.');
+                    }
+                }
                 const reference=str(component.processSupplyKind);
                 if(reference==='SKU'){
                     const child=await getDoc(DOC(ctx.orgId,'items',str(component.skuId)));
@@ -471,7 +510,8 @@ export async function referenceChecks(ctx:OrgContext,kind:MasterKind,item:Obj,ex
                     if(str(material.data.uom))materialUnitFactor(str(component.uom),str(material.data.uom));
                     // Deliberately no warehouse stock issue or material extension:
                     // direct/bulk supply cost and metering are handled by source masters.
-                }else if(reference==='UTILITY'){
+                }else if(reference==='UTILITY'&&!ccId){
+                    // Historical equipment utility source for pre-migration BOM revisions.
                     const workCenterId=str(component.utilityWorkCenterId),utilityCode=str(component.utilityCode);
                     const utility=await getDoc('organizations/'+ctx.orgId+'/equipment_utilities/'+workCenterId);
                     const configured=utility&&ARR(utility.data.items).find(x=>str(x.code)===utilityCode);
@@ -484,6 +524,8 @@ export async function referenceChecks(ctx:OrgContext,kind:MasterKind,item:Obj,ex
                     const referenceUnit=str(configured.uom)||str(configured.unitCode);
                     if(referenceUnit&&skuUnitConversion(referenceUnit,referenceUnit)!==null)
                         materialUnitFactor(str(component.uom),referenceUnit);
+                }else if(reference==='UTILITY'&&ccId){
+                    // Cost-centre capability was validated above.
                 }else throw new HttpError(400,'Unsupported metered/bulk material reference.');
                 continue;
             }
@@ -867,6 +909,25 @@ export const plnMfgFoundationRoutes={
             if(creating&&Number(ctx.body.expectedRevision)!==0)
                 throw new HttpError(409,'New master data starts with revision zero.');
             const old=creating?null:await getDoc(DOC(ctx.orgId,kind,VALID_ID(requestedId,'Master code')));
+            if(kind==='boms'){
+                // Permit an unchanged historical process source to retain its
+                // revision data. All new/changed lines must link a configured
+                // cost-centre utility (never assume an equipment utility path).
+                const before=ARR(old?.data.components);
+                for(const c of ARR(raw.components).filter(x=>str(x.source)==='PROCESS_SUPPLY')){
+                    if(str(c.supplyCostCenterId)&&str(c.supplyUtilityCode))continue;
+                    const unchanged=before.some(p=>str(p.source)==='PROCESS_SUPPLY'&&
+                        str(p.processSupplyKind)===str(c.processSupplyKind)&&
+                        str(p.skuId)===str(c.skuId)&&str(p.materialId)===str(c.materialId)&&
+                        str(p.utilityWorkCenterId)===str(c.utilityWorkCenterId)&&
+                        str(p.utilityCode)===str(c.utilityCode)&&
+                        num(p.quantity)===num(c.quantity)&&str(p.uom)===str(c.uom)&&
+                        num(p.requiredFlowPerHour)===num(c.requiredFlowPerHour)&&
+                        str(p.deliveryMode)===str(c.deliveryMode));
+                    if(!unchanged)throw new HttpError(400,'Choose a supplying cost centre utility for each new or modified process-supply BOM material.');
+                }
+            }
+
             if(kind==='routings'&&creating&&!str(raw.processClassId))
                 throw new HttpError(400,'Select a manufacturing process classification before creating a routing. Create process groups in Product Configuration.');
             // Require the governed process classification for manufactured SKUs
