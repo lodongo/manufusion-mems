@@ -61,9 +61,6 @@ const capacityBases:Array<[RoutingStep['capacityBasis'],string]>=[
  ['BATCH_CYCLE','One batch: quantity and time'],
  ['TIME_PER_UNIT','Run minutes per output unit'],
 ];
-const classes=['GENERAL','MATERIAL_PREPARATION','BLENDING','BLOW_MOULDING','FILLING',
- 'CAPPING','INSPECTION','LABELLING','CASE_PACKING','PALLETIZATION','TRANSFER','QUALITY',
- 'HEAT_TREATMENT','ASSEMBLY','MACHINING','FORMING','EXTRUSION','CLEANING','OTHER'];
 const freshStage=(code:string):RoutingStep=>({
  code,name:'',resourceId:'',producesSkuId:'',dependsOn:[],setupMinutes:0,runMinutesPerUnit:0,
  costCenterId:'',bomId:'',processClass:'GENERAL',stageType:'PRODUCE',
@@ -169,10 +166,14 @@ export default function PlnProcessRoutingEditor({value,onChange,items,boms,resou
   setStepNotice('Stage copied without an output SKU or BOM to prevent duplicated consumption.');
  };
  const dropStage=(code:string)=>{
-  updateSteps(ops.filter(s=>s.code!==code).map(s=>({...s,
-   dependsOn:(s.dependsOn||[]).filter(x=>x!==code)})));
+  setReview(null);setReviewError('');
+  onChange({...value,
+   operations:ops.filter(s=>s.code!==code).map(s=>({...s,
+    dependsOn:(s.dependsOn||[]).filter(x=>x!==code)})),
+   skuMappings:skuMappings.map(m=>({...m,stages:m.stages.filter(x=>x.code!==code)})),
+  });
   if(openStep===code)setOpenStep('');
-  setStepNotice('Stage removed from this draft. Its dependency links were also removed.');
+  setStepNotice('Stage removed from the draft, including its SKU-specific BOM overrides and dependency links.');
  };
  const move=(code:string,offset:-1|1)=>{
   const index=ops.findIndex(s=>s.code===code),other=index+offset;
@@ -295,13 +296,22 @@ export default function PlnProcessRoutingEditor({value,onChange,items,boms,resou
       <div className='grid gap-3 sm:grid-cols-2'>
        <TextField label='Stage description' value={stage.name}
         onChange={name=>updateStep(stage.code,{name})}/>
-       <TextField label='Process classification code' value={stage.processClass||'GENERAL'}
+       <TextField label='Stage activity code (optional)' value={stage.processClass||'GENERAL'}
         onChange={processClass=>updateStep(stage.code,{processClass:processClass.toUpperCase().replace(/\s+/g,'_')})}/>
-       <p className='sm:col-span-2 text-xs text-muted'>Suggested classes: {classes.slice(0,10).join(', ')}. Other codes are supported.</p>
+       <p className='sm:col-span-2 text-xs text-muted'>Optional identifier for this stage's activity. It is separate from the route's process classification and accepts organization-specific codes.</p>
        <Choice label='Stage type' value={stage.stageType||'PRODUCE'}
         options={stageTypes as Array<[string,string]>}
-        onChange={stageType=>updateStep(stage.code,{stageType:stageType as RoutingStep['stageType'],
-         ...(stageType!=='PRODUCE'?{bomId:''}:{})})}/>
+        onChange={stageType=>{
+         setReview(null);setReviewError('');
+         onChange({...value,
+          operations:ops.map(x=>x.code===stage.code?{...x,
+           stageType:stageType as RoutingStep['stageType'],
+           ...(stageType!=='PRODUCE'?{bomId:'',producesSkuId:''}:{})}:x),
+          skuMappings:stageType==='PRODUCE'?skuMappings:skuMappings.map(m=>({
+           ...m,stages:m.stages.filter(x=>x.code!==stage.code),
+          })),
+         });
+        }}/>
        <Choice label='Manufacturing cost centre' value={stage.costCenterId||''}
         options={[['','Select site manufacturing cost centre'],...centersForSite.map(x=>[x.id,x.name+' · '+x.code] as [string,string])]}
         onChange={costCenterId=>updateStep(stage.code,{costCenterId,
@@ -317,7 +327,7 @@ export default function PlnProcessRoutingEditor({value,onChange,items,boms,resou
            capacityBasis:'PHYSICAL_CONTAINER',costCenterId:str(chosen?.costCenterId)
           }:{})});
         }}/>
-       <Choice label='Stage output SKU / intermediate' value={stage.producesSkuId||''}
+       <Choice label='Common stage output (optional)' value={stage.producesSkuId||''}
         options={[['','No manufactured output'],...availableOutputs.map(x=>[x.id,x.name] as [string,string])]}
         onChange={producesSkuId=>{
          const chosen=items.find(x=>x.id===producesSkuId);
@@ -325,7 +335,8 @@ export default function PlnProcessRoutingEditor({value,onChange,items,boms,resou
           ...(str(chosen?.category)==='INTERMEDIATE'&&stage.capacityBasis==='PHYSICAL_CONTAINER'
              ?{capacityBasis:'BATCH_CYCLE' as const}:{})});
         }}/>
-       {stage.stageType==='PRODUCE'&&<Choice label='Referenced stage BOM' value={stage.bomId||''}
+       <p className='sm:col-span-2 text-xs text-muted'>When the stage output or BOM differs by product, leave the common value empty and configure it under SKUs. Common intermediate outputs can be inherited by every mapped SKU.</p>
+       {stage.stageType==='PRODUCE'&&<Choice label='Common stage BOM (optional)' value={stage.bomId||''}
         options={[['','Select BOM for this stage output'],...chosenBoms.map(x=>[x.id,
          x.name+' · '+(str(x.status)||'draft')+' · '+(str(x.alternativeCode)||'STANDARD')] as [string,string])]}
         onChange={bomId=>updateStep(stage.code,{bomId})}/>}
