@@ -664,10 +664,22 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
         if(active==='boms'){
             const parts=asComponents(draft.components);
             if(!str(draft.parentSkuId)){setError('Choose the output material before saving.');return;}
-            if(!parts.length||parts.some(c=>
-                (c.source==='WAREHOUSE'?(!str(c.warehouseId)||!str(c.materialId)):!str(c.skuId))||
-                !str(c.uom)||!Number.isFinite(c.quantity)||c.quantity<=0)){
-                setError('Each BOM line needs a source, an intermediate or warehouse material, a unit and a positive quantity.');return;
+            if(!parts.length||parts.some(c=>{
+                const missing=c.source==='WAREHOUSE'?(!str(c.warehouseId)||!str(c.materialId)):
+                    c.source==='PROCESS_SUPPLY'?(c.processSupplyKind==='SKU'?!str(c.skuId):
+                        c.processSupplyKind==='UTILITY'?(!str(c.utilityWorkCenterId)||!str(c.utilityCode)):
+                        c.processSupplyKind==='PROCUREMENT'?!str(c.materialId):true):!str(c.skuId);
+                const needsBuffer=c.source==='PROCESS_SUPPLY'&&
+                    ['BUFFERED','BULK_STORAGE'].includes(c.deliveryMode||'INLINE');
+                const invalidBuffer=needsBuffer&&(!Number.isFinite(c.bufferCapacity)||Number(c.bufferCapacity)<=0||
+                    (c.bufferUsable!=null&&(!Number.isFinite(c.bufferUsable)||
+                        c.bufferUsable<0||c.bufferUsable>Number(c.bufferCapacity))));
+                const invalidRate=c.source==='PROCESS_SUPPLY'&&c.requiredFlowPerHour!=null&&
+                    (!Number.isFinite(c.requiredFlowPerHour)||c.requiredFlowPerHour<=0);
+                return missing||!str(c.uom)||!Number.isFinite(c.quantity)||c.quantity<=0||
+                    invalidBuffer||invalidRate;
+            })){
+                setError('Every BOM material needs a valid source, unit and positive planned consumption. For process supplies select a SKU, utility or Procurement material, and check hourly rates and buffer size where used.');return;
             }
         }
         setBusy(true);setError('');setNotice('');
