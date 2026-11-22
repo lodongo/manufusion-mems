@@ -7,6 +7,7 @@ import type {OrgContext} from './guards';
 import {routingCommissionedCapacity,routingManufacturingCostCenter} from './plnCostCenterCapacity';
 import {physicalRatingUnits} from './plnPhysicalCapacity';
 import {bomClassificationCode,mfgMaterialPolicyForOrg} from './mfgMaterialPolicy';
+import {routingSkuIds,routingForSku} from './mfgRoutingSkuMappings';
 
 type Issue={stageCode:string;field:string;message:string};
 type StagePreview={code:string;name:string;stageType:string;producesSkuId:string;
@@ -18,7 +19,7 @@ const rows=(v:unknown):Obj[]=>Array.isArray(v)?v.filter(isObj):[];
 const finite=(v:unknown):number=>typeof v==='number'&&Number.isFinite(v)?v:Number(v)||0;
 
 /** Analyze complete routes; incomplete drafts return field-level issues instead of failing the screen. */
-export async function reviewManufacturingRouting(ctx:OrgContext,raw:Obj){
+async function reviewSingleManufacturingRouting(ctx:OrgContext,raw:Obj){
  const issues:Issue[]=[],stagePreviews:StagePreview[]=[];
  const issue=(code:string,field:string,message:string)=>issues.push({stageCode:code,field,message});
  const siteId=str(raw.siteId),skuId=str(raw.skuId);
@@ -206,4 +207,25 @@ export async function reviewManufacturingRouting(ctx:OrgContext,raw:Obj){
  return {ready:issues.length===0,legacy:raw.routingModelVersion!==2,
   issues,stages:stagePreviews,bottlenecks,
   comparisonNote:'Only compatible primary-container rates for the same SKU are compared. Bulk, resource and packaging unit rates remain separate.'};
+}
+
+/** Validate every mapped SKU, not just the template's primary recipe.
+ * This prevents activating a shared route with unapproved or mismatched BOMs.
+ */
+export async function reviewManufacturingRouting(ctx:OrgContext,raw:Obj){
+ const skuIds=routingSkuIds(raw);
+ const reviews=[];
+ for(const skuId of skuIds){
+  const variant=routingForSku(raw,skuId);
+  if(!variant)continue;
+  const result=await reviewSingleManufacturingRouting(ctx,variant as Obj);
+  reviews.push({skuId,...result});
+ }
+ const primary=reviews[0]??await reviewSingleManufacturingRouting(ctx,raw);
+ const issues=reviews.flatMap(r=>r.issues.map(issue=>({
+  ...issue,message:(skuIds.length>1?'SKU '+r.skuId+': ':'')+issue.message,
+ })));
+ return {...primary,ready:issues.length===0,issues,
+  skuReviews:reviews.map(r=>({skuId:r.skuId,ready:r.ready,issues:r.issues,
+   stages:r.stages,bottlenecks:r.bottlenecks}))};
 }
