@@ -172,6 +172,9 @@ export const mfgSkuConfigurationRoutes={
             if(kind==='productNames'&&all.some(p=>p.kind==='productNames'&&p.id!==existingId&&
                 str(p.productCode).trim().toUpperCase()===str(normalized.productCode).trim().toUpperCase()))
                 throw new HttpError(409,'The Product/Variant code is already in use.');
+            if(kind==='processClasses'&&all.some(p=>p.kind==='processClasses'&&p.id!==existingId&&
+                str(p.processCode).trim().toUpperCase()===str(normalized.processCode).trim().toUpperCase()))
+                throw new HttpError(409,'The manufacturing process classification code is already in use. Choose another code.');
             if(kind==='containers'&&all.some(p=>p.kind==='containers'&&p.id!==existingId&&
                 str(p.metadataCode)===str(normalized.metadataCode)&&p.enabled!==false))
                 throw new HttpError(409,'This primary-container master type has already been adopted. Edit its attributes instead.');
