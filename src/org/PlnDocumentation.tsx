@@ -148,19 +148,31 @@ const guide:Chapter[]=[
   ],example:'Fictional: 24,000 bottles/h, 12 bottles/case → 2,000 cases/h. Or enter 2,000 cases/h to derive 24,000 bottles/h from that SKU ratio.',
    checks:['The physical container size matches the selected SKU.','Every derived output retains the configured time denominator.','The output name makes bottles/hour and cases/hour distinguishable.']},
  ]},
- {id:'routing',title:'9. Process Routings',phase:'Capacity & process',summary:'Create sequential or parallel production steps using stage BOMs and authorized cost centres.',screen:'Process Routings',topics:[
-  {title:'Routing header',purpose:'A versioned route belongs to a finished or intermediate SKU.',steps:[
-   'Add routing and select production site, main manufactured SKU, route name, alternative and effective date.',
-   'Open Stages to add each manufacturing activity.',
-  ],example:'Fictional: Demo Orange Route A, one water preparation and one bottle blowing branch converging at filling.'},
-  {title:'Stage and readiness',purpose:'Every producing stage references its source masters without duplicating them.',steps:[
-   'Expand a stage and assign its process class, authorized manufacturing cost centre, primary resource and stage output SKU.',
-   'Link an approved BOM for each output-producing stage.',
-   'Choose capacity basis: commissioned primary output, resource rated throughput, batch cycle or minutes per unit.',
-   'Choose predecessor stages; a stage can depend on multiple parallel branches.',
-   'Save draft, then run Routing Review to inspect missing BOMs, output units, capacity and graph dependencies.',
-   'Submit release-ready routings for independent approval. Published versions remain immutable.',
-  ],example:'Fictional parallel graph: Prep + Blow → Fill/Cap → Label → Case Pack → Palletize.'},
+ {id:'routing',title:'9. Process Routings',phase:'Capacity & process',summary:'Create a process once, map compatible SKUs, or create a separate route when the process changes.',screen:'Process Routings',topics:[
+  {title:'Create a routing',purpose:'Start a manufacturing method for one site.',steps:[
+   'Choose Add new route, select a site and one primary manufactured SKU.',
+   'Name the route and give it an alternative code, such as STANDARD or HEAT_TREATED.',
+   'Open Stages to configure the common activity sequence, resources and dependencies.',
+   'Save the draft. Saving does not execute production or issue materials.',
+  ],example:'Fictional: One beverage route with blending, bottle blowing, filling and packing.'},
+  {title:'Same process, different recipes',purpose:'Reuse stages and resources instead of making duplicate routings.',steps:[
+   'Open SKUs and select Map SKU for each additional compatible product.',
+   'For each producing stage, choose that SKU’s actual output and corresponding BOM.',
+   'Change the batch size or processing time only if it differs from the shared stage.',
+   'Review every mapped SKU before submitting the route for approval.',
+  ],example:'Fictional: Orange and Lemon share the same line and process, each with its own BOM.'},
+  {title:'Create a different route',purpose:'Use another route when the manufacturing process changes.',steps:[
+   'Select Add new route to start from scratch or Create different route from this to copy an existing process.',
+   'Change the stage order, resources or processing activities that genuinely differ.',
+   'Keep the alternative code distinct. Add only SKUs that follow this route.',
+   'Save and submit the alternative separately. An approved route alternative must be selected where more than one applies.',
+  ],example:'Fictional: A heat-treated beverage uses a different route because an additional processing stage is needed.'},
+  {title:'Review and approve',purpose:'Protect stage accuracy and existing maker-checker governance.',steps:[
+   'Configure each stage’s resource, cost centre, output and predecessors.',
+   'Use commissioned line speed, resource rate, batch cycle or time per unit as appropriate.',
+   'Open Review to check each SKU’s BOM and capacity and verify the routing graph.',
+   'Publish only through the independent technical approval workflow. Approved routing records remain immutable.',
+  ],example:'Fictional: Preparation + bottle blowing → filling → packaging.'},
  ]},
  {id:'planning',title:'10. Planning Configuration',phase:'Planning',summary:'Set planning rules after the manufacturing masters are established.',screen:'Planning Configuration',topics:[
   {title:'Horizon and freeze period',purpose:'Provide a reproducible date horizon and constraints.',steps:[
