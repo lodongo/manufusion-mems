@@ -164,6 +164,7 @@ function BomEditor({draft,onChange,items,refs,skuSetup,materialPolicy}:{
     setMaterialsView('edit');
  };
  const removeMaterial=(index:number)=>{
+    if(!window.confirm('Remove material '+(index+1)+' from this BOM draft? Save the BOM draft to persist the change.'))return;
     update('components',components.filter((_,i)=>i!==index));
     setSelectedMaterialIndex(null);
     setMaterialsView('list');
@@ -292,26 +293,14 @@ function BomEditor({draft,onChange,items,refs,skuSetup,materialPolicy}:{
             <h3 className='font-semibold'>2. What materials are needed?</h3>
             <p className='mt-1 text-xs text-muted'>Quantities for {quantity} {bomUomName(outputUom,skuSetup.units)} of the output.</p>
         </div>
-        <div role='tablist' aria-label='BOM materials' className='grid grid-cols-2 gap-1 rounded-xl border border-line bg-page p-1'>
-            <button type='button' role='tab' id='bom-added-materials-tab' aria-controls='bom-added-materials-panel'
-                aria-selected={materialsView==='list'}
-                className={'min-h-11 min-w-0 rounded-lg px-2 py-2 text-center text-xs font-semibold sm:text-sm '+
-                    (materialsView==='list'?'bg-brand text-onbrand':'text-soft hover:bg-panel')}
-                onClick={()=>{setMaterialsView('list');setSelectedMaterialIndex(null);}}>
-                Added materials ({components.length})
-            </button>
-            <button type='button' role='tab' id='bom-add-material-tab' aria-controls='bom-add-material-panel'
-                aria-selected={materialsView==='edit'}
-                disabled={!output||(components.length>=150&&materialsView==='list')}
-                className={'min-h-11 min-w-0 rounded-lg px-2 py-2 text-center text-xs font-semibold disabled:opacity-50 sm:text-sm '+
-                    (materialsView==='edit'?'bg-brand text-onbrand':'text-soft hover:bg-panel')}
-                onClick={()=>{if(materialsView==='list')beginAddMaterial();}}>
-                Add material
-            </button>
+        <div className='flex flex-wrap items-center justify-between gap-2'>
+            <span className='text-sm font-semibold'>Added materials ({components.length})</span>
+            <Button type='button' variant='secondary' disabled={!output||components.length>=150}
+                onClick={beginAddMaterial}>Add material</Button>
         </div>
         {!output?<p className='text-sm text-muted'>Choose the output in the Output tab first.</p>:
-            materialsView==='list'?
-            <div id='bom-added-materials-panel' role='tabpanel' aria-labelledby='bom-added-materials-tab' className='space-y-2'>
+            <div className='space-y-3'>
+            <div className='space-y-2'>
                 {components.map((component,index)=>{
                     const description=describeMaterial(component);
                     return <div key={index} className='flex min-w-0 flex-wrap items-center justify-between gap-2 rounded-lg border border-line bg-page p-3'>
@@ -328,20 +317,21 @@ function BomEditor({draft,onChange,items,refs,skuSetup,materialPolicy}:{
                                 setSelectedMaterialIndex(index);
                                 setMaterialsView('edit');
                             }}>Edit</Button>
-                            <Button type='button' variant='secondary' onClick={()=>removeMaterial(index)}>Remove</Button>
+                            <Button type='button' variant='danger' onClick={()=>removeMaterial(index)}>Delete</Button>
                         </div>
                     </div>;
                 })}
                 {!components.length&&<p className='rounded-lg bg-page p-3 text-sm text-muted'>
-                    No materials added. Open the Add material tab to enter the first material.
+                    No materials added. Select Add material to enter the first material.
                 </p>}
-            </div>:
-            <div id='bom-add-material-panel' role='tabpanel' aria-labelledby='bom-add-material-tab' className='space-y-3'>
+            </div>
+            {materialsView==='edit'&&
+            <div className='space-y-3 rounded-xl border border-line p-3'>
                 <div className='flex items-center justify-between gap-2'>
                     <h4 className='text-sm font-semibold'>Material {selectedMaterialIndex===null?'':selectedMaterialIndex+1}</h4>
                     <Button type='button' variant='secondary' onClick={()=>{
                         setMaterialsView('list');setSelectedMaterialIndex(null);
-                    }}>View added</Button>
+                    }}>Close editor</Button>
                 </div>
                 {components.map((c,i)=>{
                     if(i!==selectedMaterialIndex)return null;
@@ -554,6 +544,7 @@ function BomEditor({draft,onChange,items,refs,skuSetup,materialPolicy}:{
                             onClick={beginAddMaterial}>Add another</Button>
                     </div>}
             </div>}
+            </div>}
     </section>
     <section id='bom-panel-settings' role='tabpanel' aria-labelledby='bom-tab-settings'
         className={'rounded-xl border border-line p-3'+(sectionTab==='settings'?'':' hidden')}>
@@ -703,6 +694,7 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
     const [refs,setRefs]=useState<References>(emptyReferences);
     const [draft,setDraft]=useState<Row|null>(null);
     const [viewSkuId,setViewSkuId]=useState('');
+    const [viewBomId,setViewBomId]=useState('');
     const [classEditingSku,setClassEditingSku]=useState('');
     const [classSelected,setClassSelected]=useState('');
     const [materialPolicy,setMaterialPolicy]=useState<MaterialPolicy>(defaultMaterialPolicy);
@@ -740,6 +732,7 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
             setActive(visibleTabs[0].key);
             setDraft(null);
             setViewSkuId('');
+            setViewBomId('');
         }
     },[active,visibleTabs.length,canViewPlanning,canViewMasters,module]);
     const canEdit=canViewMasters&&hasPerm(permissions,'MFG.master.edit');
@@ -750,6 +743,8 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
     const canSubmit=isReleaseMaster&&canEdit&&hasPerm(permissions,releaseScope+'.submit');
     const canApprove=isReleaseMaster&&hasPerm(permissions,releaseScope+'.approve');
     const canSave=canEdit && (active!=='boms'||hasPerm(permissions,'MFG.bom.edit')) && (active!=='routings'||hasPerm(permissions,'MFG.routing.edit'));
+    const canDeleteBom=canViewMasters&&hasPerm(permissions,'MFG.bom.delete');
+    const viewedBom=rows.boms.find(row=>row.id===viewBomId);
     const load=async()=>{
         setLoading(true);setError('');
         try{
@@ -798,9 +793,9 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
             }
         }
         setSetupBlocked('');setBlockedTarget(null);
-        setActive(tab);setDraft(null);setViewSkuId('');setHistory([]);setError('');setNotice('');setDecisionReason('');
+        setActive(tab);setDraft(null);setViewSkuId('');setViewBomId('');setHistory([]);setError('');setNotice('');setDecisionReason('');
     };
-    const copyVersion=(row:Row)=>{setViewSkuId('');const cloned={...row,id:'',name:String(row.name)+' — new revision',revision:undefined,status:'draft',effectiveFrom:'',createdBy:undefined,submittedBy:undefined,approvedBy:undefined,approvedAt:undefined};setDraft(cloned);setHistory([]);setError('');setNotice('Give this version a new unique code and effective date. The approved original remains unchanged.');};
+    const copyVersion=(row:Row)=>{setViewSkuId('');setViewBomId('');const cloned={...row,id:'',name:String(row.name)+' — new revision',revision:undefined,status:'draft',effectiveFrom:'',createdBy:undefined,submittedBy:undefined,approvedBy:undefined,approvedAt:undefined};setDraft(cloned);setHistory([]);setError('');setNotice('Give this version a new unique code and effective date. The approved original remains unchanged.');};
     const createAlternativeRoute=(row:Row)=>{
         const used=new Set(rows.routings.filter(r=>str(r.siteId)===str(row.siteId)&&
             str(r.processClassId)===str(row.processClassId))
@@ -840,11 +835,25 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
         finally{setBusy(false);}
     };
     const openDraft=async(row:Row)=>{
-        setViewSkuId('');setDraft(row);setHistory([]);setError('');
+        setViewSkuId('');setViewBomId('');setDraft(row);setHistory([]);setError('');
         try{
             const result=await callBackend<{revisions:Row[]}>('/api/org/pln-mfg/foundation/history',{kind:recordKind(active),id:row.id});
             setHistory(result.revisions);
         }catch(e){setError(e instanceof Error?e.message:'Could not read revision history.');}
+    };
+    const deleteBom=async(row:Row)=>{
+        if(active!=='boms'||!canDeleteBom||busy)return;
+        if(!window.confirm('Delete BOM '+row.id+' · '+row.name+'? It will disappear from the active list, but its revisions and audit trail will be retained. Approved BOMs require privileged test mode and cannot be deleted if referenced by a routing.'))return;
+        setBusy(true);setError('');setNotice('');
+        try{
+            await callBackend('/api/org/pln-mfg/foundation/delete',{
+                id:row.id,expectedRevision:row.revision??1,
+            });
+            setViewBomId('');
+            await load();
+            setNotice('BOM '+row.id+' deleted. Prior revisions and audit history are retained.');
+        }catch(e){setError(e instanceof Error?e.message:'BOM deletion was not permitted.');}
+        finally{setBusy(false);}
     };
     const save=async()=>{
         if(!draft||!canSave)return;
@@ -1025,7 +1034,7 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
             </div>
             <div className='flex justify-end'><Button disabled={!canConfig||busy} onClick={()=>void saveConfig()}>Save planning configuration</Button></div>
         </Card>:<>
-            <div className='flex min-w-0 flex-wrap items-center justify-between gap-2'><p className='text-xs text-muted sm:text-sm'>{active==='routings'?'Choose or create a process route. A route can serve multiple SKUs.':filtered.length+' saved master records · draft versions'}</p>{canSave&&!viewSkuId&&<Button onClick={()=>{setDraft(newRecord(active,materialPolicy,formDefaults,refs.sites));setError('');setNotice('');}}>Add {active==='items'?'SKU':active==='boms'?'BOM':active==='routings'?'new route':'resource'}</Button>}</div>
+            <div className='flex min-w-0 flex-wrap items-center justify-between gap-2'><p className='text-xs text-muted sm:text-sm'>{active==='routings'?'Choose or create a process route. A route can serve multiple SKUs.':filtered.length+' saved master records · draft versions'}</p>{canSave&&!viewSkuId&&!viewBomId&&<Button onClick={()=>{setViewBomId('');setDraft(newRecord(active,materialPolicy,formDefaults,refs.sites));setError('');setNotice('');}}>Add {active==='items'?'SKU':active==='boms'?'BOM':active==='routings'?'new route':'resource'}</Button>}</div>
             {draft?<Card className='space-y-4'>
                 <div className='flex items-center justify-between gap-2'><h2 className='font-semibold'>{active==='routings'?(draft.revision?'Edit routing draft':'Create manufacturing route'):(draft.revision?'Edit draft':'New master record')}</h2>{active!=='boms'&&<Button variant='secondary' disabled={busy} onClick={()=>setDraft(null)}>Cancel</Button>}</div>
                 {draft.revision&&<div className='flex flex-wrap gap-2 text-xs text-soft'><span className='font-semibold'>Immutable revisions:</span>{history.map(h=><span key={String(h.revision)} className='rounded-md border border-line px-2 py-1'>r{h.revision} · {str(h.updatedAt).slice(0,10)}</span>)}</div>}
@@ -1037,6 +1046,53 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
                 <div className='flex flex-wrap justify-end gap-2'>
                     {active==='boms'&&<Button variant='secondary' disabled={busy} onClick={()=>setDraft(null)}>Cancel</Button>}
                     <Button disabled={busy||!canSave} onClick={()=>void save()}>{busy?'Saving...':'Save draft'}</Button>
+                </div>
+            </Card>:active==='boms'&&viewedBom?<Card className='space-y-4'>
+                <div className='flex flex-wrap items-center justify-between gap-2'>
+                    <h2 className='font-semibold'>BOM details · {viewedBom.id}</h2>
+                    <Button variant='secondary' onClick={()=>setViewBomId('')}>Back to BOM list</Button>
+                </div>
+                <div className='rounded-xl bg-page p-3'>
+                    <p className='break-words font-semibold'>{viewedBom.name}</p>
+                    <p className='mt-1 text-sm text-muted'>Status: {str(viewedBom.status)||'draft'} · Revision {viewedBom.revision??1}</p>
+                    <p className='mt-1 text-sm text-muted'>Effective: {str(viewedBom.effectiveFrom)||'Immediately'}</p>
+                </div>
+                <div className='space-y-1'>
+                    <h3 className='font-semibold'>Output</h3>
+                    <p className='break-words text-sm'>
+                        {rows.items.find(item=>item.id===str(viewedBom.parentSkuId))?.name||str(viewedBom.parentSkuId)}
+                        {' · '}{number(viewedBom.outputQty)} {bomUomName(str(viewedBom.outputUom),skuSetup.units)}
+                    </p>
+                </div>
+                <div className='space-y-2'>
+                    <h3 className='font-semibold'>Materials ({asComponents(viewedBom.components).length})</h3>
+                    {asComponents(viewedBom.components).map((component,index)=>{
+                        const sku=rows.items.find(item=>item.id===component.skuId);
+                        const warehouseMaterial=refs.warehouseMaterials.find(item=>
+                            item.id===component.materialId&&item.warehouseId===component.warehouseId);
+                        const purchased=refs.materials.find(item=>item.id===component.materialId);
+                        const utility=refs.utilities.find(item=>item.code===component.utilityCode&&
+                            item.workCenterId===component.utilityWorkCenterId);
+                        const name=component.source==='WAREHOUSE'?
+                            (warehouseMaterial?.name||purchased?.name||component.materialId):
+                            component.source==='PROCESS_SUPPLY'&&component.processSupplyKind==='UTILITY'?
+                            (utility?.name||component.supplyUtilityCode||'Process utility'):
+                            component.source==='PROCESS_SUPPLY'&&component.processSupplyKind==='PROCUREMENT'?
+                            (purchased?.name||component.materialId):
+                            (sku?.name||component.skuId||'Not selected');
+                        return <div key={index} className='rounded-lg border border-line p-3'>
+                            <p className='break-words text-sm font-semibold'>{index+1}. {name}</p>
+                            <p className='mt-1 text-xs text-muted'>{component.source==='WAREHOUSE'?'Warehouse':component.source==='PROCESS_SUPPLY'?'Process supply':'Intermediate / WIP'} · {component.quantity} {bomUomName(component.uom,skuSetup.units)}</p>
+                        </div>;
+                    })}
+                </div>
+                <div className='space-y-1 text-sm text-soft'>
+                    <h3 className='font-semibold text-ink'>Settings</h3>
+                    <p>Classification: {materialPolicy.bomClassifications.find(x=>x.code===str(viewedBom.classificationCode))?.name||str(viewedBom.classificationCode)}</p>
+                    <p>Alternative: {str(viewedBom.alternativeCode)||'STANDARD'}</p>
+                    <p>Site: {refs.sites.find(site=>site.id===str(viewedBom.siteId))?.name||'Organization default'}</p>
+                    {str(viewedBom.versionNote)&&<p>Version note: {str(viewedBom.versionNote)}</p>}
+                    {str(viewedBom.description)&&<p className='whitespace-pre-wrap'>Notes: {str(viewedBom.description)}</p>}
                 </div>
             </Card>:active==='items'&&viewSkuId?<Card className='space-y-4'>
                 <div className='flex flex-wrap items-center justify-between gap-2'>
@@ -1067,7 +1123,19 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
                         <Button variant='secondary' onClick={()=>{
                             setViewSkuId(row.id);setDraft(null);setError('');setNotice('');
                         }}>View SKU</Button>}
-                    {canSave&&['draft','rejected',''].includes(str(row.status))&&<Button variant='secondary' onClick={()=>void openDraft(row)}>Open / edit</Button>}
+                    {active==='boms'&&<div className='flex flex-wrap gap-2'>
+                        <Button variant='secondary' disabled={busy} onClick={()=>{
+                            setDraft(null);setViewSkuId('');setViewBomId(row.id);setError('');setNotice('');
+                        }}>View</Button>
+                        {canSave&&<Button variant='secondary' disabled={busy||str(row.status)==='pending_approval'}
+                            title={str(row.status)==='pending_approval'?'Submitted BOMs must complete review before editing.':''}
+                            onClick={()=>str(row.status)==='active'?copyVersion(row):void openDraft(row)}>
+                            Edit
+                        </Button>}
+                        {canDeleteBom&&<Button variant='danger' disabled={busy}
+                            onClick={()=>void deleteBom(row)}>Delete</Button>}
+                    </div>}
+                    {active!=='boms'&&canSave&&['draft','rejected',''].includes(str(row.status))&&<Button variant='secondary' onClick={()=>void openDraft(row)}>Open / edit</Button>}
                     {active==='items'&&canEdit&&canSkuConfig&&str(row.status)==='active'&&
                         ['FINISHED','INTERMEDIATE'].includes(str(row.category))&&
                         <Button variant='secondary' onClick={()=>{
@@ -1075,7 +1143,7 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
                             setError('');setNotice('');
                         }}>Classify manufacturing process</Button>}
                     {canSave&&active==='routings'&&<Button variant='secondary' onClick={()=>createAlternativeRoute(row)}>Create different route from this</Button>}
-                    {canSave&&['active','pending_approval'].includes(str(row.status))&&<Button variant='secondary' onClick={()=>copyVersion(row)}>New version</Button>}
+                    {active!=='boms'&&canSave&&['active','pending_approval'].includes(str(row.status))&&<Button variant='secondary' onClick={()=>copyVersion(row)}>New version</Button>}
                 </div>
                 {active==='items'&&classEditingSku===row.id&&<div className='space-y-2 rounded-xl border border-line bg-page p-3'>
                     <Choice title='Manufacturing process classification' value={classSelected}
