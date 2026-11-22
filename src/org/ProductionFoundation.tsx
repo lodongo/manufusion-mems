@@ -349,7 +349,7 @@ function BomEditor({draft,onChange,items,refs,skuSetup,materialPolicy}:{
                                     <p className='text-muted'>Existing equipment utility demand is not added to the BOM demand a second time.</p>
                                 </div>}
                                 <button type='button' className='min-h-10 rounded-lg border border-line px-3 text-xs'
-                                    onClick={()=>navigate('organization_admin/structure/'+(c.supplyCostCenterId||''))}>
+                                    onClick={()=>navigate(c.supplyCostCenterId?'organization_admin/structure/'+c.supplyCostCenterId:'organization_admin/structure')}>
                                     Open cost-centre setup / add missing utility or source asset
                                 </button>
                             </div>
