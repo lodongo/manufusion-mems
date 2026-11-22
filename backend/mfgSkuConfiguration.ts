@@ -188,6 +188,18 @@ export const mfgSkuConfigurationRoutes={
             if(!prior||str(prior.data.kind)!==kind)throw new HttpError(404,'SKU configuration record not found.');
             if(Number(ctx.body.expectedRevision)!==(num(prior.data.revision)??1))
                 throw new HttpError(409,'SKU parameter changed. Refresh before editing.');
+            if(kind==='processClasses'&&normalized.enabled===false&&prior.data.enabled!==false){
+                // Class records are referenced by organization-wide SKUs and
+                // site-specific routes. Prevent disabling a group that is in use;
+                // do not cascade or silently rewrite an existing SKU/site mapping.
+                const [skus,routes]=await Promise.all([
+                    listDocs(pathRoot(ctx.orgId)+'/mfg_items'),
+                    listDocs(pathRoot(ctx.orgId)+'/mfg_routings'),
+                ]);
+                if(skus.some(row=>str(row.data.processClassId)===existingId)||
+                    routes.some(row=>str(row.data.processClassId)===existingId))
+                    throw new HttpError(409,'This manufacturing process classification is in use by SKUs or routes. Reclassify the affected records before deactivating it.');
+            }
             const data={...prior.data,...normalized,id:existingId,revision:(num(prior.data.revision)??1)+1,
                 updatedBy:ctx.uid,updatedAt:nowIso()};
             if(!await commitChecked([{path,data,precondition:{updateTime:prior.updateTime}}]))
