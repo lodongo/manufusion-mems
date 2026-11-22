@@ -33,12 +33,13 @@ export default function PlnFormDefaultsPanel({initial,revision,sites,canEdit,onS
  useEffect(()=>{
   let mounted=true;
   void callBackend<{types:CostCenterCategory[]}>('/api/org/reference/cost-center-types')
-   .then(x=>{if(mounted&&x.types?.length)setCostCategories(x.types);})
+   .then(x=>{if(mounted&&x.types?.length)setCostCategories([
+    ...COST_CENTER_CATEGORIES.filter(c=>!x.types.some(item=>item.code===c.code)),...x.types]);})
    .catch(()=>{/* Shared taxonomy remains the fallback. */});
   return ()=>{mounted=false;};
  },[]);
  // Manufacturing resources can be adopted only from Production/Manufacturing cost centres.
- const resourceCategories=costCategories.filter(c=>c.code==='MFG'||
+ const resourceCategories=costCategories.filter(c=>/^(MFG|MANUF|PROD|PRD)$/i.test(c.code)||
   /\b(manufactur(?:e|ing)?|production|factory)\b/i.test(c.label));
  const resourceSubcategories=costCategories.find(c=>c.code===draft.resourceCostCenterCategory)?.subcategories||
   costCenterSubcategories(draft.resourceCostCenterCategory);
