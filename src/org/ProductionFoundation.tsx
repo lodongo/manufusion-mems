@@ -320,7 +320,7 @@ function BomEditor({draft,onChange,items,refs,skuSetup,materialPolicy}:{
  const processUtilityChoices:Array<[string,string]>=[['','Choose a configured cost-centre utility'],
     ...costSupplies.filter(s=>!str(draft.siteId)||s.siteId===str(draft.siteId))
      .map(s=>[s.costCenterId+'::'+s.code,s.costCenterName+' · '+s.label+
-      (s.capacity!==null?' · '+s.capacity+' '+s.capacityUnit:' · supply capacity missing')] as [string,string])];
+      (s.ready?(s.capacity!==null?' · '+s.capacity+' '+s.capacityUnit:''):' · capacity setup recommended')] as [string,string])];
  const warehouseChoices:Array<[string,string]>=[['','Choose an accessible warehouse'],
     ...refs.warehouses.map(w=>[w.id,(w.code?w.code+' · ':'')+w.name] as [string,string])];
  const siteChoices:Array<[string,string]>=[['','All sites (organization default)'],...refs.sites.map(i=>[i.id,i.name] as [string,string])];
@@ -549,7 +549,11 @@ function BomEditor({draft,onChange,items,refs,skuSetup,materialPolicy}:{
                                         {' · '}Status: {currentSupply.status}</p>
                                     {Object.entries(currentSupply.values).map(([key,value])=>
                                         <p key={key}>{key}: {String(value)}</p>)}
-                                    {!currentSupply.ready&&<p className='text-amber-600'>Complete the supplying assets, capacity or equipment compatibility before using this utility in a released BOM.</p>}
+                                    {!currentSupply.ready&&
+                                        <p role='status' className='rounded-lg border border-amber-300 bg-amber-50 p-2 text-xs text-amber-900'>
+                                            <strong>Highly recommended · Optional:</strong> Configure supplying assets, rated utility capacity and equipment demand at the cost centre.
+                                            You can save and submit this BOM without completing those details. Capacity and compatibility may remain unverified until configured.
+                                        </p>}
                                     {c.requiredFlowPerHour!=null&&c.requiredFlowPerHour>0&&
                                         currentSupply.capacity!==null&&currentSupply.determinantKey==='flow'&&
                                         (()=>{const adjusted=normalizedMaterialFlow(c.requiredFlowPerHour,c.uom,currentSupply.capacityUnit);
@@ -1013,7 +1017,11 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
                 body.name=(group?.name||'Manufacturing')+' · Process route';
             }
             const result=await callBackend<{record:Row;generatedCode?:string}>('/api/org/pln-mfg/foundation/save',{kind:recordKind(active),record:body,expectedRevision:body.revision??0});
-            await load();setDraft(null);setNotice('Saved '+(result.generatedCode||result.record.id)+' · Revision '+result.record.revision+'. The code is maintained by MEMS.');
+            const incompleteUtility=active==='boms'&&asComponents(body.components).some(c=>
+                c.source==='PROCESS_SUPPLY'&&!!c.supplyCostCenterId&&!!c.supplyUtilityCode&&
+                costSupplies.some(s=>s.costCenterId===c.supplyCostCenterId&&s.code===c.supplyUtilityCode&&!s.ready));
+            await load();setDraft(null);setNotice('Saved '+(result.generatedCode||result.record.id)+' · Revision '+result.record.revision+'. The code is maintained by MEMS.'+
+                (incompleteUtility?' Advisory: completing supplying assets, rated capacity and equipment demand is highly recommended but optional.':''));
         }catch(e){setError(e instanceof Error?e.message:'Could not save.');}
         finally{setBusy(false);}
     };

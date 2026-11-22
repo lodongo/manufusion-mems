@@ -351,6 +351,20 @@ export function detectBomCycle(boms:Array<{parentSkuId:string;components:Array<{
     return visit(parentSkuId);
 }
 
+
+/** Missing cost-centre utility setup is advisory for BOM authoring/release.
+ * Preserve hard stops for known capacity overloads and known incompatible
+ * conditions. Unknown/missing attribute values are not evidence of mismatch. */
+export function bomUtilityHasVerifiedConflict(review:{
+    status:string;
+    gaps:Array<{expected?:unknown;actual?:unknown}>;
+}):boolean {
+    if(review.status==='overload')return true;
+    return review.gaps.some(gap=>
+        gap.expected!==undefined&&gap.expected!==null&&gap.expected!==''&&
+        gap.actual!==undefined&&gap.actual!==null&&gap.actual!=='');
+}
+
 export async function referenceChecks(ctx:OrgContext,kind:MasterKind,item:Obj,existingId:string) {
     const siteId=str(item.siteId);
     if(siteId){
@@ -483,10 +497,12 @@ export async function referenceChecks(ctx:OrgContext,kind:MasterKind,item:Obj,ex
                         throw new HttpError(400,'Select the same production site as the supplying cost centre.');
                     const cap=await getCostCenterUtilityCapability(ctx.orgId,ccId,supplyCode);
                     if(!cap)throw new HttpError(409,'Utility missing at cost centre. Add it under Organization Design → Cost centre → Utility supply.');
-                    if(!cap.sources.length||!cap.ready||cap.review.unknown>0)
-                        throw new HttpError(409,'Complete the asset, rated capacity and equipment demand setup on this cost-centre utility before using it in a BOM.');
-                    if(['overload','incompatible'].includes(cap.review.status))
-                        throw new HttpError(409,'Resolve overloaded or incompatible cost-centre supply before using this process material.');
+                    // Source asset assignment, rated capacity and equipment demand
+                    // are highly recommended but optional for BOM creation and release.
+                    // Do not turn missing setup into a blocking requirement.
+                    // Verified overload and compatibility conflicts still block.
+                    if(bomUtilityHasVerifiedConflict(cap.review))
+                        throw new HttpError(409,'Resolve verified overloaded or incompatible cost-centre supply before using this process material.');
                     if(num(component.requiredFlowPerHour)!==null&&Number(component.requiredFlowPerHour)>0&&
                         cap.review.determinant?.key==='flow'){
                         const converted=normalizedMaterialFlow(Number(component.requiredFlowPerHour),
