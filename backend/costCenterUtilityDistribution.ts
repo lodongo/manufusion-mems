@@ -97,8 +97,16 @@ async function capability(org:string,ccId:string,item:Obj,def:Obj,
  const equipment=await consumers(org,ccId,str(item.code),replace);
  const review=reviewUtilityDistribution(def as UtilityDefinition,isObj(item.values)?item.values:{},
   capacity,equipment);
- const ready=sources.length>0&&sources.every(s=>s.assetTag&&s.allocatedCapacity!==null||
-  !review.determinant&&s.assetTag)&&review.status!=='overload'&&review.status!=='incompatible'&&
+ const supplyValues=isObj(item.values)?item.values:{};
+ const missingRequired=(Array.isArray(def.attributes)?def.attributes.filter(isObj):[])
+  .filter(attr=>attr.required===true&&attr.key!==review.determinant?.key&&
+   !['current','flow','feed','power','force','mass'].includes(str(attr.key)))
+  .filter(attr=>supplyValues[str(attr.key)]===undefined||
+   supplyValues[str(attr.key)]===null||supplyValues[str(attr.key)]==='');
+ const ready=sources.length>0&&sources.every(s=>s.assetTag&&
+  (!review.determinant||s.allocatedCapacity!==null))&&
+  !missingRequired.length&&!review.unknown&&
+  review.status!=='overload'&&review.status!=='incompatible'&&
   (!review.determinant||capacity!==null);
  return {code:str(item.code),label:str(item.label)||str(def.label),values:isObj(item.values)?item.values:{},
   sources,capacity,ready,review};
