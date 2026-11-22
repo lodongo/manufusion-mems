@@ -8,12 +8,16 @@ import {routingCommissionedCapacity,routingManufacturingCostCenter} from './plnC
 import {physicalRatingUnits} from './plnPhysicalCapacity';
 import {bomClassificationCode,mfgMaterialPolicyForOrg} from './mfgMaterialPolicy';
 import {routingSkuIds,routingForSku} from './mfgRoutingSkuMappings';
+import {skuUnitConversion} from './mfgSkuModel';
+import {PROCUREMENT_UNITS} from './procurementUnits';
+import {analyzeFlowCapacity} from '../src/shared/mfgFlowCapacity';
 
 type Issue={stageCode:string;field:string;message:string};
 type StagePreview={code:string;name:string;stageType:string;producesSkuId:string;
  costCenterId:string;resourceId:string;bomId:string;capacityBasis:string;
  dependsOn:string[];setupMinutes:number;runMinutesPerUnit:number;bomComponentCount:number;
- capacity:{quantity:number;unit:string;source:string;revision?:number}|null};
+ capacity:{quantity:number;unit:string;unitCode?:string;source:string;revision?:number}|null;
+ flowInputFactor:number;flowBufferAvailable:number|null};
 const path=(org:string,name:string,id:string)=>'organizations/'+org+'/'+name+'/'+id;
 const rows=(v:unknown):Obj[]=>Array.isArray(v)?v.filter(isObj):[];
 const finite=(v:unknown):number=>typeof v==='number'&&Number.isFinite(v)?v:Number(v)||0;
@@ -144,14 +148,14 @@ async function reviewSingleManufacturingRouting(ctx:OrgContext,raw:Obj){
    if(!rate||!str(resource?.data.rateUom))
     issue(code,'capacityBasis','Configured manufacturing resource needs a positive rated throughput and unit.');
    else capacity={quantity:rate,unit:str(resource?.data.rateUom)+'/hour',
-    source:'Manufacturing resource master (nominal, before effectiveness)'};
+    unitCode:str(resource?.data.rateUom),source:'Manufacturing resource master (nominal, before effectiveness)'};
   }else if(capacityBasis==='BATCH_CYCLE'){
    const size=finite(step.batchSize),minutes=finite(step.cycleMinutes);
    if(size<=0||minutes<=0)issue(code,'capacityBasis','Enter a positive batch size and batch cycle in minutes.');
    else {
     const item=producesSkuId?await fetchCached(skuCache,'mfg_items',producesSkuId):null;
     capacity={quantity:Number((size*60/minutes).toPrecision(10)),
-     unit:(str(item?.data.uom)||'batch output units')+'/hour',source:'Configured batch size and cycle'};
+     unit:(str(item?.data.uom)||'batch output units')+'/hour',unitCode:str(item?.data.uom),source:'Configured batch size and cycle'};
    }
   }else if(capacityBasis==='TIME_PER_UNIT'){
    const minutes=finite(step.runMinutesPerUnit);
@@ -159,13 +163,27 @@ async function reviewSingleManufacturingRouting(ctx:OrgContext,raw:Obj){
    else{
     const item=producesSkuId?await fetchCached(skuCache,'mfg_items',producesSkuId):null;
     capacity={quantity:Number((60/minutes).toPrecision(10)),
-     unit:(str(item?.data.uom)||'output units')+'/hour',source:'Configured run time per unit'};
+     unit:(str(item?.data.uom)||'output units')+'/hour',unitCode:str(item?.data.uom),source:'Configured run time per unit'};
    }
+  }else if(capacityBasis==='CONTINUOUS_FLOW'){
+   const hourly=finite(step.flowRatePerHour),flowUom=str(step.flowRateUom);
+   if(hourly<=0)issue(code,'flowRatePerHour','Enter a positive continuous production rate per hour.');
+   if(!flowUom||skuUnitConversion(flowUom,flowUom)===null)
+    issue(code,'flowRateUom','Choose a published MEMS measurement unit for continuous flow.');
+   const output=producesSkuId?await fetchCached(skuCache,'mfg_items',producesSkuId):null;
+   if(output&&flowUom&&skuUnitConversion(flowUom,str(output.data.uom))===null)
+    issue(code,'flowRateUom','The continuous rate unit cannot be converted to the output SKU unit.');
+   if(hourly>0&&flowUom&&skuUnitConversion(flowUom,flowUom)!==null)
+    capacity={quantity:hourly,unit:flowUom+'/hour',unitCode:flowUom,
+     source:'Configured continuous production rate, not a live meter reading'};
   }else issue(code,'capacityBasis','Select a supported capacity basis.');
   stagePreviews.push({code,name,stageType,producesSkuId,costCenterId,resourceId,bomId,
    capacityBasis,dependsOn:predecessors,setupMinutes:finite(step.setupMinutes),
    runMinutesPerUnit:finite(step.runMinutesPerUnit),
-   bomComponentCount:rows(bomId?bomCache.get(bomId)?.data.components:null).length,capacity});
+   bomComponentCount:rows(bomId?bomCache.get(bomId)?.data.components:null).length,capacity,
+   flowInputFactor:finite(step.flowInputFactor)||1,
+   flowBufferAvailable:step.flowBufferAvailable===null||step.flowBufferAvailable===undefined?
+    null:finite(step.flowBufferAvailable)});
  }
  if(operations.length){
   // Every required parallel branch must lead to the final stage; isolated
@@ -204,9 +222,14 @@ async function reviewSingleManufacturingRouting(ctx:OrgContext,raw:Obj){
    return {outputSkuId,limitingStageCode:limiting.code,
     physicalContainersPerHour:limiting.capacity!.quantity,comparableStageCodes:stages.map(x=>x.code)};
   });
+ const flowAnalysis=analyzeFlowCapacity(stagePreviews.map(stage=>({
+  code:stage.code,name:stage.name,dependsOn:stage.dependsOn,
+  ratePerHour:stage.capacity?.quantity,unitCode:stage.capacity?.unitCode,
+  bufferAvailable:stage.flowBufferAvailable??undefined,inputFactor:stage.flowInputFactor,
+ })),PROCUREMENT_UNITS);
  return {ready:issues.length===0,legacy:raw.routingModelVersion!==2,
-  issues,stages:stagePreviews,bottlenecks,
-  comparisonNote:'Only compatible primary-container rates for the same SKU are compared. Bulk, resource and packaging unit rates remain separate.'};
+  issues,stages:stagePreviews,bottlenecks,flowAnalysis,
+  comparisonNote:'Only compatible MEMS rate units are compared across direct process links. Parallel feed branches require individual input requirements and cannot be automatically added.'};
 }
 
 /** Validate every mapped SKU, not just the template's primary recipe.
@@ -217,7 +240,8 @@ export async function reviewManufacturingRouting(ctx:OrgContext,raw:Obj){
  if(!skuIds.length)return {
   ready:false,legacy:false,issues:[{stageCode:'HEADER',field:'skuMappings',
    message:'Map at least one manufactured SKU to this process route and configure its stage BOMs.'}],
-  stages:[],bottlenecks:[],comparisonNote:'A process classification describes the eligible SKU group. Assignments and approved stage BOMs are still required before routing release.',
+  stages:[],bottlenecks:[],flowAnalysis:{opportunities:[],unresolved:[],comparableLinks:0,limitedLinks:0},
+  comparisonNote:'A process classification describes the eligible SKU group. Assignments and approved stage BOMs are still required before routing release.',
   skuReviews:[],
  };
  const reviews=[];
@@ -233,5 +257,5 @@ export async function reviewManufacturingRouting(ctx:OrgContext,raw:Obj){
  })));
  return {...primary,ready:issues.length===0,issues,
   skuReviews:reviews.map(r=>({skuId:r.skuId,ready:r.ready,issues:r.issues,
-   stages:r.stages,bottlenecks:r.bottlenecks}))};
+   stages:r.stages,bottlenecks:r.bottlenecks,flowAnalysis:r.flowAnalysis}))};
 }
