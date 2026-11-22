@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {materialMasterHierarchy} from '../../src/org/materialMasterHierarchy.ts';
+import {materialSourcingPolicy} from '../../backend/procurement.ts';
 
 const read=path=>readFileSync(new URL('../../'+path,import.meta.url),'utf8');
 const material=(code,family,category,group,industryRecommended=false)=>({
@@ -70,4 +71,30 @@ test('wizard refreshes the published PRC catalog, resets new material and loads 
     assert.ok(backend.includes('const master=await load('+"'materials'"+')'));
     assert.ok(backend.includes('for(const key of strs(item.requiredAttributes))'));
     assert.ok(backend.includes("kind==='multi_select'"));
+});
+
+test('proprietary supplier sourcing is selection-only and removes stale supplier or equipment details',()=>{
+    const wizard=read('src/org/MaterialsMaster.tsx');
+    assert.match(wizard,/code: 'PROPRIETARY_SUPPLIER', title: 'Proprietary Supplier'/);
+    assert.match(wizard,/supply==='PROPRIETARY_SUPPLIER'\?null:/);
+    assert.match(wizard,/supplierless\?\{vendorId:''/);
+    assert.match(wizard,/!supplierless&&mode==='registered'/);
+    assert.match(wizard,/!supplierless&&mode==='manual'/);
+    assert.match(wizard,/!supplierless&&!registration\[partKey\]/);
+    const original={
+        supplyType:'PROPRIETARY_SUPPLIER',name:'Private concentrate',uom:'L',
+        partyEntryMode:'registered',vendorId:'vendor-1',partyName:'SECRET',
+        oemPartNumber:'A',ocmPartNumber:'B',generalPartNumber:'C',
+        model:'M1',versionNumber:'V1',costCenterId:'CC1',assetId:'AS1',
+        assemblyId:'ASS1',assemblyIds:['ASS2'],
+    };
+    const clean=materialSourcingPolicy(original);
+    assert.equal(clean.supplyType,'PROPRIETARY_SUPPLIER');
+    assert.equal(clean.partyEntryMode,'none');
+    for(const key of ['vendorId','partyName','oemPartNumber','ocmPartNumber','generalPartNumber','model','versionNumber','costCenterId','assetId','assemblyId'])
+        assert.equal(clean[key],'',key+' must not be retained');
+    assert.deepEqual(clean.assemblyIds,[]);
+    assert.equal(clean.name,original.name);
+    assert.equal(clean.uom,'L');
+    assert.equal(materialSourcingPolicy({...original,supplyType:'OEM'}).vendorId,'vendor-1','OEM sourcing remains unchanged');
 });
