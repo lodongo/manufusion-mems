@@ -10,7 +10,7 @@ import { createHash } from 'crypto';
 import {MATERIAL_STOCK_DIMENSIONS,UNIVERSAL_STOCK_METADATA,STOCK_META_BY_KEY,stockedPolicyToMrp} from './stockPolicyConfig';
 import {METHODS as REPLENISHMENT_METHODS,factorsOf,methodOf,routeFor} from './replenishmentPlan';
 import {stockMasterItems,warehouseRestrictionMaster} from './stockMasters';
-import {binningBlock,effectiveRestriction,locationBlock,restrictionCodesOf} from './restrictionRules';
+import {SEGREGATED_RESTRICTIONS,binningBlock,effectiveRestriction,locationBlock,restrictionCodesOf} from './restrictionRules';
 import {materialPhotos,vendorsForMaterial} from './materialMedia';
 // Numeric replenishment strategy parameters and their allowed ranges (material and warehouse, Inventory section).
 const REPLENISHMENT_LIMITS:Record<string,{min:number;max:number;integer?:boolean;message:string}>={
