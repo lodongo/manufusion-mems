@@ -1081,7 +1081,7 @@ async function synchronizeMaterialCluster(ctx:OrgContext,data:Record<string,unkn
         clusterCode,clusterAssignmentStatus:clusterCode?'assigned_pending_material_approval':'unassigned'};
 }
 
-function materialSourcingPolicy(data:Obj):Obj{
+export function materialSourcingPolicy(data:Obj):Obj{
     const relationship=str(data.supplyType);
     // Proprietary supplier is a selection-only supply relationship, not a
     // vendor registration or a disclosure of confidential supply details.
