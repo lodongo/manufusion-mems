@@ -88,7 +88,7 @@ const menu:Array<{key:MenuKey;title:string;Icon:IconComponent}>=[
 ];
 /** Organize the large parameter catalogue without changing any editor or SKU setting. */
 const menuGroups:{title:string;hint:string;keys:MenuKey[]}[]=[
-    {title:'Product identity & manufacturing process',hint:'Manage product names, production forms and reusable manufacturing process families',
+    {title:'Product identity & manufacturing process',hint:'What the product is · how it is made · the physical form and production unit',
         keys:['productNames','processClasses','productionForms']},
     {title:'Primary container',hint:'Container types and physical sizes',
         keys:['containers','containerSizes']},
@@ -97,6 +97,38 @@ const menuGroups:{title:string;hint:string;keys:MenuKey[]}[]=[
     {title:'Reporting units',hint:'Normalized production measurement',
         keys:['normalizationUnits']},
 ];
+/** Consistent language at Product Configuration and Materials & Products. */
+export function SkuIdentityGuide({inSkuForm=false}:{inSkuForm?:boolean}){
+ return <div className='space-y-2 rounded-xl border border-line bg-page p-3'>
+  <p className='text-sm font-semibold text-ink'>How do these link to an SKU?</p>
+  <p className='text-xs text-muted'>
+   Product/Variant says <strong>what</strong> the product is. Manufacturing Process Classification says <strong>how</strong> it is made.
+   Production Form describes <strong>the physical form and its measuring unit</strong>.
+   An SKU is the specific product or intermediate record that uses these choices.
+  </p>
+  <details className='rounded-lg border border-line bg-panel p-3'>
+   <summary className='cursor-pointer text-sm font-semibold text-ink'>Show an example and how the selections work</summary>
+   <div className='mt-3 space-y-2 text-xs text-muted'>
+    <p><strong>1. Product/Variant:</strong> Cola Original — one reusable name and code across pack sizes.</p>
+    <p><strong>2. Manufacturing Process Classification:</strong> PET carbonated beverage process — the group used to find compatible routings, not the flavour or recipe.</p>
+    <p><strong>3. Production Form:</strong> Liquid, measured in litres (L) — defines the output unit and physical-quantity conversions; it is not a bottle or case.</p>
+    <p><strong>4. SKU:</strong> Cola Original · 500 mL PET · 24 bottles/case is one SKU.
+     Cola Original · 1 L PET · 12 bottles/case is a different SKU, even if the first three choices stay the same.</p>
+    <p><strong>How they connect:</strong> In Materials &amp; Products → Add SKU, choose the process classification and applicable Product/Variant and Production Form;
+     add packaging and containment only when required. Each SKU receives its own generated SKU_ identifier and can have its own BOM/recipe.
+     Process classification helps determine routing eligibility; the resource and site allocation determines where it can be made.</p>
+    <p><strong>Not industry-specific:</strong> The same framework works for resin by kg, fabric by m² or machined components by piece.</p>
+    <p><strong>Intermediate/WIP:</strong> Product/Variant can be optional, while Production Form is needed when physical SKU composition and conversions are configured.</p>
+   </div>
+  </details>
+  {inSkuForm&&<p className='text-xs text-muted'>Choose the process group above, then use SKU composition below for Product/Variant and Production Form when applicable. These shared catalogue values do not create new SKUs by themselves.</p>}
+ </div>;
+}
+const identityHints:Partial<Record<MenuKey,string>>={
+ productNames:'Product identity and code; reused across multiple sizes and packs',
+ processClasses:'Shared manufacturing method; links SKUs to eligible routings',
+ productionForms:'Physical form and output unit, e.g. liquid (L), mass (kg), length (m)',
+};
 const variants:Array<{key:'productNameId'|'productionFormId'|'containerId'|'containerSizeId'|'packageId'|'packagingSizeId'|'normalizationUnitId';kind:SkuParameterKind;label:string}>=[
     {key:'productNameId',kind:'productNames',label:'Product/Variant'},
     {key:'productionFormId',kind:'productionForms',label:'Production form'},
@@ -526,6 +558,7 @@ export function SkuSetupPanel({setup,canEdit,onSaved,variantLabel='Product/Varia
                         {i+1}. {group.title}
                         <span className='mt-1 block text-xs font-normal text-muted'>{group.hint}</span>
                     </summary>
+                    {i===0&&<div className='mt-3'><SkuIdentityGuide/></div>}
                     <div className='mt-3 space-y-2'>
                         {group.keys.map(key=>{
                             const entry=menu.find(m=>m.key===key);
@@ -534,8 +567,11 @@ export function SkuSetupPanel({setup,canEdit,onSaved,variantLabel='Product/Varia
                             return <button key={key} type='button' onClick={()=>open(key)}
                                 className='flex min-h-11 w-full min-w-0 items-center gap-2 rounded-lg border border-line bg-page px-2 py-2 text-left hover:bg-brand/10 focus-visible:outline-2 focus-visible:outline-brand'>
                                 <Icon className='h-4 w-4 shrink-0 text-brand' aria-hidden='true'/>
-                                <span className='min-w-0 flex-1 break-words text-xs font-medium sm:text-sm'>
-                                    {key==='productNames'?variantLabel:entry.title}
+                                <span className='min-w-0 flex-1'>
+                                    <span className='block break-words text-xs font-semibold sm:text-sm'>
+                                        {key==='productNames'?variantLabel:entry.title}
+                                    </span>
+                                    {identityHints[key]&&<span className='mt-1 block text-xs font-normal text-muted'>{identityHints[key]}</span>}
                                 </span>
                                 <ChevronRight className='h-4 w-4 shrink-0 text-muted' aria-hidden='true'/>
                             </button>;
