@@ -131,6 +131,8 @@ function BomEditor({draft,onChange,items,refs,skuSetup,materialPolicy}:{
  draft:Row;onChange:(v:Row)=>void;items:Row[];refs:References;skuSetup:SkuSetup;materialPolicy:MaterialPolicy;
 }){
  const output=items.find(i=>i.id===str(draft.parentSkuId));
+ const [sectionTab,setSectionTab]=useState<'output'|'materials'|'settings'>('output');
+ useEffect(()=>{setSectionTab('output');},[draft.id]);
  const [costSupplies,setCostSupplies]=useState<CostCenterSupplyOption[]>([]);
  const [costSupplyError,setCostSupplyError]=useState('');
  const includesProcess=asComponents(draft.components).some(c=>c.source==='PROCESS_SUPPLY');
@@ -197,12 +199,28 @@ function BomEditor({draft,onChange,items,refs,skuSetup,materialPolicy}:{
             }:{})});
     }else if(!old.uom||old.uom===code)updateComponent(index,{uom:code});
  };
+ const sectionTabs=[
+    {key:'output',title:'1. Output'},
+    {key:'materials',title:'2. Materials'},
+    {key:'settings',title:'3. Settings'},
+ ] as const;
  return <div className='space-y-4'>
     <div className='rounded-xl bg-page p-3 text-sm text-soft'>
         <p className='font-semibold text-ink'>Bill of materials</p>
         <p className='mt-1'>First choose what is produced, then add its ingredients and materials. Use a manufactured intermediate for an internal output, a warehouse material for stock-issued items, or Process supply for metered, inline, buffered and bulk inputs such as water or gases. MEMS creates the BOM code and name automatically.</p>
     </div>
-    <section className='space-y-3 rounded-xl border border-line p-3'>
+    <div role='tablist' aria-label='BOM creation sections' className='grid grid-cols-3 gap-1 rounded-xl border border-line bg-page p-1'>
+        {sectionTabs.map(section=>
+            <button key={section.key} id={'bom-tab-'+section.key} type='button' role='tab'
+                aria-selected={sectionTab===section.key} aria-controls={'bom-panel-'+section.key}
+                onClick={()=>setSectionTab(section.key)}
+                className={'min-w-0 min-h-11 rounded-lg px-1.5 py-2 text-center text-xs font-semibold sm:px-3 sm:text-sm '+
+                    (sectionTab===section.key?'bg-brand text-onbrand':'text-soft hover:bg-panel')}>
+                {section.title}
+            </button>)}
+    </div>
+    <section id='bom-panel-output' role='tabpanel' aria-labelledby='bom-tab-output'
+        className={'space-y-3 rounded-xl border border-line p-3'+(sectionTab==='output'?'':' hidden')}>
         <h3 className='font-semibold'>1. What are you producing?</h3>
         <Choice title='Output material or finished product' value={str(draft.parentSkuId)}
             options={outputChoices} onChange={v=>{
@@ -222,7 +240,8 @@ function BomEditor({draft,onChange,items,refs,skuSetup,materialPolicy}:{
             </div>
         </div>
     </section>
-    <section className='space-y-3 rounded-xl border border-line p-3'>
+    <section id='bom-panel-materials' role='tabpanel' aria-labelledby='bom-tab-materials'
+        className={'space-y-3 rounded-xl border border-line p-3'+(sectionTab==='materials'?'':' hidden')}>
         <div className='flex items-start justify-between gap-2'>
             <div>
                 <h3 className='font-semibold'>2. What materials are needed?</h3>
@@ -231,7 +250,7 @@ function BomEditor({draft,onChange,items,refs,skuSetup,materialPolicy}:{
             <Button type='button' variant='secondary' disabled={!output||components.length>=150}
                 onClick={()=>update('components',[...components,{source:'INTERMEDIATE',skuId:'',warehouseId:'',materialId:'',quantity:1,uom:'',scrapPct:0}])}>Add material</Button>
         </div>
-        {!output?<p className='text-sm text-muted'>Choose the output above first.</p>:
+        {!output?<p className='text-sm text-muted'>Choose the output in the Output tab first.</p>:
             <div className='space-y-3'>
                 {components.map((c,i)=>{
                     const fromWarehouse=c.source==='WAREHOUSE';
@@ -437,8 +456,9 @@ function BomEditor({draft,onChange,items,refs,skuSetup,materialPolicy}:{
                 {!components.length&&<p className='text-sm text-muted'>No inputs yet. Choose Add to include a component, ingredient or packaging material.</p>}
             </div>}
     </section>
-    <details className='rounded-xl border border-line p-3'>
-        <summary className='cursor-pointer font-semibold'>3. Additional settings (optional)</summary>
+    <section id='bom-panel-settings' role='tabpanel' aria-labelledby='bom-tab-settings'
+        className={'rounded-xl border border-line p-3'+(sectionTab==='settings'?'':' hidden')}>
+        <h3 className='font-semibold'>3. Additional settings (optional)</h3>
         <p className='my-3 text-xs text-muted'>The defaults work for most BOMs. Only change these when you need a different purpose, alternative method, site or effective date.</p>
         <div className='grid gap-3 sm:grid-cols-2'>
             <Choice title='BOM classification' value={str(draft.classificationCode)||'PRODUCTION'}
@@ -460,8 +480,18 @@ function BomEditor({draft,onChange,items,refs,skuSetup,materialPolicy}:{
         <TextField title='Description / notes' value={str(draft.description)}
             onChange={v=>update('description',v)}/>
         <p className='mt-2 text-xs text-muted'>Product identity comes from the output material; no separate variant selection is needed. Routing is maintained separately.</p>
-    </details>
-    <p className='text-xs text-muted'>Save creates a draft only. You can define upstream BOMs later. Production release follows the approval workflow.</p>
+    </section>
+    <div className='flex flex-wrap items-center justify-between gap-2'>
+        {sectionTab!=='output'?<Button type='button' variant='secondary'
+            onClick={()=>setSectionTab(sectionTab==='settings'?'materials':'output')}>
+            Back
+        </Button>:<span className='text-xs text-muted'>Step 1 of 3</span>}
+        {sectionTab!=='settings'&&<Button type='button' variant='secondary'
+            onClick={()=>setSectionTab(sectionTab==='output'?'materials':'settings')}>
+            Next: {sectionTab==='output'?'Materials':'Settings'}
+        </Button>}
+    </div>
+    <p className='text-xs text-muted'>Save draft is available on every tab. You can define upstream BOMs later. Production release follows the approval workflow.</p>
  </div>;
 }
 function MasterEditor({tab,draft,onChange,items,boms,resources,refs,skuSetup,materialPolicy}:{tab:Tab;draft:Row;onChange:(v:Row)=>void;items:Row[];boms:Row[];resources:Row[];refs:References;skuSetup:SkuSetup;materialPolicy:MaterialPolicy}){
