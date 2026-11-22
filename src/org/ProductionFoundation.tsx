@@ -279,7 +279,6 @@ function MasterEditor({tab,draft,onChange,items,boms,resources,refs,skuSetup,mat
         measureUnits={skuSetup.units}/>;
     const update=(key:string,value:unknown)=>onChange({...draft,[key]:value});
     const siteOptions:Array<[string,string]>=[['','Organization-wide'],...refs.sites.map(r=>[r.id,r.name+(r.code?' · '+r.code:'')] as [string,string])];
-    const assetOptions:Array<[string,string]>=[['','No linked asset'],...refs.assets.map(r=>[r.id,r.name+' · '+r.id] as [string,string])];
     const materialOptions:Array<[string,string]>=[['','Select approved Inventory material'],...refs.materials.map(r=>[r.id,r.materialNumber+' · '+r.name] as [string,string])];
     const utilityOptions:Array<[string,string]>=[['','Select registered equipment utility'],
         ...refs.utilities.map(u=>[u.workCenterId+'::'+u.code,u.name+' · '+u.workCenterId] as [string,string])];
@@ -333,13 +332,6 @@ function MasterEditor({tab,draft,onChange,items,boms,resources,refs,skuSetup,mat
                         value={str(draft.utilityWorkCenterId)&&str(draft.utilityCode)?str(draft.utilityWorkCenterId)+'::'+str(draft.utilityCode):''}
                         options={utilityOptions} onChange={v=>{const selected=refs.utilities.find(u=>u.workCenterId+'::'+u.code===v);
                             onChange({...draft,utilityCode:selected?.code||'',utilityWorkCenterId:selected?.workCenterId||''});}}/>}
-            </>}
-            {tab==='resources'&&<>
-                <Choice title='Resource class' value={str(draft.type)} options={['LINE','WORK_CENTER','MACHINE','BATCH_VESSEL','ASSEMBLY_CELL','OTHER'].map(v=>[v,v.replaceAll('_',' ')])} onChange={v=>update('type',v)}/>
-                <Field title='Rated units per hour' type='number' value={number(draft.rate,1000)} onChange={v=>update('rate',Number(v))}/>
-                <Field title='Rate unit' value={str(draft.rateUom)} onChange={v=>update('rateUom',v)}/>
-                <Field title='Planning efficiency (%)' type='number' value={number(draft.efficiency,100)} onChange={v=>update('efficiency',Number(v))}/>
-                <Choice title='Active Asset Register equipment (optional)' value={str(draft.assetId)} options={assetOptions} onChange={v=>update('assetId',v)}/>
             </>}
             {tab!=='items'&&<Choice title='Site applicability' value={str(draft.siteId)} options={siteOptions} onChange={v=>update('siteId',v)}/>}
             {tab==='items'&&<p className='md:col-span-2 text-xs text-muted'>
