@@ -123,3 +123,15 @@ test('SKU picker removes extra utility configuration from its material editor',(
  assert.ok(ui.includes('This BOM uses its registered material identity, unit and supply setup directly.'));
  assert.ok(backend.includes("const ccId=reference==='UTILITY'?str(component.supplyCostCenterId):''"));
 });
+
+test('BOM save permits new or edited adopted SKU and Procurement process lines without a second utility selection',()=>{
+    const api=file('backend/plnMfgFoundation.ts');
+    const validation=api.slice(api.indexOf("if(kind==='boms'){",api.indexOf("'POST /api/org/pln-mfg/foundation/save'")),
+        api.indexOf("if(kind==='routings'&&creating",api.indexOf("'POST /api/org/pln-mfg/foundation/save'")));
+    assert.match(validation,/str\(x\.processSupplyKind\)==='UTILITY'/);
+    assert.doesNotMatch(validation,/for\(const c of ARR\(raw\.components\)\.filter\(x=>str\(x\.source\)==='PROCESS_SUPPLY'\)\)/);
+    assert.match(validation,/Only direct UTILITY lines require their own distribution reference/);
+    assert.match(validation,/SKU and Procurement material lines inherit their registered source/);
+    assert.match(api,/if\(reference==='SKU'\)/);
+    assert.match(api,/else if\(reference==='PROCUREMENT'\)/);
+});
