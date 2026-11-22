@@ -52,7 +52,7 @@ const stageTypes:Array<[RoutingStep['stageType'],string]>=[
 const capacityBases:Array<[RoutingStep['capacityBasis'],string]>=[
  ['PHYSICAL_CONTAINER','Commissioned primary-container speed'],
  ['RESOURCE_RATE','Manufacturing resource rate'],
- ['BATCH_CYCLE','Batch size and cycle time'],
+ ['BATCH_CYCLE','One batch: quantity and time'],
  ['TIME_PER_UNIT','Run minutes per output unit'],
 ];
 const classes=['GENERAL','MATERIAL_PREPARATION','BLENDING','BLOW_MOULDING','FILLING',
@@ -294,27 +294,62 @@ export default function PlnProcessRoutingEditor({value,onChange,items,boms,resou
         options={[['','Select BOM for this stage output'],...chosenBoms.map(x=>[x.id,
          x.name+' · '+(str(x.status)||'draft')+' · '+(str(x.alternativeCode)||'STANDARD')] as [string,string])]}
         onChange={bomId=>updateStep(stage.code,{bomId})}/>}
-       <Choice label='Capacity basis' value={stage.capacityBasis||'PHYSICAL_CONTAINER'}
+       <Choice label='Capacity basis — how do you measure this step?' value={stage.capacityBasis||'PHYSICAL_CONTAINER'}
         options={capacityBases.filter(x=>
          (str(resource?.sourceKind)!=='PRODUCTION_COST_CENTER'||x[0]!=='RESOURCE_RATE')&&
          (str(output?.category)!=='INTERMEDIATE'||x[0]!=='PHYSICAL_CONTAINER')) as Array<[string,string]>}
         onChange={capacityBasis=>updateStep(stage.code,{capacityBasis:capacityBasis as RoutingStep['capacityBasis']})}/>
-       <TextField label='Setup / changeover minutes' type='number' min='0' value={num(stage.setupMinutes)}
-        onChange={v=>updateStep(stage.code,{setupMinutes:Number(v)})}/>
-       {stage.capacityBasis==='TIME_PER_UNIT'&&<TextField label='Run minutes per output unit'
-        type='number' min='0' value={num(stage.runMinutesPerUnit)}
-        onChange={v=>updateStep(stage.code,{runMinutesPerUnit:Number(v)})}/>}
+       <div className='sm:col-span-2 rounded-xl border border-line bg-page p-3 text-xs'>
+        <p className='font-semibold text-ink'>Which option should I use?</p>
+        <p className='mt-1 text-muted'>
+         {stage.capacityBasis==='BATCH_CYCLE'?
+          'Use this when you make a fixed quantity at a time, like mixing a tank of syrup. Enter how much one batch makes and how long it runs.':
+          stage.capacityBasis==='TIME_PER_UNIT'?
+          'Use this if you know how many minutes it takes to make one item.':
+          stage.capacityBasis==='RESOURCE_RATE'?
+          'Use this when the selected machine already has an hourly rate saved in Manufacturing Resources.':
+          'Use this for a finished product with a saved commissioned line speed, such as bottles per hour.'}
+        </p>
+        <details className='mt-2'>
+         <summary className='cursor-pointer font-medium text-brand'>Help me choose a method</summary>
+         <p className='mt-2 text-muted'>Bottling line with a recorded speed? Use commissioned physical-container speed. Machine with a known hourly rate? Use manufacturing resource rate. Mixing one tank at a time? Use batch quantity and time. One item takes a known number of minutes? Use time per unit.</p>
+        </details>
+       </div>
+       <div>
+        <TextField label='Preparation time (setup / changeover minutes)' type='number' min='0'
+         value={num(stage.setupMinutes)} onChange={v=>updateStep(stage.code,{setupMinutes:Number(v)})}/>
+        <p className='mt-1 text-xs text-muted'>Minutes to get ready before production, e.g. cleaning, adjusting settings or changing tools. Enter 0 if none.</p>
+       </div>
+       {stage.capacityBasis==='TIME_PER_UNIT'&&<div>
+        <TextField label='Time to make one unit (minutes)' type='number' min='0'
+         value={num(stage.runMinutesPerUnit)}
+         onChange={v=>updateStep(stage.code,{runMinutesPerUnit:Number(v)})}/>
+        <p className='mt-1 text-xs text-muted'>Example: enter 2 if one item needs 2 minutes.</p>
+       </div>}
        {stage.capacityBasis==='BATCH_CYCLE'&&<>
-        <TextField label='Batch size / output quantity' type='number' min='0'
-         value={num(stage.batchSize)} onChange={v=>updateStep(stage.code,{batchSize:Number(v)})}/>
-        <TextField label='Batch cycle minutes' type='number' min='0'
-         value={num(stage.cycleMinutes)} onChange={v=>updateStep(stage.code,{cycleMinutes:Number(v)})}/>
+        <div>
+         <TextField label='Batch size — how much is made?' type='number' min='0'
+          value={num(stage.batchSize)} onChange={v=>updateStep(stage.code,{batchSize:Number(v)})}/>
+         <p className='mt-1 text-xs text-muted'>Amount made in ONE batch, not the daily target. For example, 30,000 litres if the output SKU is measured in litres.</p>
+        </div>
+        <div>
+         <TextField label='Batch time — minutes to make one batch' type='number' min='0'
+          value={num(stage.cycleMinutes)} onChange={v=>updateStep(stage.code,{cycleMinutes:Number(v)})}/>
+         <p className='mt-1 text-xs text-muted'>How long one batch runs AFTER preparation. For a 2-hour batch, enter 120; do not include setup time.</p>
+        </div>
+        {num(stage.batchSize)>0&&num(stage.cycleMinutes)>0&&<div className='sm:col-span-2 space-y-1 rounded-xl border border-line bg-page p-3 text-xs' role='status'>
+         <p className='font-semibold text-ink'>Your numbers explained</p>
+         <p>You make <strong>{fmt(num(stage.batchSize))} output units</strong> in <strong>{fmt(num(stage.cycleMinutes))} minutes</strong>.</p>
+         <p>Production pace: <strong>{fmt(num(stage.batchSize)*60/num(stage.cycleMinutes))} output units/hour</strong> (while running, without setup).</p>
+         <p>First batch with one preparation: <strong>{fmt(num(stage.setupMinutes)+num(stage.cycleMinutes))} minutes</strong> ({fmt(num(stage.setupMinutes))} preparation + {fmt(num(stage.cycleMinutes))} production).</p>
+         <p className='text-muted'>The output unit comes from the selected stage SKU. This preview does not change calculations: the app tracks preparation separately from the hourly production rate. Repeat setup only when it really happens.</p>
+        </div>}
        </>}
       </div>
       <div className='rounded-lg bg-page p-3 text-xs'>
        {str(output?.category)==='INTERMEDIATE'?<>
-        <p className='font-semibold'>Intermediate/WIP: no commissioned SKU speed</p>
-        <p className='mt-1 text-muted'>This stage does not inherit a speed from intermediate-container capacity. Configure the relevant stage process or manufacturing-resource basis independently.</p>
+        <p className='font-semibold'>Intermediate product: use this step's own capacity</p>
+        <p className='mt-1 text-muted'>For a product still being made (e.g. syrup), the app does not assume the bottle-filling speed. Tell us how fast this step makes its own output, using the method above.</p>
        </>:stage.capacityBasis==='PHYSICAL_CONTAINER'?<>
         <p className='font-semibold'>Commissioned physical-container speed</p>
         <p className='mt-1'>{speedBusy?'Checking authoritative cost-centre rating…':
