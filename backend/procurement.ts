@@ -1662,18 +1662,28 @@ export const procurementRoutes = {
             const loc=locs.find(l=>str(l.code)===str(d.locationCode));
             const codes=restrictionCodesOf(d.restrictionCodes,str(d.restrictionCode)||str(loc?.restrictionCode));
             const subcodes=Array.isArray(d.subcategories)?d.subcategories.filter(isObj).map(y=>str(y.code)):[str(d.materialSubcategoryCode)];
-            const compatibleCategory=!categoryCode||!str(loc?.materialCategoryCode)||str(loc?.materialCategoryCode)===categoryCode;
+            const mappedSubcategories=Array.isArray(d.subcategories)?d.subcategories.filter(isObj):[];
+            const existingCategory=str(d.materialCategoryCode)||str(mappedSubcategories[0]?.categoryCode);
+            const compatibleCategory=(!categoryCode||!str(loc?.materialCategoryCode)||str(loc?.materialCategoryCode)===categoryCode)&&
+                (!categoryCode||!existingCategory||existingCategory===categoryCode)&&
+                mappedSubcategories.every(sc=>!str(sc.categoryCode)||str(sc.categoryCode)===categoryCode);
             const compatibleSubcategory=!!subcategoryCode&&subcodes.includes(subcategoryCode);
             const compatibleRestrictions=selected.every(code=>codes.includes(code));
+            const restrictionIssue=locationBlock(codes,master,'cluster '+x.id);
+            const segregatedSubcategory= !compatibleSubcategory&&codes.some(code=>SEGREGATED_RESTRICTIONS.has(code));
+            const adoptable=!!loc&&loc.active!==false&&compatibleCategory&&!!subcategoryCode&&
+                !restrictionIssue&&!segregatedSubcategory&&!!subcodes.length;
             const reason=!loc||loc.active===false?'Storage location inactive':
                 !compatibleCategory?'Different material category':
-                !compatibleSubcategory?'Different material subcategory':
-                !!locationBlock(codes,master,'cluster '+x.id)?'Cluster restrictions need attention':
+                restrictionIssue?'Cluster restrictions need attention':
+                segregatedSubcategory?'Segregated cluster: a different subcategory cannot be added':
+                !compatibleSubcategory?'Different material subcategory — can be added':
                 !compatibleRestrictions?'Not all selected restrictions are allowed':'';
             return {code:x.id,name:str(d.name)||x.id,locationCode:str(d.locationCode),
                 locationName:str(loc?.name)||'',subcategoryCodes:subcodes,
                 restrictionCodes:codes,restrictionLabels:codes.map(code=>master.find(m=>m.code===code)?.label||code),
-                storageTypeCode:str(d.storageTypeCode),compatible:!reason,reason};
+                storageTypeCode:str(d.storageTypeCode),compatible:!reason,reason,adoptable,
+                requiresSubcategoryExtension:adoptable&&!compatibleSubcategory};
         }).sort((a,b)=>Number(b.compatible)-Number(a.compatible)||a.code.localeCompare(b.code));
         return {clusters,warehouseConfigured:true};
     })],
