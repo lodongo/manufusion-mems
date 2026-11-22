@@ -96,15 +96,19 @@ function UtilityEditor({
     const [values, setValues] = useState<Record<string, string>>(() =>
         Object.fromEntries(attrs.map(a=>[a.key,initial[a.key]===undefined||initial[a.key]===null?'':String(initial[a.key])])));
     const demand=determinant?Number(values[determinant.key]):0;
+    // Compare this equipment's conditions independently; the backend retains
+    // full conditions for every other equipment and reviews all combined loads.
     const localReview=supply?reviewUtilityDistribution(utility,supply.values,supply.capacity,
-        [...supply.review.consumers.filter(c=>c.equipmentId!==workCenterId).map(c=>({
-            equipmentId:c.equipmentId,name:c.name,values:
-                c.demand!==null&&determinant?{[determinant.key]:c.demand}:{} ,
-            legacy:c.legacy,hasAsset:c.hasAsset,
-        })),{equipmentId:workCenterId,name:'This equipment',values,legacy:false,hasAsset:true}]):null;
+        [{equipmentId:workCenterId,name:'This equipment',values,legacy:false,hasAsset:true}]):null;
+    const previousDemand=supply?.review.consumers.find(c=>c.equipmentId===workCenterId)?.demand||0;
+    const totalProjected=supply&&determinant?supply.review.demand-previousDemand+
+        (Number.isFinite(demand)&&demand>0?demand:0):null;
+    const projectedPercent=totalProjected!==null&&supply?.capacity?
+        totalProjected/supply.capacity*100:null;
     const sourceReady=internal||!!allocation&&!allocation.missingUtility&&
         !!supply?.ready&&(!determinant||!!supply.capacity&&Number.isFinite(demand)&&demand>0)&&
-        localReview?.status!=='overload'&&localReview?.status!=='incompatible';
+        (projectedPercent===null||projectedPercent<=100)&&
+        localReview?.status!=='incompatible';
     const [touched, setTouched] = useState<string[]>([]);
     const [showAll, setShowAll] = useState(Object.keys(initial).length > 0);
 
@@ -169,8 +173,8 @@ function UtilityEditor({
                             <p>Utility: {supply.label} · {supply.sources.length} registered source asset(s)</p>
                             <p>Allocated capacity: <strong>{supply.capacity??'Not rated'} {determinant?.unit||''}</strong></p>
                             <p>Existing equipment demand: {supply.review.demand} {determinant?.unit||''}</p>
-                            {localReview?.percentage!==null&&<p>
-                                Projected demand after this equipment: <strong>{localReview?.percentage?.toFixed(1)}%</strong> of cost-centre capacity
+                            {projectedPercent!==null&&<p>
+                                Projected combined demand after this equipment: <strong>{projectedPercent.toFixed(1)}%</strong> of cost-centre capacity
                             </p>}
                             {localReview?.gaps.filter(g=>g.equipmentId===workCenterId&&g.key!=='asset').slice(0,5).map((g,i)=>
                                 <p key={i} className='text-amber-500'>{g.message}</p>)}
@@ -194,7 +198,7 @@ function UtilityEditor({
                     </Button>}
                     {supply&&determinant&&(!Number.isFinite(demand)||demand<=0)&&
                         <Alert tone='warn'>Enter the positive equipment requirement in {determinant.unit} below.</Alert>}
-                    {supply&&localReview?.status==='overload'&&<Alert tone='error'>
+                    {supply&&projectedPercent!==null&&projectedPercent>100&&<Alert tone='error'>
                         The combined equipment requirement exceeds the cost-centre allocation. Increase supply capacity or reduce demand.
                     </Alert>}
                     {supply&&localReview?.status==='incompatible'&&<Alert tone='error'>
