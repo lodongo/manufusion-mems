@@ -47,9 +47,10 @@ test('Compressed air uses summed flow while pressure is at-least equipment minim
  assert.ok(pressure.gaps.some(x=>x.key==='pressure'));
 });
 test('Missing equipment capacity remains unresolved instead of being treated as zero',()=>{
- const r=reviewUtilityDistribution(air,{pressure:7},100,[
-  {equipmentId:'A',values:{flow:35,pressure:6}},
-  {equipmentId:'B',values:{flow:undefined,pressure:6}},
+ const supply={pressure:7,dewpoint:-40,particle:'1',water:'1',oil:'1'};
+ const r=reviewUtilityDistribution(air,supply,100,[
+  {equipmentId:'A',values:{flow:35,pressure:6,dewpoint:-40,particle:'1',water:'1',oil:'1'}},
+  {equipmentId:'B',values:{flow:undefined,pressure:6,dewpoint:-40,particle:'1',water:'1',oil:'1'}},
  ]);
  assert.equal(r.demand,35);
  assert.equal(r.unknown,1);
