@@ -3,7 +3,7 @@ import { Check, RefreshCw } from 'lucide-react';
 import { callBackend } from '../lib/backend';
 import { Alert } from '../components/ui';
 import RichTable, { type Column } from '../components/RichTable';
-import { Badge, Button, Spinner, useLoad } from '../admin/kit';
+import { Button, Spinner, useLoad } from '../admin/kit';
 import { fmtDate } from '../admin/format';
 import InventoryMaterialDetail from './InventoryMaterialDetail';
 
