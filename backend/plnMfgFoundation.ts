@@ -11,7 +11,8 @@ import { getNode } from './structure';
 import { calculateSkuConversion, composeConfiguredSkuName, composeSkuNameWithSequence, skuUnitConversion, masterPrefix, type SkuComponents } from './mfgSkuModel';
 import { commitGeneratedCode, skuParametersForOrg, namingSequenceForOrg } from './mfgSkuConfiguration';
 import { mfgMaterialPolicyForOrg, mfgMaterialPolicyPath, normalizeMfgMaterialPolicy, bomClassificationCode } from './mfgMaterialPolicy';
-import {eligibleManufacturingHierarchy,routingManufacturingCostCenter,routingCommissionedCapacity} from './plnCostCenterCapacity';
+import {eligibleManufacturingHierarchy,routingManufacturingCostCenter,routingCommissionedCapacity,isManufacturingCostType} from './plnCostCenterCapacity';
+import {costCenterSubcategories} from '../src/shared/costCenterTaxonomy';
 import {physicalRatingUnits} from './plnPhysicalCapacity';
 import { allowedNodeIds } from './positions';
 import {reviewManufacturingRouting} from './mfgRoutingReadiness';
@@ -81,7 +82,7 @@ export function bomAlternative(value:unknown):string {
 /** Organization-managed defaults for new Production Planning & MRP forms only. */
 const BASE_PLN_FORM_DEFAULTS={
  defaultSiteId:'',skuCategory:'FINISHED',bomOutputQty:1,
- resourceType:'LINE',resourceRate:1000,resourceEfficiency:100,
+ resourceCostCenterCategory:'MFG',resourceCostCenterSubcategory:'',
  routingAlternativeCode:'STANDARD',demandType:'FORECAST',demandQuantity:1,demandLeadDays:7,
 } as const;
 function normalizePlanningFormDefaults(raw:unknown){
@@ -90,16 +91,19 @@ function normalizePlanningFormDefaults(raw:unknown){
  if(defaultSiteId&&!ID.test(defaultSiteId))throw new HttpError(400,'Invalid default planning site.');
  const skuCategory=ENUM(value.skuCategory??BASE_PLN_FORM_DEFAULTS.skuCategory,STAGES,'default SKU category');
  const bomOutputQty=POSITIVE(value.bomOutputQty??BASE_PLN_FORM_DEFAULTS.bomOutputQty,'Default BOM output quantity');
- const resourceType=ENUM(value.resourceType??BASE_PLN_FORM_DEFAULTS.resourceType,RESOURCE_TYPES,'default resource class');
- const resourceRate=POSITIVE(value.resourceRate??BASE_PLN_FORM_DEFAULTS.resourceRate,'Default resource rate');
- const resourceEfficiency=POSITIVE(value.resourceEfficiency??BASE_PLN_FORM_DEFAULTS.resourceEfficiency,'Default resource efficiency');
- if(resourceEfficiency>100)throw new HttpError(400,'Default resource efficiency cannot exceed 100%.');
+ const resourceCostCenterCategory=str(value.resourceCostCenterCategory??BASE_PLN_FORM_DEFAULTS.resourceCostCenterCategory).trim();
+ if(!/^[A-Z0-9_-]{2,20}$/.test(resourceCostCenterCategory))
+  throw new HttpError(400,'Choose a valid cost-centre category for manufacturing resources.');
+ const resourceCostCenterSubcategory=str(value.resourceCostCenterSubcategory??'').trim();
+ if(resourceCostCenterSubcategory&&!costCenterSubcategories(resourceCostCenterCategory)
+  .some(item=>item.code===resourceCostCenterSubcategory))
+  throw new HttpError(400,'Choose a cost-centre subcategory belonging to the selected category.');
  const routingAlternativeCode=bomAlternative(value.routingAlternativeCode??BASE_PLN_FORM_DEFAULTS.routingAlternativeCode);
  const demandType=ENUM(value.demandType??BASE_PLN_FORM_DEFAULTS.demandType,['FORECAST','FIRM_ORDER'] as const,'default demand type');
  const demandQuantity=POSITIVE(value.demandQuantity??BASE_PLN_FORM_DEFAULTS.demandQuantity,'Default demand quantity');
  const demandLeadDays=NONNEGATIVE(value.demandLeadDays??BASE_PLN_FORM_DEFAULTS.demandLeadDays,'Default demand lead days',3650);
  if(!Number.isInteger(demandLeadDays))throw new HttpError(400,'Default demand lead days must be a whole number.');
- return {defaultSiteId,skuCategory,bomOutputQty,resourceType,resourceRate,resourceEfficiency,
+ return {defaultSiteId,skuCategory,bomOutputQty,resourceCostCenterCategory,resourceCostCenterSubcategory,
   routingAlternativeCode,demandType,demandQuantity,demandLeadDays};
 }
 
@@ -996,6 +1000,9 @@ export const plnMfgFoundationRoutes={
             if(ctx.role!=='org_super_admin'&&!hasPerm(ctx.directPermissions,'PLN.configure'))
                 throw new HttpError(403,'Organization-wide form defaults require direct Planning configuration permission.');
             const formDefaults=normalizePlanningFormDefaults(ctx.body.formDefaults);
+            const typeMetadata=await getDoc('module_workspaces/FIN/metadata/costCenterTypes');
+            if(!isManufacturingCostType(formDefaults.resourceCostCenterCategory,typeMetadata?.data.items))
+                throw new HttpError(400,'Only Manufacturing/Production cost-centre categories can be used as manufacturing resource defaults.');
             if(formDefaults.defaultSiteId){
                 const site=await getNode(ctx,formDefaults.defaultSiteId);
                 if(str(site.data.level)!=='site'||str(site.data.status)==='inactive')
