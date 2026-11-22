@@ -179,10 +179,14 @@ export function normalizeMaster(kind:MasterKind, raw:unknown): Obj {
         });
         return {...base,classificationCode,productVariantId,alternativeCode,routingId,parentSkuId,outputQty:POSITIVE(raw.outputQty??1,'Output basis'),outputUom:UOM(raw.outputUom),components:lines as unknown as Plain,effectiveFrom:effectiveDate(raw.effectiveFrom),versionNote:str(raw.versionNote).slice(0,300)};
     }
-    const skuId=VALID_ID(raw.skuId,'Primary routed SKU');
     const processClassId=str(raw.processClassId).trim();
     if(processClassId)VALID_ID(processClassId,'Manufacturing process classification');
     const routingModelVersion=raw.routingModelVersion===2?2:1;
+    // A new stage-based route can be owned by its process classification.
+    // Previously created SKU-anchored routing records retain their original SKU.
+    const skuId=str(raw.skuId).trim()
+        ?VALID_ID(raw.skuId,'Routed SKU')
+        :routingModelVersion===2&&processClassId?'':VALID_ID(raw.skuId,'Routed SKU');
     const advanced=routingModelVersion===2;
     const operations=ARR(raw.operations);
     if(!operations.length||operations.length>60)throw new HttpError(400,'A routing must have 1–60 operations.');
@@ -659,6 +663,8 @@ export const plnMfgFoundationRoutes={
             if(creating&&Number(ctx.body.expectedRevision)!==0)
                 throw new HttpError(409,'New master data starts with revision zero.');
             const old=creating?null:await getDoc(DOC(ctx.orgId,kind,VALID_ID(requestedId,'Master code')));
+            if(kind==='routings'&&creating&&!str(raw.processClassId))
+                throw new HttpError(400,'Select a manufacturing process classification before creating a routing. Create process groups in Product Configuration.');
             if(kind==='items'&&creating&&['FINISHED','INTERMEDIATE'].includes(str(raw.category))&&
                 !str(raw.processClassId)){
                 const configured=await skuParametersForOrg(ctx.orgId);
