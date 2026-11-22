@@ -77,7 +77,7 @@ const stageList=(input:unknown):RoutingStep[]=>Array.isArray(input)?input as Rou
 /** Stage editor does not write to resources, BOMs or equipment; it only saves routing references. */
 export default function PlnProcessRoutingEditor({value,onChange,items,boms,resources,sites,processClasses,measureUnits}:{
  value:RoutingRecord;onChange:(next:RoutingRecord)=>void;items:Row[];boms:Row[];resources:Row[];
- sites:Array<{id:string;name:string;code:string}>;processClasses:Array<{id:string;name:string;enabled?:boolean}>;
+ sites:Array<{id:string;name:string;code:string}>;processClasses:Array<{id:string;name:string;processCode?:string;enabled?:boolean}>;
  measureUnits:Array<CapacityUnit&{label?:string;symbol?:string}>}){
  const [centers,setCenters]=useState<CostCenter[]>([]);
  const [loadError,setLoadError]=useState('');
@@ -250,7 +250,7 @@ export default function PlnProcessRoutingEditor({value,onChange,items,boms,resou
      options={[['','Select site'],...sites.map(s=>[s.id,s.name+' · '+s.code] as [string,string])]}
      onChange={siteId=>{setReview(null);onChange({...value,siteId});}}/>
     <Choice label='Manufacturing process classification' value={value.processClassId||''}
-     options={[['','No classification assigned'],...classOptions.map(x=>[x.id,x.name] as [string,string])]}
+     options={[['','No classification assigned'],...classOptions.map(x=>[x.id,(x.processCode?x.processCode+' · ':'')+x.name] as [string,string])]}
      onChange={processClassId=>{
       // Process classification never silently deletes a previously entered BOM,
       // stage or SKU allocation. Mismatches are shown for explicit correction.
