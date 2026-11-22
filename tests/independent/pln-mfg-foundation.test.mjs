@@ -25,12 +25,15 @@ test('real raw and packaging materials require an Inventory master reference',()
  assert.equal(normalizeMaster('items',{id:'CAP-2622',name:'Cap',category:'PACKAGING',uom:'EA',packQty:1,inventoryMaterialId:'MAT-2622'}).inventoryMaterialId,'MAT-2622');
 });
 
-test('BOM editor follows output, materials and optional advanced settings',()=>{
+test('BOM editor starts with applicability settings before output and materials',()=>{
  const ui=read('src/org/ProductionFoundation.tsx');
  const backend=read('backend/plnMfgFoundation.ts');
- assert.ok(ui.includes('1. What are you producing?'));
- assert.ok(ui.includes('2. What materials are needed?'));
- assert.ok(ui.includes('3. Additional settings (optional)'));
+ assert.ok(ui.includes('1. BOM settings and applicability'));
+ assert.ok(ui.includes('2. What are you producing?'));
+ assert.ok(ui.includes('3. What materials are needed?'));
+ assert.ok(ui.includes("['SKU','One specific SKU']"));
+ assert.ok(ui.includes("['PROCESS_CLASS','All SKUs in a manufacturing process classification']"));
+ assert.ok(ui.includes("['ALL','All SKUs']"));
  assert.ok(ui.includes("if(tab==='boms')return <BomEditor"));
  assert.ok(!ui.includes('BOM alternative code'));
  assert.ok(!ui.includes('Product/Variant (optional for shared materials)'));
@@ -161,8 +164,9 @@ test('Release selection requires explicit BOM classification and alternative to 
  assert.ok(ui.includes('Alternative method identifier'));
  assert.ok(ui.includes('Intermediate tracking'));
  assert.ok(ui.includes('Adopted equipment utility supply'));
- assert.ok(ui.includes('Alternate unit'));
- assert.ok(ui.includes('Other consumption options'));
+ assert.ok(ui.includes('Unit category'));
+ assert.ok(ui.includes('Material quantity unit'));
+ assert.ok(ui.includes('Consumption options'));
 });
 
 test('BOM dependencies include different classifications',()=>{
