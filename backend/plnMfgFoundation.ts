@@ -650,6 +650,7 @@ export const plnMfgFoundationRoutes={
                     await recordAccess(ctx,'MFG.view',d.id)?d:null))).filter((d):d is NonNullable<typeof d>=>d!==null)
                     .flatMap(d=>ARR(d.data.items).map(u=>({
                         workCenterId:d.id,code:str(u.code),name:str(u.label)||str(u.code),
+                        uom:str(u.uom)||str(u.unitCode)||str(u.measurementUnitCode),
                     }))).filter(u=>u.code),
                 materials:materials.filter(x=>['approved','active'].includes(str(x.data.status))&&str(x.data.materialNumber))
                     .map(x=>({id:x.id,name:str(x.data.shortText)||str(x.data.name)||x.id,
