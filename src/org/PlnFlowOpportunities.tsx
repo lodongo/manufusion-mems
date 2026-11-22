@@ -1,10 +1,12 @@
 import type {FlowAnalysis} from '../shared/mfgFlowCapacity';
 const fmt=(value:number)=>new Intl.NumberFormat(undefined,{maximumFractionDigits:2}).format(value);
-export default function PlnFlowOpportunities({analysis,heading='Capacity opportunities',showUnresolved=true}:{
+export default function PlnFlowOpportunities({analysis,heading='Capacity opportunities',showUnresolved=true,units=[]}:{
  analysis:FlowAnalysis|undefined;heading?:string;showUnresolved?:boolean;
+ units?:Array<{code:string;label?:string;symbol?:string}>;
 }){
  if(!analysis)return null;
  const constrained=analysis.opportunities.filter(x=>x.shortagePerHour>0);
+ const unitName=(code:string)=>units.find(x=>x.code===code)?.symbol||units.find(x=>x.code===code)?.label||code;
  return <section className='space-y-2 rounded-xl border border-line bg-panel p-3' aria-live='polite'>
   <div className='flex flex-wrap items-center justify-between gap-2'>
    <h3 className='text-sm font-semibold'>{heading}</h3>
@@ -20,11 +22,11 @@ export default function PlnFlowOpportunities({analysis,heading='Capacity opportu
     <p className='font-semibold'>{x.upstreamName||x.upstreamCode} → {x.downstreamName||x.downstreamCode}</p>
     <span className='font-semibold text-amber-700'>{fmt(x.shortagePercent)}% upstream shortfall</span>
    </div>
-   <p>Upstream can supply <strong>{fmt(x.supplyCoveragePercent)}%</strong> of the required input rate. Supply: <strong>{fmt(x.upstreamRate)} {x.unitCode}/h</strong>; required: <strong>{fmt(x.requiredInputRate)} {x.unitCode}/h</strong>.</p>
-   <p>Missing supply over one uninterrupted hour: <strong>{fmt(x.oneHourShortage)} {x.unitCode}</strong>.</p>
+   <p>Upstream can supply <strong>{fmt(x.supplyCoveragePercent)}%</strong> of the required input rate. Supply: <strong>{fmt(x.upstreamRate)} {unitName(x.unitCode)}/h</strong>; required: <strong>{fmt(x.requiredInputRate)} {unitName(x.unitCode)}/h</strong>.</p>
+   <p>Missing supply over one uninterrupted hour: <strong>{fmt(x.oneHourShortage)} {unitName(x.unitCode)}</strong>.</p>
    {x.bufferAvailable===null?
     <p>Buffer not specified. The time until interruption cannot be estimated.</p>:
-    <p>Usable buffer: <strong>{fmt(x.bufferAvailable)} {x.unitCode}</strong>.
+    <p>Usable buffer: <strong>{fmt(x.bufferAvailable)} {unitName(x.unitCode)}</strong>.
      {' '+(x.minutesToDepletion===null?'No depletion estimated.':
      'At the configured rates the buffer would last about '+fmt(x.minutesToDepletion)+' minutes.') }
      {x.riskWithinHour===true?' Potential interruption within one hour if no other supply is available.':
