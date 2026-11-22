@@ -210,7 +210,7 @@ function BomEditor({draft,onChange,items,refs,skuSetup,materialPolicy}:{
      .then(result=>setCostSupplies(result.supplies))
      .catch(e=>setCostSupplyError(e instanceof Error?e.message:'Could not load cost-centre utility capability.'));
  };
- useEffect(()=>{if(includesProcess)refreshCostSupplies();},[includesProcess]);
+ useEffect(()=>{if(includesProcess)refreshCostSupplies();},[includesProcess,draft.parentSkuId]);
  const components=asComponents(draft.components);
  const quantity=number(draft.outputQty,1);
  const outputUom=str(draft.outputUom)||str(output?.uom)||'EA';
@@ -533,8 +533,13 @@ function BomEditor({draft,onChange,items,refs,skuSetup,materialPolicy}:{
                                 <Choice title='Supplying cost centre' value={c.supplyCostCenterId||''}
                                     options={processCostCenterChoices}
                                     onChange={costCenterId=>{
-                                        updateComponent(i,{supplyCostCenterId:costCenterId,
-                                            supplyUtilityCode:'',utilityWorkCenterId:'',utilityCode:''});
+                                        const selectedSupply=costSupplies.find(s=>s.costCenterId===costCenterId);
+                                        onChange({...draft,
+                                            siteId:selectedSupply?.siteId||str(draft.siteId),
+                                            components:components.map((row,j)=>j===i?{...row,
+                                                supplyCostCenterId:costCenterId,supplyUtilityCode:'',
+                                                utilityWorkCenterId:'',utilityCode:''}:row),
+                                        });
                                     }}/>
                                 <Choice title='Utility supplied by selected cost centre'
                                     value={c.supplyUtilityCode||''}
