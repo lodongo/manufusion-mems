@@ -8,7 +8,7 @@ import type {UtilityCapacityReview} from '../shared/utilityDistributionCapacity'
 
 type Source={assetTag:string;allocatedCapacity:number|null};
 type Item={code:string;label:string;values:Record<string,string|number>;sources:Source[];
- capacity:number|null;ready:boolean;review:UtilityCapacityReview|null;legacy?:boolean};
+ capacity:number|null;ready:boolean;review:UtilityCapacityReview|null;sourceIssues?:string[];legacy?:boolean};
 type DraftItem=Pick<Item,'code'|'label'|'values'|'sources'>;
 type Asset={tag:string;name:string;status:string;nodeId:string;rating:{
  key:string;unit:string;capacity:number|null}|null};
@@ -131,6 +131,9 @@ export default function CostCenterUtilitySupplies({costCenterId,onBack}:{
        </div>}
        <p>Equipment served: {review.consumers.length} · Unknown demand: {review.unknown}
         {review.remaining!==null?' · Remaining capacity: '+num(review.remaining)+' '+review.determinant?.unit:''}</p>
+       {(latest?.sourceIssues?.length||0)>0&&<div className='space-y-1'>
+        {latest?.sourceIssues?.map((issue,i)=><p key={i} className='text-amber-600'>{issue}</p>)}
+       </div>}
        {review.gaps.length>0&&<div className='space-y-1'>
         {review.gaps.slice(0,8).map((g,i)=><p className='text-amber-600' key={g.equipmentId+'-'+g.key+'-'+i}>
          {g.equipmentId}: {g.message}</p>)}
