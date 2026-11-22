@@ -1,6 +1,7 @@
 import {useEffect,useId,useState,type ReactNode} from 'react';
 import {Alert,Field,SelectField} from '../components/ui';
 import {callBackend} from '../lib/backend';
+import CostCenterUtilitySupplies from './CostCenterUtilitySupplies';
 import {THROUGHPUT_OUTPUTS,throughputOutput,throughputOutputGroups} from '../shared/throughputOutput';
 import {skuRatingReadiness} from '../shared/plnSkuRatingReadiness';
 
@@ -63,6 +64,7 @@ export default function PlnCostCenterSkuSetup({costCenterId,initialSkuId='',onBa
  const [error,setError]=useState(''),[notice,setNotice]=useState('');
  const [showValidation,setShowValidation]=useState(false);
  const [openSku,setOpenSku]=useState('');
+ const [showUtilities,setShowUtilities]=useState(false);
  const load=async()=>{
   setLoading(true);setError('');
   try{
@@ -521,5 +523,14 @@ export default function PlnCostCenterSkuSetup({costCenterId,initialSkuId='',onBa
     {!data.canConfigure&&<p className='text-xs text-muted'>You have read access; edits require Planning or Organization Design permission.</p>}
     <p className='text-xs text-muted'>This is a commissioned capacity reference, not a production schedule or material posting. Where a packaging or transport relationship is absent, the corresponding rating remains unavailable.</p>
    </section>}
+   <section className='rounded-xl border border-line bg-panel p-3'>
+    <button type='button' className='flex min-h-11 w-full items-center justify-between gap-3 text-left'
+     onClick={()=>setShowUtilities(v=>!v)}>
+     <span className='font-semibold text-ink'>Utility supply &amp; equipment distribution</span>
+     <span className='text-sm text-muted'>{showUtilities?'Hide':'Configure & review'}</span>
+    </button>
+    <p className='mt-1 text-xs text-muted'>Cost-centre utility catalogue, source assets, aggregate equipment loads and voltage/pressure/quality compatibility. Independent of SKU throughput ratings.</p>
+    {showUtilities&&<div className='mt-3'><CostCenterUtilitySupplies costCenterId={costCenterId}/></div>}
+   </section>
  </div>;
 }
