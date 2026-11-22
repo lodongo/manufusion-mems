@@ -198,10 +198,16 @@ function BomEditor({draft,onChange,items,refs,skuSetup,materialPolicy}:{
             <div className='space-y-3'>
                 {components.map((c,i)=>{
                     const fromWarehouse=c.source==='WAREHOUSE';
+                    const processSupply=c.source==='PROCESS_SUPPLY';
+                    const supplyRef=c.processSupplyKind||'SKU';
+                    const processMaterial=refs.materials.find(m=>m.id===c.materialId);
+                    const processUtility=refs.utilities.find(u=>u.workCenterId===c.utilityWorkCenterId&&u.code===c.utilityCode);
                     const material=refs.warehouseMaterials.find(m=>m.warehouseId===c.warehouseId&&m.id===c.materialId);
                     const warehouse=refs.warehouses.find(w=>w.id===c.warehouseId);
                     const selected=items.find(item=>item.id===c.skuId);
-                    const unitBasis=fromWarehouse?material?.uom:str(selected?.uom);
+                    const unitBasis=fromWarehouse?material?.uom:processSupply?
+                        (supplyRef==='SKU'?str(selected?.uom):supplyRef==='PROCUREMENT'?processMaterial?.uom:processUtility?.uom):
+                        str(selected?.uom);
                     const availableMaterials=refs.warehouseMaterials.filter(m=>m.warehouseId===c.warehouseId);
                     return <div key={i} className='space-y-3 rounded-lg border border-line bg-page p-3'>
                         <div className='flex flex-wrap items-center justify-between gap-2'>
@@ -209,13 +215,23 @@ function BomEditor({draft,onChange,items,refs,skuSetup,materialPolicy}:{
                             <button type='button' className='min-h-10 rounded-lg border border-line px-3 text-xs text-ink'
                                 onClick={()=>update('components',components.filter((_,j)=>j!==i))}>Remove</button>
                         </div>
-                        <Choice title='Material source' value={fromWarehouse?'WAREHOUSE':'INTERMEDIATE'}
-                            options={[['INTERMEDIATE','Manufactured intermediate / WIP'],['WAREHOUSE','Approved Procurement material from warehouse']]}
+                        <Choice title='Material source' value={c.source==='PROCESS_SUPPLY'?'PROCESS_SUPPLY':fromWarehouse?'WAREHOUSE':'INTERMEDIATE'}
+                            options={[
+                                ['INTERMEDIATE','Manufactured intermediate / WIP'],
+                                ['WAREHOUSE','Approved Procurement material from warehouse'],
+                                ['PROCESS_SUPPLY','Process supply · continuous, metered, inline or bulk'],
+                            ]}
                             onChange={v=>update('components',components.map((row,j)=>j===i?{
                                 source:v as Component['source'],skuId:'',warehouseId:'',materialId:'',
+                                utilityWorkCenterId:'',utilityCode:'',processSupplyKind:v==='PROCESS_SUPPLY'?'SKU':undefined,
+                                deliveryMode:v==='PROCESS_SUPPLY'?'INLINE':undefined,
+                                quantityMethod:v==='PROCESS_SUPPLY'?'PLANNED':undefined,
+                                requiredFlowPerHour:null,bufferCapacity:null,bufferUsable:null,
                                 quantity:row.quantity,uom:'',scrapPct:row.scrapPct}:row))}/>
                         <span className='inline-flex rounded-full border border-line bg-panel px-3 py-1 text-xs font-medium text-ink'>
-                            {fromWarehouse?'WAREHOUSE · PROCUREMENT MATERIAL':!c.source&&selected&&str(selected.category)!=='INTERMEDIATE'?'EXISTING · MANUFACTURING SKU':'MANUFACTURED · INTERMEDIATE/WIP'}
+                            {processSupply?'PROCESS SUPPLY · NON-WAREHOUSE':
+                                fromWarehouse?'WAREHOUSE · PROCUREMENT MATERIAL':
+                                    !c.source&&selected&&str(selected.category)!=='INTERMEDIATE'?'EXISTING · MANUFACTURING SKU':'MANUFACTURED · INTERMEDIATE/WIP'}
                         </span>
                         {fromWarehouse?<div className='space-y-3'>
                             <Choice title='Warehouse (within your access)' value={c.warehouseId||''} options={warehouseChoices}
@@ -231,6 +247,60 @@ function BomEditor({draft,onChange,items,refs,skuSetup,materialPolicy}:{
                             {!refs.warehouses.length&&<p className='text-xs text-muted'>
                                 No accessible warehouse currently has approved, mapped Procurement materials.
                             </p>}
+                        </div>:processSupply?<div className='space-y-3'>
+                            <p className='text-xs text-muted'>For treated water, gas, steam or other process inputs. Choose the existing material or utility first, then describe how it reaches this manufacturing stage. Do not create a duplicate SKU just because the source changes.</p>
+                            <Choice title='Process supply reference' value={supplyRef}
+                                options={[['SKU','Existing manufactured / raw material SKU'],
+                                    ['UTILITY','Registered metered equipment utility'],
+                                    ['PROCUREMENT','Approved Procurement material · direct/bulk (not a warehouse stock issue)']]}
+                                onChange={v=>updateComponent(i,{processSupplyKind:v as Component['processSupplyKind'],
+                                    skuId:'',materialId:'',warehouseId:'',utilityWorkCenterId:'',utilityCode:'',uom:''})}/>
+                            {supplyRef==='SKU'&&<Choice title='Process material / intermediate SKU' value={c.skuId}
+                                options={processMaterialChoices}
+                                onChange={v=>updateComponent(i,{skuId:v,materialId:'',warehouseId:'',
+                                    utilityWorkCenterId:'',utilityCode:'',uom:str(items.find(x=>x.id===v)?.uom)})}/>}
+                            {supplyRef==='PROCUREMENT'&&<Choice title='Direct / bulk purchased material' value={c.materialId||''}
+                                options={processProcurementChoices}
+                                onChange={v=>updateComponent(i,{materialId:v,skuId:'',warehouseId:'',
+                                    utilityWorkCenterId:'',utilityCode:'',uom:str(refs.materials.find(m=>m.id===v)?.uom)})}/>}
+                            {supplyRef==='UTILITY'&&<Choice title='Equipment utility source' value={c.utilityWorkCenterId&&c.utilityCode?
+                                c.utilityWorkCenterId+'::'+c.utilityCode:''}
+                                options={processUtilityChoices}
+                                onChange={v=>{
+                                    const ref=refs.utilities.find(u=>u.workCenterId+'::'+u.code===v);
+                                    updateComponent(i,{utilityWorkCenterId:ref?.workCenterId||'',
+                                        utilityCode:ref?.code||'',skuId:'',materialId:'',warehouseId:'',
+                                        uom:ref?.uom||''});
+                                }}/>}
+                            {supplyRef==='UTILITY'&&<p className='text-xs text-muted'>This uses the registered utility reference. Select its approved quantity unit below if the register does not provide one.</p>}
+                            {supplyRef==='SKU'&&selected&&<p className='text-xs text-muted'>
+                                Source SKU {selected.id} · {selected.name}. Supply origins, rates and tariffs belong to this material's supply profile, not a second BOM line.
+                            </p>}
+                            {supplyRef==='PROCUREMENT'&&processMaterial&&<p className='text-xs text-muted'>
+                                {processMaterial.materialNumber} · {processMaterial.name}. Direct process use does not create a warehouse stock issue or purchase.
+                            </p>}
+                            <Choice title='Supply / delivery arrangement' value={c.deliveryMode||'INLINE'}
+                                options={[['INLINE','Inline · continuous / supply on demand'],
+                                    ['BUFFERED','Continuous feed with a buffer tank or accumulator'],
+                                    ['BULK_STORAGE','Bulk tank, silo or storage vessel'],
+                                    ['CYLINDER','Cylinder / canister supply']]}
+                                onChange={v=>updateComponent(i,{deliveryMode:v as Component['deliveryMode'],
+                                    bufferCapacity:null,bufferUsable:null})}/>
+                            <Choice title='How will actual usage be determined?' value={c.quantityMethod||'PLANNED'}
+                                options={[['PLANNED','Fixed / calculated recipe requirement'],
+                                    ['METERED','Metered continuous flow · actual usage recorded separately'],
+                                    ['AS_REQUIRED','As required · planned estimate, actual quantity reconciled later']]}
+                                onChange={v=>updateComponent(i,{quantityMethod:v as Component['quantityMethod']})}/>
+                            <p className='text-xs text-muted'>All three methods still need a planned material quantity for the selected BOM output. This keeps MRP and recipe calculations valid; meter readings and actual consumption are separate records.</p>
+                            {['BUFFERED','BULK_STORAGE'].includes(c.deliveryMode||'INLINE')&&
+                                <div className='space-y-2 rounded-lg border border-line bg-panel p-3'>
+                                    <p className='text-xs font-semibold'>Buffer / bulk storage</p>
+                                    <Field title='Buffer size / physical capacity' type='number' value={c.bufferCapacity??''}
+                                        onChange={v=>updateComponent(i,{bufferCapacity:v===''?null:Number(v)})}/>
+                                    <Field title='Usable quantity currently available (optional)' type='number' value={c.bufferUsable??''}
+                                        onChange={v=>updateComponent(i,{bufferUsable:v===''?null:Number(v)})}/>
+                                    <p className='text-xs text-muted'>Both quantities use the material unit below. Usable quantity must not exceed capacity. Leave usable blank if unknown; zero indicates an empty usable buffer. Capacity is NOT material consumed by the recipe.</p>
+                                </div>}
                         </div>:<div className='space-y-2'>
                             <Choice title='Manufactured intermediate' value={c.skuId} options={componentChoices}
                                 onChange={v=>updateComponent(i,{skuId:v,warehouseId:'',materialId:'',
