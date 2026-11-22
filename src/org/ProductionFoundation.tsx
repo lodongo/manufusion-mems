@@ -668,7 +668,7 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
             <div className='flex justify-end'><Button disabled={!canSkuConfig||busy} onClick={()=>void saveMaterialPolicy()}>Save manufacturing setup</Button></div>
         </Card>:active==='resources'?<ManufacturingResources onChanged={()=>{void load();}}/>:active==='capacityOverview'?
         <PlnCapacityOverview sites={refs.sites} processClasses={skuSetup.parameters.filter(p=>p.kind==='processClasses')}
-            items={rows.items}/>:active==='config'?<Card className='space-y-4'>
+            items={rows.items} units={skuSetup.units}/>:active==='config'?<Card className='space-y-4'>
             <p className='text-sm text-muted'>Initial organization-level planning defaults. Further rule sets and site overrides use the same configuration model in subsequent phases.</p>
             <div className='grid gap-3 sm:grid-cols-2'>
                 <Field title='Planning horizon (days)' type='number' value={config.horizonDays} onChange={v=>setConfig(s=>({...s,horizonDays:Number(v)}))}/>
