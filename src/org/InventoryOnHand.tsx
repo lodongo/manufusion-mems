@@ -10,8 +10,8 @@ import InventoryMaterialDetail from './InventoryMaterialDetail';
 // Inventory on hand (INV): every published material in every warehouse the person can access
 // (one row per material × warehouse: master warehouse, pushed warehouse or approved extension).
 // Net available and stock value are read from posted, reconciled stock journals only.
-// Missing/unreconciled balances never masquerade as zero; money is shown only
-// when the purchase unit matches the stock UOM and a unit price exists.
+// Missing/unreconciled balances never masquerade as zero. Purchase prices are
+// normalized to the stock UoM and legal-entity local currency using configured masters.
 // Tapping a row opens the material detail for that warehouse (stock position, settings, bins, journal).
 // Mobile layout: the page has no header or toolbar of its own. The search box and ONE menu button are the action bar
 // (always visible); the menu holds the warehouse choice, refresh, status and every table tool. The table fills the
@@ -37,6 +37,11 @@ interface Item {
     netAvailable: number | null;
     netStockValue: number | null;
     stockCurrency: string;
+    unitCostLocal: number | null;
+    purchaseUnitPrice: number | null;
+    priceUom: string;
+    priceCurrency: string;
+    valuationReason: string;
     stockStatus: 'Not yet tracked'|'Unreconciled'|'Empty bin'|'Overstock'|'Understock'|'Within limits';
     stockLedgerAvailable: boolean;
     createdAt: string;
@@ -60,7 +65,13 @@ const stockColour = (s: Item['stockStatus']) => s==='Overstock'?
     s==='Not yet tracked'?'bg-slate-100 text-slate-700 border-slate-300':
     'bg-emerald-100 text-emerald-900 border-emerald-300';
 
-const COLUMNS: Array<Column<Item>> = [
+const convertDisplayed = (value: number | null, source: string, selected: string, rates: Record<string, number>): number | null => {
+    if(value===null||!Number.isFinite(value)||!source)return null;
+    if(!selected||selected===source)return value;
+    const from=rates[source],to=rates[selected];
+    return Number.isFinite(from)&&from>0&&Number.isFinite(to)&&to>0?value/from*to:null;
+};
+const COLUMNS = (selectedCurrency: string, rates: Record<string, number>, mixedLocal: boolean): Array<Column<Item>> => [
     { key: 'materialNumber', label: 'Material number', value: (x) => x.materialNumber, render: (x) => <span className='font-mono font-semibold text-brandsoft'>{x.materialNumber}</span> },
     { key: 'name', label: 'Material', value: (x) => x.name, render: (x) => <span className='font-medium text-ink'>{x.name}</span> },
     { key: 'shortText', label: 'Description', value: (x) => x.shortText },
@@ -95,14 +106,21 @@ const COLUMNS: Array<Column<Item>> = [
     },
     {
         key: 'netStockValue',
-        label: 'Net stock value',
-        type: 'number',
-        value: (x) => x.netStockValue,
-        render: (x) => x.netStockValue===null||!Number.isFinite(x.netStockValue)?
-            <span className='text-muted' title='Needs a reconciled stock ledger and unit price in the same UOM as inventory'>—</span>:
-            <span className='font-semibold tabular-nums text-ink'>
-                {x.stockCurrency?x.stockCurrency+' ':''}{x.netStockValue.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}
-            </span>,
+        label: selectedCurrency ? `Net stock value (${selectedCurrency})` : 'Net stock value',
+        // Never total unlike currencies when multiple legal entities share this view.
+        type: !selectedCurrency && mixedLocal ? 'text' : 'number',
+        value: (x) => convertDisplayed(x.netStockValue,x.stockCurrency,selectedCurrency,rates),
+        render: (x) => {
+            const value=convertDisplayed(x.netStockValue,x.stockCurrency,selectedCurrency,rates);
+            const cost=convertDisplayed(x.unitCostLocal,x.stockCurrency,selectedCurrency,rates);
+            const curr=selectedCurrency||x.stockCurrency;
+            return value===null ?
+                <span className='text-muted' title={x.valuationReason||'Configured exchange rate is unavailable'}>—</span> :
+                <span className='font-semibold tabular-nums text-ink' title={`Procurement: ${x.priceCurrency} ${x.purchaseUnitPrice ?? '—'} per ${x.priceUom||'purchase unit'}. Normalized to ${x.uom||'stock unit'}.`}>
+                    {curr} {value.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}
+                    {cost!==null&&<span className='block text-xs font-normal text-slate-500'>@ {curr} {cost.toLocaleString(undefined,{maximumFractionDigits:4})}/{x.uom||'unit'}</span>}
+                </span>;
+        },
     },
     {
         key: 'stockStatus',
@@ -116,8 +134,9 @@ const COLUMNS: Array<Column<Item>> = [
 ];
 
 export default function InventoryOnHand() {
-    const { data, loading, error, reload } = useLoad(() => callBackend<{ items: Item[]; warehouses: Warehouse[] }>('/api/org/inventory/on-hand'));
+    const { data, loading, error, reload } = useLoad(() => callBackend<{ items: Item[]; warehouses: Warehouse[]; currencies: Array<{code:string;rate:number}> }>('/api/org/inventory/on-hand'));
     const [warehouse, setWarehouse] = useState('all');
+    const [displayCurrency, setDisplayCurrency] = useState('');
     const [detail, setDetail] = useState<Item | null>(null);
 
     const warehouses = data?.warehouses || [];
@@ -125,6 +144,10 @@ export default function InventoryOnHand() {
     const chosen = warehouses.find((w) => w.id === warehouse);
     const rows = useMemo(() => (data?.items || []).filter((x) => !chosen || x.warehouseId === chosen.id), [data, chosen]);
     const tracked = rows.filter((x) => x.stockLedgerAvailable).length;
+    const currencyOptions=data?.currencies||[];
+    const rates=useMemo(()=>Object.fromEntries(currencyOptions.map(x=>[x.code,x.rate])),[data]);
+    const mixedLocal=new Set(rows.map(x=>x.stockCurrency).filter(Boolean)).size>1;
+    const columns=useMemo(()=>COLUMNS(displayCurrency,rates,mixedLocal),[displayCurrency,rates,mixedLocal]);
 
     if (detail) {
         return (
@@ -160,7 +183,7 @@ export default function InventoryOnHand() {
                     id='inv.onhand'
                     title={chosen ? `Inventory on hand · ${chosen.name}` : 'Inventory on hand'}
                     menuTitle='Inventory on hand'
-                    columns={COLUMNS}
+                    columns={columns}
                     rows={rows}
                     rowKey={(x) => `${x.id}|${x.warehouseId}`}
                     onRowClick={setDetail}
@@ -169,6 +192,19 @@ export default function InventoryOnHand() {
                     height='h-full'
                     menuTop={(close) => (
                         <div className='space-y-3'>
+                            {currencyOptions.length>0&&(
+                                <section className='space-y-2'>
+                                    <label htmlFor='inv-stock-currency' className='block px-1 text-xs font-semibold uppercase tracking-wide text-slate-400'>Net stock value currency</label>
+                                    <select id='inv-stock-currency' aria-label='Net stock value currency'
+                                        className='min-h-12 w-full rounded-xl border border-slate-600 bg-slate-900 px-3 text-sm text-white'
+                                        value={displayCurrency} onChange={e=>{setDisplayCurrency(e.target.value);close();}}>
+                                        <option value=''>Legal entity local currency (default)</option>
+                                        {currencyOptions.map(x=><option key={x.code} value={x.code}>{x.code}</option>)}
+                                    </select>
+                                    <p className='px-1 text-xs text-slate-400'>Alternative values use configured MEMS exchange rates. Original procurement prices are never changed.</p>
+                                    {!displayCurrency&&mixedLocal&&<p className='px-1 text-xs text-amber-300'>Multiple local currencies: totals are disabled until one common display currency is selected.</p>}
+                                </section>
+                            )}
                             {warehouses.length > 1 && (
                                 <section role='radiogroup' aria-label='Warehouse' className='space-y-1'>
                                     <p className='px-1 text-xs font-semibold uppercase tracking-wide text-slate-400'>Warehouse</p>

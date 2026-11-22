@@ -12,6 +12,7 @@ import {METHODS as REPLENISHMENT_METHODS,factorsOf,methodOf,routeFor} from './re
 import {stockMasterItems,warehouseRestrictionMaster} from './stockMasters';
 import {SEGREGATED_RESTRICTIONS,binningBlock,effectiveRestriction,locationBlock,restrictionCodesOf} from './restrictionRules';
 import {materialPhotos,vendorsForMaterial} from './materialMedia';
+import {unitPricePerStockUnit,convertStockCurrency} from './inventoryValuation';
 // Numeric replenishment strategy parameters and their allowed ranges (material and warehouse, Inventory section).
 const REPLENISHMENT_LIMITS:Record<string,{min:number;max:number;integer?:boolean;message:string}>={
     annualDemand:{min:0,max:1e12,message:'Annual demand must be 0 or more.'},
@@ -1624,15 +1625,24 @@ export const procurementRoutes = {
         if(ctx.role!=='org_super_admin'&&!hasPerm(ctx.permissions,'INV.view')&&!hasPerm(ctx.permissions,'INV.')&&!hasPerm(ctx.permissions,'PRC.view'))
             throw new HttpError(403,'Inventory viewing permission required.');
         const root='organizations/'+ctx.orgId;
-        const [user,warehouses,materials,extensions,nodes,journal,inventoryInfo,procurementInfo,occupancies]=await Promise.all([
+        const [user,warehouses,materials,extensions,nodes,journal,inventoryInfo,procurementInfo,occupancies,org,legalEntities,uomDoc,currencyDoc]=await Promise.all([
             getDoc('users/'+ctx.uid),listDocs(root+'/warehouses'),listDocs(root+'/materials'),
             listDocs(root+'/material_extensions'),listDocs(root+'/structure'),
             listDocs(root+'/material_journal'),listDocs(root+'/inventory_material_info'),
             listDocs(root+'/procurement_material_info'),listDocs(root+'/warehouse_bin_occupancy'),
+            getDoc(root),listDocs(root+'/legal_entities'),getDoc('module_workspaces/PRC/metadata/unitsOfMeasure'),getDoc('reference/currencies'),
         ]);
         const allowed=ctx.role==='org_super_admin'?'all':user?await allowedNodeIds(ctx.orgId,user,true):new Set<string>();
         const nodeMap=new Map(nodes.map(x=>[x.id,x]));
         const visible=warehouses.filter(x=>allowed==='all'||allowed.has(x.id));
+        const warehouseById=new Map(visible.map(x=>[x.id,x.data]));
+        const entityById=new Map(legalEntities.map(x=>[x.id,x.data]));
+        const customUnits=Array.isArray(uomDoc?.data.items)?uomDoc.data.items.filter(isObj):[];
+        const configuredUnits=customUnits.length?customUnits:undefined;
+        const currencyEntries=(Array.isArray(currencyDoc?.data.items)?currencyDoc.data.items:[])
+            .filter(isObj).map(c=>({code:str(c.code).toUpperCase(),rate:Number(c.unitsPerUsd),enabled:c.enabled!==false}))
+            .filter(c=>/^[A-Z]{3}$/.test(c.code)&&c.enabled&&Number.isFinite(c.rate)&&c.rate>0);
+        const rates=Object.fromEntries(currencyEntries.map(c=>[c.code,c.rate]));
         const whMap=new Map(visible.map(w=>[w.id,{
             id:w.id,name:str(nodeMap.get(w.id)?.data.name)||str(w.data.name)||w.id,
             code:str(nodeMap.get(w.id)?.data.code)||str(w.data.code)||w.id,
@@ -1696,11 +1706,21 @@ export const procurementRoutes = {
                     min!==null&&net!==null&&net<min?'Understock':'Within limits';
                 const purchase=purchasing.get(m.id+'_'+warehouseId),unitPrice=level(purchase?.unitPrice);
                 const priceUom=str(purchase?.purchaseUom),stockUom=str(m.data.uom);
-                // Purchase price is per purchase UOM. Only multiply without
-                // conversion when it exactly equals the stock UOM.
-                const comparable=ready&&unitPrice!==null&&unitPrice>=0&&
-                    priceUom!==''&&stockUom!==''&&priceUom===stockUom;
-                const netStockValue=comparable&&net!==null?net*unitPrice!:null;
+                const priceCurrency=str(purchase?.priceCurrency).toUpperCase();
+                const entityId=str(warehouseById.get(warehouseId)?.legalEntityId)||str(m.data.legalEntityId);
+                const entity=entityById.get(entityId);
+                const localCurrency=(str(entity?.localCurrency)||str(entity?.currencyCode)||
+                    str(org?.data.localCurrency)||str(org?.data.currencyCode)).toUpperCase();
+                const unitCost=unitPrice!==null?unitPricePerStockUnit(unitPrice,priceUom,stockUom,configuredUnits):null;
+                const unitCostLocal=unitCost!==null?convertStockCurrency(unitCost,priceCurrency,localCurrency,rates):null;
+                const netStockValue=ready&&net!==null&&unitCostLocal!==null?net*unitCostLocal:null;
+                const valuationReason=!ready?'Stock journal must be posted and reconciled':
+                    unitPrice===null?'Procurement unit price is not configured':
+                    !priceUom||!stockUom?'Purchase or stock UoM is missing':
+                    unitCost===null?'No compatible, enabled UoM conversion in the Procurement units master':
+                    !priceCurrency?'Supplier price currency is not configured':
+                    !localCurrency?'Local currency is not configured for the legal entity':
+                    unitCostLocal===null?'Configured exchange rate is unavailable for this currency pair':'';
                 items.push({
                     id:m.id,materialNumber:str(m.data.materialNumber),name:str(m.data.name),
                     shortText:str(m.data.shortText),categoryCode:str(m.data.categoryCode),
@@ -1711,13 +1731,14 @@ export const procurementRoutes = {
                         str(m.data.proprietaryPartNumber)||str(m.data.generalPartNumber),
                     warehouseId,warehouseName:wh.name,warehouseCode:wh.code,
                     status:str(m.data.status),quantityOnHand:physical,netAvailable:net,
-                    netStockValue,stockCurrency:comparable?str(purchase?.priceCurrency):'',
+                    netStockValue,stockCurrency:localCurrency,unitCostLocal,priceCurrency,priceUom,
+                    purchaseUnitPrice:unitPrice,valuationReason,
                     stockLedgerAvailable:ready,stockStatus,emptyBin,
                     minimumLevel:min,maximumLevel:max,createdAt:str(m.data.createdAt),
                 });
             }
         }
-        return {warehouses:Array.from(whMap.values()),items};
+        return {warehouses:Array.from(whMap.values()),currencies:currencyEntries.map(({code,rate})=>({code,rate})),items};
     })],
     'POST /api/org/procurement/materials/options': [orgRoute('org.procurement.materials.options', null, async ctx => {requireModule(ctx,'materials');const [u,c,v,assemblies,warehouseDocs,user]=await Promise.all([getDoc('module_workspaces/PRC/metadata/unitsOfMeasure'),getDoc('module_workspaces/INV/metadata/materialClassifications'),listDocs('organizations/'+ctx.orgId+'/vendors'),listDocs('organizations/'+ctx.orgId+'/structure'),listDocs('organizations/'+ctx.orgId+'/warehouses'),getDoc('users/'+ctx.uid)]);const allowed=ctx.role==='org_super_admin'?'all':user?await allowedNodeIds(ctx.orgId,user,true):new Set<string>();const nodes=new Map(assemblies.map(x=>[x.id,x]));const costCenters=assemblies.filter(x=>str(x.data.level)==='cost_center'&&(allowed==='all'||allowed.has(x.id))&&str(x.data.status)!=='inactive').map(x=>({id:x.id,name:str(x.data.name)||x.id,code:str(x.data.code)||x.id}));const assets=assemblies.filter(x=>str(x.data.level)==='work_center'&&str(x.data.status)!=='inactive').map(x=>({id:x.id,name:str(x.data.name)||x.id,code:str(x.data.code)||x.id,parentId:str(x.data.parentId)}));const scopedAssemblies=assemblies.filter(x=>str(x.data.level)==='assembly'&&str(x.data.status)!=='inactive').map(x=>({id:x.id,name:str(x.data.name)||x.id,parentId:str(x.data.parentId)}));const warehouses=warehouseDocs.filter(x=>allowed==='all'||allowed.has(x.id)).map(x=>({id:x.id,name:str(nodes.get(x.id)?.data.name)||str(x.data.name)||x.id,code:str(nodes.get(x.id)?.data.code)||x.id,categoryCodes:Array.isArray(x.data.materialCategoryCodes)?x.data.materialCategoryCodes.map(str):str(x.data.materialCategoryCode)?[str(x.data.materialCategoryCode)]:[]}));return {warehouses,costCenters,assets,scopedAssemblies,uoms:(Array.isArray(u?.data.items)?u.data.items:[]).filter(x=>isObj(x)&&x.active!==false),classifications:(Array.isArray(c?.data.items)?c.data.items:[]).filter(x=>isObj(x)&&x.active!==false),restrictions:(await warehouseRestrictionMaster()).filter(x=>x.active),vendors:v.filter(x=>x.data.active!==false).map(x=>({id:x.id,name:str(x.data.name)||str(x.data.legalName)||x.id})),assemblies:assemblies.filter(x=>str(x.data.level)==='assembly').map(x=>({id:x.id,name:str(x.data.name)||x.id}))};})],
     'POST /api/org/procurement/materials/clusters': [orgRoute('org.procurement.materials.clusters',null,async ctx=>{
