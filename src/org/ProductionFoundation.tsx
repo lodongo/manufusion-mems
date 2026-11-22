@@ -367,6 +367,7 @@ function MasterEditor({tab,draft,onChange,items,boms,resources,refs,skuSetup,mat
             Object.values((draft.skuComponents||{}) as Record<string,unknown>).some(Boolean))&&<>
             <SkuConfigurationFields value={(draft.skuComponents||{}) as SkuSelections}
                 onChange={v=>update('skuComponents',v)} setup={skuSetup}
+                processClassId={str(draft.processClassId)}
                 variantLabel={str(draft.category)==='INTERMEDIATE'?'Product/Variant (optional for intermediate)':'Product/Variant'}/>
             {str(draft.category)==='FINISHED'&&draft.id&&skuSetup.namingConfigured&&<label className='flex min-h-11 items-center gap-2 rounded-xl border border-line p-3 text-sm text-ink'>
                 <input type='checkbox' checked={draft.applySkuNamingSequence===true}
