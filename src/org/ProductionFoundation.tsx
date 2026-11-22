@@ -47,7 +47,7 @@ type Component={
 type CostCenterSupplyOption={costCenterId:string;costCenterName:string;siteId:string;
  code:string;label:string;capacity:number|null;capacityUnit:string;determinantKey:string;
  demand:number;percentage:number|null;status:string;ready:boolean;values:Record<string,unknown>;
- sourceCount:number;unknown:number};
+ sourceCount:number;unknown:number;relevance?:number;costCenterSubcategories?:string[]};
 type Operation={code:string;name:string;resourceId:string;setupMinutes:number;runMinutesPerUnit:number;producesSkuId?:string;dependsOn?:string[]};
 type Config={horizonDays:number;freezeDays:number;lotPolicy:string;strategy:string;formDefaults?:FormDefaults};
 type BomClassification={code:string;name:string;enabled:boolean;mrpRelevant:boolean;productionEligible:boolean};
@@ -127,13 +127,12 @@ function TextField({title,value,onChange}:{title:string;value:string;onChange:(v
 }
 
 
-/** The unit registry's measurement system is the unit subcategory. Both are
- * selectors only; physical quantities and conversion remain owned by BomEditor. */
+/** Category and compatible unit only; the measurement system is metadata,
+ * not a separate selection step. Conversion remains with the BOM editor. */
 function BomMaterialUnitSelector({setup,value,allowedUnitCodes,onChange}:{
     setup:SkuSetup;value:string;allowedUnitCodes:string[];onChange:(code:string)=>void;
 }){
     const [categoryChoice,setCategoryChoice]=useState('');
-    const [subcategoryChoice,setSubcategoryChoice]=useState('');
     const allowedUnits=setup.units.filter(unit=>
         allowedUnitCodes.some(code=>code===unit.code||code.toLowerCase()===unit.symbol.toLowerCase()));
     const current=setup.units.find(unit=>unit.code===value||unit.symbol.toLowerCase()===value.toLowerCase());
@@ -144,28 +143,20 @@ function BomMaterialUnitSelector({setup,value,allowedUnitCodes,onChange}:{
         const registered=setup.categories.find(item=>item.code===code);
         return [code,registered?.name||allowedUnits.find(u=>u.categoryCode===code)?.category||code] as [string,string];
     });
-    const categoryUnits=allowedUnits.filter(unit=>unit.categoryCode===category);
-    const subcategories=[...new Set(categoryUnits.map(unit=>unit.system||'Other'))];
-    const subcategory=subcategoryChoice||
-        (current?.categoryCode===category?(current.system||'Other'):'')||
-        (subcategories.length===1?subcategories[0]:'');
-    const matchingUnits=categoryUnits.filter(unit=>(unit.system||'Other')===subcategory);
+    const matchingUnits=allowedUnits.filter(unit=>unit.categoryCode===category);
     const selectedValue=matchingUnits.some(unit=>unit.code===current?.code)?current?.code||'':'';
     return <div className='grid gap-3'>
         <Choice title='Unit category' value={category}
             options={[['','Choose unit category'],...categoryOptions]}
-            onChange={next=>{setCategoryChoice(next);setSubcategoryChoice('');}}/>
-        <Choice title='Unit subcategory (measurement system)' value={subcategory}
-            options={[['','Choose subcategory'],...subcategories.map(system=>[system,system] as [string,string])]}
-            onChange={setSubcategoryChoice}/>
+            onChange={setCategoryChoice}/>
         <Choice title='Material quantity unit' value={selectedValue}
             options={[['','Choose unit'],...matchingUnits.map(unit=>[
                 unit.code,bomUomName(unit.code,setup.units),
             ] as [string,string])]}
             onChange={code=>{if(code)onChange(code);}}/>
-        <p className='text-xs text-muted'>Selected unit: {bomUomName(value,setup.units)}. Changing between compatible units converts quantities and related flow and buffer values.</p>
+        <p className='text-xs text-muted'>Selected unit: {bomUomName(value,setup.units)}. Compatible unit changes convert quantities, flow and buffer values.</p>
         {!allowedUnits.length&&<p role='alert' className='text-xs text-amber-600'>
-            No compatible units are available in the active MEMS unit registry for this material.
+            No compatible units are available in the active MEMS unit registry.
         </p>}
     </div>;
 }
@@ -181,12 +172,14 @@ function BomEditor({draft,onChange,items,refs,skuSetup,materialPolicy}:{
  const [materialEditorMode,setMaterialEditorMode]=useState<'create'|'edit'>('create');
  const [materialEditorSnapshot,setMaterialEditorSnapshot]=useState<Row|null>(null);
  const [materialEditorError,setMaterialEditorError]=useState('');
+ const [estimatedRunHours,setEstimatedRunHours]=useState('');
  useEffect(()=>{
     setSectionTab('output');
     setMaterialsView('list');
     setSelectedMaterialIndex(null);
     setMaterialEditorSnapshot(null);
     setMaterialEditorError('');
+    setEstimatedRunHours('');
  },[draft.id]);
  // Keep the mobile editor independent from the scrolling BOM list.
  useEffect(()=>{
@@ -212,7 +205,8 @@ function BomEditor({draft,onChange,items,refs,skuSetup,materialPolicy}:{
  const includesProcess=asComponents(draft.components).some(c=>c.source==='PROCESS_SUPPLY');
  const refreshCostSupplies=()=>{
     setCostSupplyError('');
-    void callBackend<{supplies:CostCenterSupplyOption[]}>('/api/org/ast/cost-center-utilities/options',{})
+    void callBackend<{supplies:CostCenterSupplyOption[]}>('/api/org/ast/cost-center-utilities/options',
+        {outputSkuId:str(draft.parentSkuId)})
      .then(result=>setCostSupplies(result.supplies))
      .catch(e=>setCostSupplyError(e instanceof Error?e.message:'Could not load cost-centre utility capability.'));
  };
@@ -226,6 +220,7 @@ function BomEditor({draft,onChange,items,refs,skuSetup,materialPolicy}:{
  const beginAddMaterial=()=>{
     if(!output||components.length>=150)return;
     setMaterialEditorSnapshot(draft);
+    setEstimatedRunHours('');
     setMaterialEditorMode('create');
     setMaterialEditorError('');
     update('components',[...components,{
@@ -237,6 +232,7 @@ function BomEditor({draft,onChange,items,refs,skuSetup,materialPolicy}:{
  const beginEditMaterial=(index:number)=>{
     if(!components[index])return;
     setMaterialEditorSnapshot(draft);
+    setEstimatedRunHours('');
     setMaterialEditorMode('edit');
     setMaterialEditorError('');
     setSelectedMaterialIndex(index);
@@ -317,10 +313,15 @@ function BomEditor({draft,onChange,items,refs,skuSetup,materialPolicy}:{
         .map(x=>[x.id,x.name+' · '+str(x.category)] as [string,string])];
  const processProcurementChoices:Array<[string,string]>=[['','Choose an approved bulk/direct procurement material'],
     ...refs.materials.map(m=>[m.id,m.materialNumber+' · '+m.name] as [string,string])];
- const processUtilityChoices:Array<[string,string]>=[['','Choose a configured cost-centre utility'],
-    ...costSupplies.filter(s=>!str(draft.siteId)||s.siteId===str(draft.siteId))
-     .map(s=>[s.costCenterId+'::'+s.code,s.costCenterName+' · '+s.label+
-      (s.ready?(s.capacity!==null?' · '+s.capacity+' '+s.capacityUnit:''):' · capacity setup recommended')] as [string,string])];
+ const relevantSupplies=costSupplies.filter(s=>!str(draft.siteId)||s.siteId===str(draft.siteId));
+ const processCostCenterChoices:Array<[string,string]>=[
+     ['','Choose a permitted manufacturing cost centre'],
+     ...[...new Map(relevantSupplies.map(s=>[s.costCenterId,s])).values()]
+         .sort((a,b)=>(b.relevance||0)-(a.relevance||0)||a.costCenterName.localeCompare(b.costCenterName))
+         .map(s=>[s.costCenterId,s.costCenterName+
+             (s.costCenterSubcategories?.length?' · '+s.costCenterSubcategories.join(', '):'')+
+             ((s.relevance||0)>0?' · Matches output':'')] as [string,string]),
+ ];
  const warehouseChoices:Array<[string,string]>=[['','Choose an accessible warehouse'],
     ...refs.warehouses.map(w=>[w.id,(w.code?w.code+' · ':'')+w.name] as [string,string])];
  const siteChoices:Array<[string,string]>=[['','All sites (organization default)'],...refs.sites.map(i=>[i.id,i.name] as [string,string])];
@@ -457,6 +458,14 @@ function BomEditor({draft,onChange,items,refs,skuSetup,materialPolicy}:{
                     const processMaterial=refs.materials.find(m=>m.id===c.materialId);
                     const processUtility=refs.utilities.find(u=>u.workCenterId===c.utilityWorkCenterId&&u.code===c.utilityCode);
                     const currentSupply=costSupplies.find(x=>x.costCenterId===c.supplyCostCenterId&&x.code===c.supplyUtilityCode);
+                    const selectedUnit=skuSetup.units.find(u=>u.code===c.uom||u.symbol.toLowerCase()===c.uom.toLowerCase());
+                    // Aggregate demand is a RATE, not a per-BOM recipe quantity.
+                    const demandRate=currentSupply&&currentSupply.demand>0&&currentSupply.determinantKey==='flow'&&selectedUnit?
+                        normalizedMaterialFlow(currentSupply.demand,currentSupply.capacityUnit,
+                            selectedUnit.symbol+'/h'):null;
+                    const runHours=estimatedRunHours.trim()===''?null:Number(estimatedRunHours);
+                    const demandQuantity=demandRate!==null&&runHours!==null&&Number.isFinite(runHours)&&runHours>0?
+                        demandRate*runHours:null;
                     const material=refs.warehouseMaterials.find(m=>m.warehouseId===c.warehouseId&&m.id===c.materialId);
                     const warehouse=refs.warehouses.find(w=>w.id===c.warehouseId);
                     const selected=items.find(item=>item.id===c.skuId);
@@ -521,23 +530,25 @@ function BomEditor({draft,onChange,items,refs,skuSetup,materialPolicy}:{
                                     <button type='button' className='min-h-9 rounded-lg border border-line px-2 text-xs'
                                         onClick={refreshCostSupplies}>Refresh utility supplies</button>
                                 </div>
-                                <Choice title='Configured cost-centre utility' value={c.supplyCostCenterId&&c.supplyUtilityCode?
-                                    c.supplyCostCenterId+'::'+c.supplyUtilityCode:''}
-                                    options={processUtilityChoices}
-                                    onChange={v=>{
-                                        const supply=costSupplies.find(x=>x.costCenterId+'::'+x.code===v);
-                                        const next=components.map((row,j)=>j===i?{...row,
-                                            supplyCostCenterId:supply?.costCenterId||'',
-                                            supplyUtilityCode:supply?.code||'',
-                                            utilityWorkCenterId:'',utilityCode:''}:row);
-                                        onChange({...draft,components:next,
-                                            siteId:supply?.siteId||str(draft.siteId)});
+                                <Choice title='Supplying cost centre' value={c.supplyCostCenterId||''}
+                                    options={processCostCenterChoices}
+                                    onChange={costCenterId=>{
+                                        updateComponent(i,{supplyCostCenterId:costCenterId,
+                                            supplyUtilityCode:'',utilityWorkCenterId:'',utilityCode:''});
                                     }}/>
+                                <Choice title='Utility supplied by selected cost centre'
+                                    value={c.supplyUtilityCode||''}
+                                    options={[['','Choose utility from this cost centre'],
+                                        ...relevantSupplies.filter(s=>s.costCenterId===c.supplyCostCenterId)
+                                            .map(s=>[s.code,s.label+
+                                                (s.ready?'':' · capacity configuration recommended')] as [string,string])]}
+                                    onChange={code=>updateComponent(i,{supplyUtilityCode:code,
+                                        utilityWorkCenterId:'',utilityCode:''})}/>
                                 {costSupplyError&&<p role='alert' className='text-xs text-red-500'>{costSupplyError}</p>}
-                                {!processUtilityChoices.slice(1).length&&<p className='text-xs text-amber-600'>
+                                {!processCostCenterChoices.slice(1).length&&<p className='text-xs text-amber-600'>
                                     No cost-centre utility supplies configured within this site's permitted scope.
                                     Open Organization Design → Cost centre → Utility supply &amp; distribution,
-                                    adopt the utility and link a rated source asset.
+                                    adopt the utility. Assigning a rated source asset is highly recommended, not mandatory for the BOM.
                                 </p>}
                                 {currentSupply&&<div className='space-y-1 rounded-lg bg-page p-3 text-xs'>
                                     <p className='font-semibold'>Available capability from the cost-centre master</p>
@@ -622,6 +633,27 @@ function BomEditor({draft,onChange,items,refs,skuSetup,materialPolicy}:{
                             onChange={code=>changeComponentUnit(i,code)}/>
                         {processSupply&&<div className='space-y-2 rounded-lg border border-line bg-panel p-3'>
                             <p className='text-xs font-semibold'>Continuous / on-demand quantity planning</p>
+                            {demandRate!==null&&<div className='space-y-2 rounded-lg border border-line p-3'>
+                                <p className='font-semibold'>Suggested from equipment utility demand</p>
+                                <p>Aggregate configured demand: {demandRate.toLocaleString(undefined,{maximumFractionDigits:2})} {bomUomName(c.uom,skuSetup.units)}/hour.</p>
+                                <p>This is the cost-centre equipment aggregate, not a verified recipe quantity for this product. Review allocation to this BOM before applying.</p>
+                                <Button type='button' variant='secondary'
+                                    onClick={()=>updateComponent(i,{requiredFlowPerHour:demandRate})}>
+                                    Use suggested flow rate
+                                </Button>
+                                <Field title='Estimated production duration (hours)' type='number'
+                                    value={estimatedRunHours} onChange={setEstimatedRunHours}/>
+                                {demandQuantity!==null&&<div className='space-y-2'>
+                                    <p>Indicative material quantity: {demandQuantity.toLocaleString(undefined,{maximumFractionDigits:2})} {bomUomName(c.uom,skuSetup.units)}.</p>
+                                    <Button type='button' variant='secondary'
+                                        onClick={()=>updateComponent(i,{quantity:demandQuantity})}>
+                                        Use suggested planned quantity
+                                    </Button>
+                                </div>}
+                            </div>}
+                            {currentSupply&&demandRate===null&&<p className='text-xs text-amber-600'>
+                                No compatible, positive equipment demand flow is configured. Enter planned quantity manually; an estimate requires a known flow and production duration.
+                            </p>}
                             <p className='text-xs text-muted'>The quantity above is required for {quantity} {bomUomName(outputUom,skuSetup.units)} of output, regardless of whether supply is metered or buffered. It is the planning basis for BOM demand, NOT a buffer volume or equipment rate.</p>
                             <Field title='Optional required continuous flow (material units/hour)' type='number'
                                 value={c.requiredFlowPerHour??''}
@@ -1017,7 +1049,8 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
                 body.name=(group?.name||'Manufacturing')+' · Process route';
             }
             const result=await callBackend<{record:Row;generatedCode?:string}>('/api/org/pln-mfg/foundation/save',{kind:recordKind(active),record:body,expectedRevision:body.revision??0});
-            await load();setDraft(null);setNotice('Saved '+(result.generatedCode||result.record.id)+' · Revision '+result.record.revision+'. The code is maintained by MEMS.');
+            await load();setDraft(null);setNotice('Saved '+(result.generatedCode||result.record.id)+' · Revision '+result.record.revision+
+                '. Existing BOM code retained. Approved edits require reapproval before use.');
         }catch(e){setError(e instanceof Error?e.message:'Could not save.');}
         finally{setBusy(false);}
     };
@@ -1243,7 +1276,7 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
                         }}>View</Button>
                         {canSave&&<Button variant='secondary' disabled={busy||str(row.status)==='pending_approval'}
                             title={str(row.status)==='pending_approval'?'Submitted BOMs must complete review before editing.':''}
-                            onClick={()=>str(row.status)==='active'?copyVersion(row):void openDraft(row)}>
+                            onClick={()=>void openDraft(row)}>
                             Edit
                         </Button>}
                         {canDeleteBom&&<Button variant='danger' disabled={busy}
