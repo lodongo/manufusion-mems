@@ -77,12 +77,12 @@ const label='mb-1 block text-xs font-medium text-soft';
 const newRecord=(tab:Tab,policy:MaterialPolicy=defaultMaterialPolicy,
     defaults:FormDefaults=DEFAULT_FORM_DEFAULTS,sites:References['sites']=[]):Row=>{
     const siteId=preferredSiteId(defaults.defaultSiteId,sites);
-    if(tab==='items')return {id:'',name:'',category:defaults.skuCategory,family:'',uom:'',siteId:'',packQty:1,
+    if(tab==='items')return {id:'',name:'',category:defaults.skuCategory,processClassId:'',family:'',uom:'',siteId:'',packQty:1,
         stockPolicy:policy.defaultIntermediateTracking,sourceMode:'INVENTORY',inventoryMaterialId:'',utilityCode:'',utilityWorkCenterId:'',skuComponents:{}};
     if(tab==='boms')return {id:'',name:'',classificationCode:'PRODUCTION',alternativeCode:defaults.routingAlternativeCode,routingId:'',siteId,
         parentSkuId:'',outputQty:defaults.bomOutputQty,outputUom:'EA',components:[]};
     if(tab==='resources')return {id:'',name:'',type:defaults.resourceType,rate:defaults.resourceRate,rateUom:'EA',efficiency:defaults.resourceEfficiency,siteId,assetId:''};
-    return {id:'',name:'',skuId:'',siteId,routingModelVersion:2,alternativeCode:defaults.routingAlternativeCode,
+    return {id:'',name:'',skuId:'',siteId,processClassId:'',routingModelVersion:2,alternativeCode:defaults.routingAlternativeCode,
         operations:[{code:'STG_000000001',name:'',resourceId:'',setupMinutes:0,
         runMinutesPerUnit:0,producesSkuId:'',costCenterId:'',bomId:'',stageType:'PRODUCE',
         processClass:'GENERAL',capacityBasis:'RESOURCE_RATE',batchSize:0,cycleMinutes:0,dependsOn:[]}]};
@@ -271,7 +271,8 @@ function BomEditor({draft,onChange,items,refs,skuSetup,materialPolicy}:{
 function MasterEditor({tab,draft,onChange,items,boms,resources,refs,skuSetup,materialPolicy}:{tab:Tab;draft:Row;onChange:(v:Row)=>void;items:Row[];boms:Row[];resources:Row[];refs:References;skuSetup:SkuSetup;materialPolicy:MaterialPolicy}){
     if(tab==='boms')return <BomEditor draft={draft} onChange={onChange} items={items} refs={refs} skuSetup={skuSetup} materialPolicy={materialPolicy}/>;
     if(tab==='routings')return <PlnProcessRoutingEditor value={draft} onChange={onChange}
-        items={items} boms={boms} resources={resources} sites={refs.sites}/>;
+        items={items} boms={boms} resources={resources} sites={refs.sites}
+        processClasses={skuSetup.parameters.filter(p=>p.kind==='processClasses')}/>;
     const update=(key:string,value:unknown)=>onChange({...draft,[key]:value});
     const siteOptions:Array<[string,string]>=[['','Organization-wide'],...refs.sites.map(r=>[r.id,r.name+(r.code?' · '+r.code:'')] as [string,string])];
     const assetOptions:Array<[string,string]>=[['','No linked asset'],...refs.assets.map(r=>[r.id,r.name+' · '+r.id] as [string,string])];
@@ -288,6 +289,14 @@ function MasterEditor({tab,draft,onChange,items,boms,resources,refs,skuSetup,mat
             {tab==='items'&&<>
                 <Choice title='SKU type' value={str(draft.category)} options={ [['FINISHED','Finished goods'],['INTERMEDIATE','Intermediate/WIP'],['RAW','Raw/input material'],['PACKAGING','Packaging component']] } onChange={v=>update('category',v)}/>
                 <Field title='Product family' value={str(draft.family)} required onChange={v=>update('family',v)}/>
+                {['FINISHED','INTERMEDIATE'].includes(str(draft.category))&&<>
+                    <Choice title='Manufacturing process classification' value={str(draft.processClassId)}
+                        options={[['','Choose production process group'],...skuSetup.parameters.filter(p=>
+                            p.kind==='processClasses'&&(p.enabled!==false||p.id===str(draft.processClassId)))
+                            .map(p=>[p.id,p.name] as [string,string])]}
+                        onChange={v=>update('processClassId',v)}/>
+                    <p className='text-xs text-muted'>Classify by how the SKU is manufactured, not by flavor, recipe or product family. Different SKUs in one process group can use the same routes. Manage the available groups in Product Configuration.</p>
+                </>}
                 {str(draft.category)!=='FINISHED'&&<div className='md:col-span-2'>
                     <UnitChoice key={draft.id||'new-sku'} title='Unit of measure'
                         value={str(draft.uom)} setup={skuSetup} onChange={v=>update('uom',v)}/>
@@ -331,7 +340,7 @@ function MasterEditor({tab,draft,onChange,items,boms,resources,refs,skuSetup,mat
             </>}
             {tab!=='items'&&<Choice title='Site applicability' value={str(draft.siteId)} options={siteOptions} onChange={v=>update('siteId',v)}/>}
             {tab==='items'&&<p className='md:col-span-2 text-xs text-muted'>
-                SKUs belong to the organization, not one site. Set which manufacturing cost centres can produce each SKU under Manufacturing Cost Centre &amp; SKUs, including the commissioned physical-container speeds.
+                SKUs belong to the organization, not one site. Their manufacturing process classification is shared across sites. Set site-specific availability and production speed through Manufacturing Resources → SKU allocation; no site mappings are changed by classification.
             </p>}
         </div>
         {tab==='items'&&str(draft.category)==='INTERMEDIATE'&&<label className='flex min-h-11 items-start gap-3 rounded-xl border border-line bg-page p-3 text-sm text-ink'>
@@ -675,7 +684,10 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
             </Card>:<div className='grid gap-3 md:grid-cols-2 xl:grid-cols-3'>{filtered.map(row=><Card key={row.id} className='space-y-2'>
                 <div className='flex items-start justify-between gap-2'><span className='font-mono text-xs text-brand'>{row.id}</span><span className='rounded-full bg-page px-2 py-1 text-[11px] uppercase text-soft'>{str(row.status)||'draft'}</span></div>
                 <h3 className='break-words font-semibold'>{row.name}</h3>
-                <p className='text-xs text-muted'>{active==='items'?str(row.category)+' · '+str(row.uom):active==='routings'?'Alternative: '+(str(row.alternativeCode)||'STANDARD')+' · '+asOperations(row.operations).length+' stages · '+(1+(Array.isArray(row.skuMappings)?row.skuMappings.length:0))+' mapped SKU(s)':'BOM · '+(materialPolicy.bomClassifications.find(c=>c.code===str(row.classificationCode))?.name||str(row.classificationCode)||'Production')+' · Components: '+asComponents(row.components).length}</p>
+                <p className='text-xs text-muted'>{active==='items'?
+                    str(row.category)+' · '+str(row.uom)+' · Process: '+(skuSetup.parameters.find(p=>p.id===str(row.processClassId))?.name||'Not classified'):
+                    active==='routings'?'Process: '+(skuSetup.parameters.find(p=>p.id===str(row.processClassId))?.name||'Not classified')+' · Alternative: '+(str(row.alternativeCode)||'Not set')+' · '+asOperations(row.operations).length+' stages · '+(1+(Array.isArray(row.skuMappings)?row.skuMappings.length:0))+' mapped SKU(s)':
+                    'BOM · '+(materialPolicy.bomClassifications.find(c=>c.code===str(row.classificationCode))?.name||str(row.classificationCode)||'Production')+' · Components: '+asComponents(row.components).length}</p>
                 <div className='flex flex-wrap items-center justify-between gap-2'>
                     <span className='text-xs text-muted'>Revision {row.revision??1} · effective {str(row.effectiveFrom)||'immediately'}</span>
                     {active==='items'&&['FINISHED','INTERMEDIATE'].includes(str(row.category))&&
