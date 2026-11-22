@@ -85,7 +85,7 @@ const BASE_PLN_FORM_DEFAULTS={
  resourceCostCenterCategory:'MFG',resourceCostCenterSubcategory:'',
  routingAlternativeCode:'STANDARD',demandType:'FORECAST',demandQuantity:1,demandLeadDays:7,
 } as const;
-function normalizePlanningFormDefaults(raw:unknown){
+export function normalizePlanningFormDefaults(raw:unknown){
  const value=isObj(raw)?raw:{};
  const defaultSiteId=str(value.defaultSiteId??BASE_PLN_FORM_DEFAULTS.defaultSiteId).trim();
  if(defaultSiteId&&!ID.test(defaultSiteId))throw new HttpError(400,'Invalid default planning site.');
