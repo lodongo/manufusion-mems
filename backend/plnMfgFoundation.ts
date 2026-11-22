@@ -7,6 +7,7 @@ import { HttpError, commitChecked, getDoc, isObj, listDocs, nowIso, num, str, wr
 import { orgRoute, hasPerm, type OrgContext } from './guards';
 import { canAt, nodePath, scopeOf } from './access';
 import { audit } from './audit';
+import {readSkuAuditLog} from './plnSkuAudit';
 import { getNode } from './structure';
 import { calculateSkuConversion, composeConfiguredSkuName, composeSkuNameWithSequence, skuUnitConversion, masterPrefix, type SkuComponents } from './mfgSkuModel';
 import { commitGeneratedCode, skuParametersForOrg, namingSequenceForOrg } from './mfgSkuConfiguration';
@@ -1227,6 +1228,14 @@ export const plnMfgFoundationRoutes={
                 details:'Soft deleted BOM '+id+' from '+status+'; revision '+nextRevision+
                     '. All prior versions remain in the audit and revision history.'}]);
             return {ok:true,id,status:'deleted',revision:nextRevision};
+        }),
+    ],
+    'POST /api/org/pln-mfg/foundation/sku/audit-log':[
+        orgRoute('org.mfg.foundation.sku_audit_log','MFG.view',async ctx=>{
+            const skuId=VALID_ID(ctx.body.skuId,'SKU code');
+            if(!await recordAccess(ctx,'MFG.view',''))
+                throw new HttpError(403,'SKU audit log is outside your permitted manufacturing scope.');
+            return readSkuAuditLog(ctx,skuId);
         }),
     ],
     'POST /api/org/pln-mfg/foundation/history':[

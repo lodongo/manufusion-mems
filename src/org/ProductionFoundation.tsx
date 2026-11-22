@@ -4,6 +4,7 @@ import { Spinner } from '../admin/kit';
 import { SkuConfigurationFields, SkuSetupPanel, SkuIdentityGuide, UnitChoice, emptySkuSetup, type SkuSelections, type SkuSetup } from './MfgSkuSetup';
 import PlnDemand from './PlnDemand';
 import PlnSkuCostCenterRatings from './PlnSkuCostCenterRatings';
+import PlnSkuAuditLog from './PlnSkuAuditLog';
 import ManufacturingResources from './ManufacturingResources';
 import PlnProcessRoutingEditor from './PlnProcessRoutingEditor';
 import PlnMaterialSupplyProfile, {type SupplyProfile} from './PlnMaterialSupplyProfile';
@@ -992,6 +993,8 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
     const [draft,setDraft]=useState<Row|null>(null);
     const [testBomOverride,setTestBomOverride]=useState(false);
     const [viewSkuId,setViewSkuId]=useState('');
+    const [skuEditTab,setSkuEditTab]=useState<'details'|'audit'>('details');
+    const [skuViewTab,setSkuViewTab]=useState<'details'|'audit'>('details');
     const [viewBomId,setViewBomId]=useState('');
     const [classEditingSku,setClassEditingSku]=useState('');
     const [classSelected,setClassSelected]=useState('');
@@ -1136,6 +1139,8 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
     };
     const openDraft=async(row:Row)=>{
         setViewSkuId('');setViewBomId('');setDraft(row);setHistory([]);setError('');
+        setSkuEditTab('details');
+        if(active==='items')return; // The SKU audit is loaded on demand in its dedicated tab.
         try{
             const result=await callBackend<{revisions:Row[]}>('/api/org/pln-mfg/foundation/history',{kind:recordKind(active),id:row.id});
             setHistory(result.revisions);
@@ -1351,7 +1356,23 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
                     <div role='status' className='rounded-xl border-2 border-blue-600 bg-blue-50 p-3 text-sm text-blue-900'>
                         Development test override · super admin. Save applies changes immediately to this BOM code; version history and high-priority security audit are retained.
                     </div>}
-                {draft.revision&&<div className='flex flex-wrap gap-2 text-xs text-soft'><span className='font-semibold'>Revision history:</span>{history.map(h=><span key={String(h.revision)} className='rounded-md border border-line px-2 py-1'>r{h.revision} · {str(h.updatedAt).slice(0,10)}</span>)}</div>}
+                {active==='items'&&!!draft.id&&<div role='tablist' aria-label='SKU editor sections'
+                    className='grid grid-cols-2 gap-1 rounded-xl border border-line bg-page p-1'>
+                    <button type='button' role='tab' aria-selected={skuEditTab==='details'}
+                        onClick={()=>setSkuEditTab('details')}
+                        className={'min-h-11 rounded-lg px-3 text-sm font-semibold '+(skuEditTab==='details'?'bg-brand text-onbrand':'text-soft')}>
+                        SKU information
+                    </button>
+                    <button type='button' role='tab' aria-selected={skuEditTab==='audit'}
+                        onClick={()=>setSkuEditTab('audit')}
+                        className={'min-h-11 rounded-lg px-3 text-sm font-semibold '+(skuEditTab==='audit'?'bg-brand text-onbrand':'text-soft')}>
+                        Audit log
+                    </button>
+                </div>}
+                {active!=='items'&&draft.revision&&<div className='flex flex-wrap gap-2 text-xs text-soft'><span className='font-semibold'>Revision history:</span>{history.map(h=><span key={String(h.revision)} className='rounded-md border border-line px-2 py-1'>r{h.revision} · {str(h.updatedAt).slice(0,10)}</span>)}</div>}
+                {active==='items'&&draft.id&&skuEditTab==='audit'
+                    ?<PlnSkuAuditLog skuId={draft.id}/>
+                    :<>
                 <MasterEditor tab={active} draft={draft} onChange={setDraft} items={rows.items}
                     boms={rows.boms} resources={rows.resources} refs={refs} skuSetup={skuSetup} materialPolicy={materialPolicy}/>
                 {active==='items'&&draft.id&&['FINISHED','INTERMEDIATE'].includes(str(draft.category))&&
@@ -1362,6 +1383,7 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
                     <Button disabled={busy||!canSave} className={active==='boms'&&testBomOverride?'border-2 border-blue-600 ring-2 ring-blue-300':''}
                         onClick={()=>void save()}>{busy?'Saving...':active==='boms'&&testBomOverride?'Save & apply now':active==='boms'?'Save BOM':'Save draft'}</Button>
                 </div>
+                </>}
             </Card>:active==='boms'&&viewedBom?<Card className='space-y-4'>
                 <div className='flex flex-wrap items-center justify-between gap-2'>
                     <h2 className='font-semibold'>BOM details · {viewedBom.id}</h2>
@@ -1415,15 +1437,26 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
                     <Button variant='secondary' onClick={()=>setViewSkuId('')}>Back to SKU list</Button>
                 </div>
                 {viewedSku?<>
+                    <div role='tablist' aria-label='SKU detail sections' className='grid grid-cols-2 gap-1 rounded-xl border border-line bg-page p-1'>
+                        <button type='button' role='tab' aria-selected={skuViewTab==='details'}
+                            onClick={()=>setSkuViewTab('details')}
+                            className={'min-h-11 rounded-lg px-3 text-sm font-semibold '+(skuViewTab==='details'?'bg-brand text-onbrand':'text-soft')}>SKU information</button>
+                        <button type='button' role='tab' aria-selected={skuViewTab==='audit'}
+                            onClick={()=>setSkuViewTab('audit')}
+                            className={'min-h-11 rounded-lg px-3 text-sm font-semibold '+(skuViewTab==='audit'?'bg-brand text-onbrand':'text-soft')}>Audit log</button>
+                    </div>
+                    {skuViewTab==='audit'?<PlnSkuAuditLog skuId={viewedSku.id}/>:<>
                     <div className='rounded-xl bg-page p-3'>
                         <p className='font-mono text-xs text-brand'>{viewedSku.id}</p>
                         <p className='mt-1 break-words font-semibold'>{viewedSku.name}</p>
                         <p className='mt-1 text-xs text-muted'>{str(viewedSku.category)} · {str(viewedSku.uom)} · Revision {viewedSku.revision??1}</p>
                         <p className='mt-1 text-xs text-muted'>Manufacturing process: {skuSetup.parameters.find(p=>p.id===str(viewedSku.processClassId))?.name||'Not classified'}</p>
                     </div>
-                    <PlnSkuCostCenterRatings skuId={viewedSku.id}/>
+                    {['FINISHED','INTERMEDIATE'].includes(str(viewedSku.category))&&
+                        <PlnSkuCostCenterRatings skuId={viewedSku.id}/>}
                     {canSave&&['draft','rejected',''].includes(str(viewedSku.status))&&
                         <Button variant='secondary' onClick={()=>void openDraft(viewedSku)}>Edit SKU draft</Button>}
+                    </>}
                 </>:<p className='text-sm text-muted'>SKU not found. Refresh the Materials &amp; Products list.</p>}
             </Card>:<div className='grid gap-3 md:grid-cols-2 xl:grid-cols-3'>{filtered.map(row=><Card key={row.id} className='space-y-2'>
                 <div className='flex items-start justify-between gap-2'><span className='font-mono text-xs text-brand'>{row.id}</span><span className='rounded-full bg-page px-2 py-1 text-[11px] uppercase text-soft'>{str(row.status)||'draft'}</span></div>
@@ -1436,8 +1469,11 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
                     <span className='text-xs text-muted'>Revision {row.revision??1} · effective {str(row.effectiveFrom)||'immediately'}</span>
                     {active==='items'&&['FINISHED','INTERMEDIATE'].includes(str(row.category))&&
                         <Button variant='secondary' onClick={()=>{
-                            setViewSkuId(row.id);setDraft(null);setError('');setNotice('');
+                            setViewSkuId(row.id);setSkuViewTab('details');setDraft(null);setError('');setNotice('');
                         }}>View SKU</Button>}
+                    {active==='items'&&<Button variant='secondary' disabled={busy} onClick={()=>{
+                        setViewSkuId(row.id);setSkuViewTab('audit');setDraft(null);setError('');setNotice('');
+                    }}>Audit log</Button>}
                     {active==='boms'&&<div className='flex flex-wrap gap-2'>
                         <Button variant='secondary' disabled={busy} onClick={()=>{
                             setDraft(null);setViewSkuId('');setViewBomId(row.id);setError('');setNotice('');
