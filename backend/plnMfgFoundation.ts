@@ -623,6 +623,51 @@ export const plnMfgFoundationRoutes={
             return reviewManufacturingRouting(ctx,prepared);
         }),
     ],
+    'POST /api/org/pln-mfg/foundation/sku/process-classify':[
+        orgRoute('org.mfg.sku.process.classify','MFG.master.edit',async ctx=>{
+            // Controlled classification-only update of an existing organization SKU.
+            // This does NOT replace its ID, BOM, physical attributes, site mapping
+            // or production capacity record. No production/stock posting occurs.
+            if(ctx.role!=='org_super_admin'&&
+                (!hasPerm(ctx.directPermissions,'MFG.master.edit')||
+                 !hasPerm(ctx.directPermissions,'MFG.sku.configure')))
+                throw new HttpError(403,'Direct manufacturing master and SKU configuration permissions are required.');
+            if(!await recordAccess(ctx,'MFG.master.edit',''))
+                throw new HttpError(403,'Organization SKU classification is outside your authorized scope.');
+            const skuId=VALID_ID(ctx.body.skuId,'SKU code');
+            const processClassId=VALID_ID(ctx.body.processClassId,'Manufacturing process classification');
+            const [doc,group]=await Promise.all([
+                getDoc(DOC(ctx.orgId,'items',skuId)),
+                getDoc('organizations/'+ctx.orgId+'/mfg_sku_parameters/'+processClassId),
+            ]);
+            if(!doc||!['FINISHED','INTERMEDIATE'].includes(str(doc.data.category)))
+                throw new HttpError(404,'Manufactured SKU was not found.');
+            if(!group||str(group.data.kind)!=='processClasses'||group.data.enabled===false)
+                throw new HttpError(400,'Choose an active manufacturing process classification from Product Configuration.');
+            if(str(doc.data.status)==='pending_approval')
+                throw new HttpError(409,'A submitted SKU cannot be reclassified while its approval is pending.');
+            if(Number(ctx.body.expectedRevision)!==(num(doc.data.revision)??1))
+                throw new HttpError(409,'The SKU changed. Refresh it before reclassifying.');
+            const before=str(doc.data.processClassId);
+            if(before===processClassId)return {ok:true,record:out(doc)};
+            const linked=await listDocs(ROOT(ctx.orgId,'routings'));
+            if(linked.some(route=>
+                ['active','pending_approval'].includes(str(route.data.status))&&
+                routingSkuIds(route.data).includes(skuId)&&
+                !!str(route.data.processClassId)&&str(route.data.processClassId)!==processClassId))
+                throw new HttpError(409,'An active or submitted routing for this SKU uses another process classification. Update the route through its approved revision workflow first.');
+            const at=nowIso(),data={...doc.data,processClassId,
+                revision:(num(doc.data.revision)??1)+1,updatedAt:at,updatedBy:ctx.uid};
+            if(!await commitChecked([{path:DOC(ctx.orgId,'items',skuId),
+                data,precondition:{updateTime:doc.updateTime}}]))
+                throw new HttpError(409,'The SKU was changed concurrently. Reload it before reclassifying.');
+            await audit([{category:'data',action:'mfg.sku.process.classify',actor:ctx.actor,
+                meta:ctx.meta,orgId:ctx.orgId,target:{label:'items:'+skuId},
+                details:'Classification metadata only: '+(before||'unclassified')+' → '+processClassId+
+                    '; SKU identity, BOM and site/resource mapping preserved.'}]);
+            return {ok:true,record:out({id:skuId,data})};
+        }),
+    ],
     'POST /api/org/pln-mfg/foundation/list':[
         orgRoute('org.mfg.foundation.list','MFG.view',async ctx=>{
             const kind=readKind(ctx.body.kind);
