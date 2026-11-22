@@ -6,6 +6,7 @@ import PlnDemand from './PlnDemand';
 import PlnSkuCostCenterRatings from './PlnSkuCostCenterRatings';
 import ManufacturingResources from './ManufacturingResources';
 import PlnProcessRoutingEditor from './PlnProcessRoutingEditor';
+import PlnMaterialSupplyProfile, {type SupplyProfile} from './PlnMaterialSupplyProfile';
 import PlnDocumentation from './PlnDocumentation';
 import {configurationProgress,type SetupRow,type SetupStep} from './plnSetupDependencies';
 import {DEFAULT_FORM_DEFAULTS,formDefaultsFor,preferredSiteId,type FormDefaults} from './plnFormDefaults';
@@ -272,7 +273,8 @@ function MasterEditor({tab,draft,onChange,items,boms,resources,refs,skuSetup,mat
     if(tab==='boms')return <BomEditor draft={draft} onChange={onChange} items={items} refs={refs} skuSetup={skuSetup} materialPolicy={materialPolicy}/>;
     if(tab==='routings')return <PlnProcessRoutingEditor value={draft} onChange={onChange}
         items={items} boms={boms} resources={resources} sites={refs.sites}
-        processClasses={skuSetup.parameters.filter(p=>p.kind==='processClasses')}/>;
+        processClasses={skuSetup.parameters.filter(p=>p.kind==='processClasses')}
+        measureUnits={skuSetup.units}/>;
     const update=(key:string,value:unknown)=>onChange({...draft,[key]:value});
     const siteOptions:Array<[string,string]>=[['','Organization-wide'],...refs.sites.map(r=>[r.id,r.name+(r.code?' · '+r.code:'')] as [string,string])];
     const assetOptions:Array<[string,string]>=[['','No linked asset'],...refs.assets.map(r=>[r.id,r.name+' · '+r.id] as [string,string])];
@@ -343,6 +345,12 @@ function MasterEditor({tab,draft,onChange,items,boms,resources,refs,skuSetup,mat
                 SKUs belong to the organization, not one site. Their manufacturing process classification is shared across sites. Set site-specific availability and production speed through Manufacturing Resources → SKU allocation; no site mappings are changed by classification.
             </p>}
         </div>
+        {tab==='items'&&str(draft.category)!=='PACKAGING'&&
+            <PlnMaterialSupplyProfile
+                value={(draft.supplyProfile||{}) as SupplyProfile}
+                onChange={v=>update('supplyProfile',v)}
+                materialUom={str(draft.uom)}
+                sites={refs.sites} units={skuSetup.units}/>}
         {tab==='items'&&str(draft.category)==='INTERMEDIATE'&&<label className='flex min-h-11 items-start gap-3 rounded-xl border border-line bg-page p-3 text-sm text-ink'>
             <input type='checkbox' className='mt-1 shrink-0'
                 checked={Object.values((draft.skuComponents||{}) as Record<string,unknown>).some(Boolean)}
