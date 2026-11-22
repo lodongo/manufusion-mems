@@ -109,7 +109,15 @@ const COLUMNS = (selectedCurrency: string, rates: Record<string, number>, mixedL
         label: selectedCurrency ? `Net stock value (${selectedCurrency})` : 'Net stock value',
         // Never total unlike currencies when multiple legal entities share this view.
         type: !selectedCurrency && mixedLocal ? 'text' : 'number',
-        value: (x) => convertDisplayed(x.netStockValue,x.stockCurrency,selectedCurrency,rates),
+        value: (x) => {
+            const amount=convertDisplayed(x.netStockValue,x.stockCurrency,selectedCurrency,rates);
+            // RichTable can auto-detect numeric columns even when their type is 'text',
+            // and saved views may explicitly request totals. Keep mixed local currencies
+            // searchable and exportable, but never return numeric values that could be added.
+            return !selectedCurrency&&mixedLocal&&amount!==null
+                ? `${x.stockCurrency} · ${amount.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}`
+                : amount;
+        },
         render: (x) => {
             const value=convertDisplayed(x.netStockValue,x.stockCurrency,selectedCurrency,rates);
             const cost=convertDisplayed(x.unitCostLocal,x.stockCurrency,selectedCurrency,rates);
