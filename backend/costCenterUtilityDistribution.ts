@@ -112,10 +112,16 @@ export async function getCostCenterUtilityCapability(org:string,ccId:string,code
  return capability(org,ccId,item,def,replace);
 }
 export async function resolveEquipmentUtilitySupply(ctx:OrgContext,workCenterId:string,code:string){
- const {costCenterId,costCenter}=await costCenterForEquipment(ctx.orgId,workCenterId);
- const supplied=await getCostCenterUtilityCapability(ctx.orgId,costCenterId,code);
+ const {equipment,costCenterId,costCenter}=await costCenterForEquipment(ctx.orgId,workCenterId);
+ const [supplied,assignedAssets]=await Promise.all([
+  getCostCenterUtilityCapability(ctx.orgId,costCenterId,code),
+  listDocs(assetsRoot(ctx.orgId)),
+ ]);
+ const equipmentHasAsset=!!str(isObj(equipment.data.attributes)?equipment.data.attributes.assetTag:'')||
+  assignedAssets.some(a=>str(a.data.workCenterId)===workCenterId&&
+   !['removed','deleted'].includes(str(a.data.status)));
  return {costCenterId,costCenterName:str(costCenter.data.name),supply:supplied,
-  missingUtility:!supplied,missingAsset:!!supplied&&!supplied.sources.length};
+  equipmentHasAsset,missingUtility:!supplied,missingAsset:!!supplied&&!supplied.sources.length};
 }
 export async function validateEquipmentUtilityDistribution(ctx:OrgContext,
  workCenterId:string,code:string,values:Record<string,unknown>){
