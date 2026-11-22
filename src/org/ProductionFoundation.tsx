@@ -692,6 +692,7 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
                         <p className='font-mono text-xs text-brand'>{viewedSku.id}</p>
                         <p className='mt-1 break-words font-semibold'>{viewedSku.name}</p>
                         <p className='mt-1 text-xs text-muted'>{str(viewedSku.category)} · {str(viewedSku.uom)} · Revision {viewedSku.revision??1}</p>
+                        <p className='mt-1 text-xs text-muted'>Manufacturing process: {skuSetup.parameters.find(p=>p.id===str(viewedSku.processClassId))?.name||'Not classified'}</p>
                     </div>
                     <PlnSkuCostCenterRatings skuId={viewedSku.id}/>
                     {canSave&&['draft','rejected',''].includes(str(viewedSku.status))&&
@@ -702,7 +703,7 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
                 <h3 className='break-words font-semibold'>{row.name}</h3>
                 <p className='text-xs text-muted'>{active==='items'?
                     str(row.category)+' · '+str(row.uom)+' · Process: '+(skuSetup.parameters.find(p=>p.id===str(row.processClassId))?.name||'Not classified'):
-                    active==='routings'?'Process: '+(skuSetup.parameters.find(p=>p.id===str(row.processClassId))?.name||'Not classified')+' · Alternative: '+(str(row.alternativeCode)||'Not set')+' · '+asOperations(row.operations).length+' stages · '+(1+(Array.isArray(row.skuMappings)?row.skuMappings.length:0))+' mapped SKU(s)':
+                    active==='routings'?'Process: '+(skuSetup.parameters.find(p=>p.id===str(row.processClassId))?.name||'Not classified')+' · Alternative: '+(str(row.alternativeCode)||'Not set')+' · '+asOperations(row.operations).length+' stages · '+((str(row.skuId)?1:0)+(Array.isArray(row.skuMappings)?row.skuMappings.length:0))+' mapped SKU(s)':
                     'BOM · '+(materialPolicy.bomClassifications.find(c=>c.code===str(row.classificationCode))?.name||str(row.classificationCode)||'Production')+' · Components: '+asComponents(row.components).length}</p>
                 <div className='flex flex-wrap items-center justify-between gap-2'>
                     <span className='text-xs text-muted'>Revision {row.revision??1} · effective {str(row.effectiveFrom)||'immediately'}</span>
