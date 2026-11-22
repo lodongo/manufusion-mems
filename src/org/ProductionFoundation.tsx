@@ -32,7 +32,15 @@ import { hasPerm } from '../types';
 type Kind='items'|'boms'|'resources'|'routings';
 type Tab=Kind|'skuSetup'|'materialPolicy'|'formDefaults'|'config'|'demand'|'capacityOverview'|'documentation';
 type Row=Record<string,unknown>&{id:string;name:string;revision?:number;type?:string};
-type Component={source?:'INTERMEDIATE'|'WAREHOUSE';skuId:string;warehouseId?:string;materialId?:string;quantity:number;uom:string;scrapPct:number};
+type Component={
+ source?:'INTERMEDIATE'|'WAREHOUSE'|'PROCESS_SUPPLY';
+ skuId:string;warehouseId?:string;materialId?:string;quantity:number;uom:string;scrapPct:number;
+ processSupplyKind?:'SKU'|'UTILITY'|'PROCUREMENT';
+ utilityWorkCenterId?:string;utilityCode?:string;
+ quantityMethod?:'PLANNED'|'METERED'|'AS_REQUIRED';
+ deliveryMode?:'INLINE'|'BUFFERED'|'BULK_STORAGE'|'CYLINDER';
+ requiredFlowPerHour?:number|null;bufferCapacity?:number|null;bufferUsable?:number|null;
+};
 type Operation={code:string;name:string;resourceId:string;setupMinutes:number;runMinutesPerUnit:number;producesSkuId?:string;dependsOn?:string[]};
 type Config={horizonDays:number;freezeDays:number;lotPolicy:string;strategy:string;formDefaults?:FormDefaults};
 type BomClassification={code:string;name:string;enabled:boolean;mrpRelevant:boolean;productionEligible:boolean};
@@ -46,7 +54,7 @@ type References={
     materials:Array<{id:string;name:string;materialNumber:string;uom:string}>;
     warehouses:Array<{id:string;name:string;code:string}>;
     warehouseMaterials:Array<{warehouseId:string;id:string;name:string;materialNumber:string;uom:string}>;
-    utilities:Array<{workCenterId:string;code:string;name:string}>;
+    utilities:Array<{workCenterId:string;code:string;name:string;uom?:string}>;
     assets:Array<{id:string;name:string;siteId:string}>;
     sites:Array<{id:string;name:string;code:string}>;
 };
@@ -127,6 +135,13 @@ function BomEditor({draft,onChange,items,refs,skuSetup,materialPolicy}:{
     ...items.filter(i=>i.id!==str(output?.id)&&
         (str(i.category)==='INTERMEDIATE'||components.some(c=>c.skuId===i.id&&!c.source)))
         .map(i=>[i.id,i.name+' · '+str(i.category)] as [string,string])];
+ const processMaterialChoices:Array<[string,string]>=[['','Select a manufactured or raw process-input SKU'],
+    ...items.filter(x=>x.id!==str(output?.id)&&['INTERMEDIATE','RAW'].includes(str(x.category)))
+        .map(x=>[x.id,x.name+' · '+str(x.category)] as [string,string])];
+ const processProcurementChoices:Array<[string,string]>=[['','Choose an approved bulk/direct procurement material'],
+    ...refs.materials.map(m=>[m.id,m.materialNumber+' · '+m.name] as [string,string])];
+ const processUtilityChoices:Array<[string,string]>=[['','Choose an existing registered equipment utility'],
+    ...refs.utilities.map(u=>[u.workCenterId+'::'+u.code,u.name+' · '+u.workCenterId] as [string,string])];
  const warehouseChoices:Array<[string,string]>=[['','Choose an accessible warehouse'],
     ...refs.warehouses.map(w=>[w.id,(w.code?w.code+' · ':'')+w.name] as [string,string])];
  const siteChoices:Array<[string,string]>=[['','All sites (organization default)'],...refs.sites.map(i=>[i.id,i.name] as [string,string])];
