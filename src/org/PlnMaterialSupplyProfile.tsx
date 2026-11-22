@@ -6,7 +6,7 @@ type Source={id:string;name:string;type:string;siteId?:string;rateUom?:string;
 export type SupplyProfile={productionMode?:string;handlingMode?:string;
  qualitySpecification?:string;sources?:Source[]};
 type Site={id:string;name:string};
-type Unit={code:string;label:string;symbol:string;categoryCode:string};
+type Unit={code:string;label:string;symbol:string;categoryCode:string;baseUnit?:string};
 const textClass='w-full min-h-11 rounded-xl border border-line bg-panel px-3 py-2 text-sm text-ink';
 const sourceTypes:Array<[string,string]>=[
  ['PURCHASED','Purchased / supplier'],['EXTRACTED','Extracted / withdrawn at source'],
