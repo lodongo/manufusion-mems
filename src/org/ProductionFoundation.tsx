@@ -464,6 +464,18 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
         setActive(tab);setDraft(null);setViewSkuId('');setHistory([]);setError('');setNotice('');setDecisionReason('');
     };
     const copyVersion=(row:Row)=>{setViewSkuId('');const cloned={...row,id:'',name:String(row.name)+' — new revision',revision:undefined,status:'draft',effectiveFrom:'',createdBy:undefined,submittedBy:undefined,approvedBy:undefined,approvedAt:undefined};setDraft(cloned);setHistory([]);setError('');setNotice('Give this version a new unique code and effective date. The approved original remains unchanged.');};
+    const createAlternativeRoute=(row:Row)=>{
+        const used=new Set(rows.routings.filter(r=>str(r.siteId)===str(row.siteId))
+            .map(r=>str(r.alternativeCode).toUpperCase()));
+        let index=1,alternativeCode='ALTERNATIVE_'+index;
+        while(used.has(alternativeCode)){index++;alternativeCode='ALTERNATIVE_'+index;}
+        setDraft({...row,id:'',revision:undefined,status:'draft',
+            name:String(row.name).slice(0,110)+' · alternative '+index,
+            alternativeCode,effectiveFrom:'',createdBy:undefined,submittedBy:undefined,
+            approvedBy:undefined,approvedAt:undefined});
+        setViewSkuId('');setHistory([]);setError('');
+        setNotice('New alternative route started. Change its stages, resources or sequence, then save and submit it separately for approval.');
+    };
     const release=async (id:string,decision:'submit'|'approve'|'reject')=>{
         if(decision==='reject'&&!decisionReason.trim()){setError('Enter a rejection reason first.');return;}
         setBusy(true);setError('');setNotice('');
@@ -635,9 +647,9 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
             </div>
             <div className='flex justify-end'><Button disabled={!canConfig||busy} onClick={()=>void saveConfig()}>Save planning configuration</Button></div>
         </Card>:<>
-            <div className='flex min-w-0 flex-wrap items-center justify-between gap-2'><p className='text-xs text-muted sm:text-sm'>{filtered.length} saved master records · draft versions</p>{canSave&&!viewSkuId&&<Button onClick={()=>setDraft(newRecord(active,materialPolicy,formDefaults,refs.sites))}>Add {active==='items'?'SKU':active==='boms'?'BOM':active==='routings'?'routing':'resource'}</Button>}</div>
+            <div className='flex min-w-0 flex-wrap items-center justify-between gap-2'><p className='text-xs text-muted sm:text-sm'>{active==='routings'?'Choose or create a process route. A route can serve multiple SKUs.':filtered.length+' saved master records · draft versions'}</p>{canSave&&!viewSkuId&&<Button onClick={()=>{setDraft(newRecord(active,materialPolicy,formDefaults,refs.sites));setError('');setNotice('');}}>Add {active==='items'?'SKU':active==='boms'?'BOM':active==='routings'?'new route':'resource'}</Button>}</div>
             {draft?<Card className='space-y-4'>
-                <div className='flex items-center justify-between gap-2'><h2 className='font-semibold'>{draft.revision?'Edit draft':'New master record'}</h2><Button variant='secondary' onClick={()=>setDraft(null)}>Cancel</Button></div>
+                <div className='flex items-center justify-between gap-2'><h2 className='font-semibold'>{active==='routings'?(draft.revision?'Edit routing draft':'Create manufacturing route'):(draft.revision?'Edit draft':'New master record')}</h2><Button variant='secondary' onClick={()=>setDraft(null)}>Cancel</Button></div>
                 {draft.revision&&<div className='flex flex-wrap gap-2 text-xs text-soft'><span className='font-semibold'>Immutable revisions:</span>{history.map(h=><span key={String(h.revision)} className='rounded-md border border-line px-2 py-1'>r{h.revision} · {str(h.updatedAt).slice(0,10)}</span>)}</div>}
                 <MasterEditor tab={active} draft={draft} onChange={setDraft} items={rows.items}
                     boms={rows.boms} resources={rows.resources} refs={refs} skuSetup={skuSetup} materialPolicy={materialPolicy}/>
@@ -663,7 +675,7 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
             </Card>:<div className='grid gap-3 md:grid-cols-2 xl:grid-cols-3'>{filtered.map(row=><Card key={row.id} className='space-y-2'>
                 <div className='flex items-start justify-between gap-2'><span className='font-mono text-xs text-brand'>{row.id}</span><span className='rounded-full bg-page px-2 py-1 text-[11px] uppercase text-soft'>{str(row.status)||'draft'}</span></div>
                 <h3 className='break-words font-semibold'>{row.name}</h3>
-                <p className='text-xs text-muted'>{active==='items'?str(row.category)+' · '+str(row.uom):active==='routings'?'Operations: '+asOperations(row.operations).length:'BOM · '+(materialPolicy.bomClassifications.find(c=>c.code===str(row.classificationCode))?.name||str(row.classificationCode)||'Production')+' · Components: '+asComponents(row.components).length}</p>
+                <p className='text-xs text-muted'>{active==='items'?str(row.category)+' · '+str(row.uom):active==='routings'?'Alternative: '+(str(row.alternativeCode)||'STANDARD')+' · '+asOperations(row.operations).length+' stages · '+(1+(Array.isArray(row.skuMappings)?row.skuMappings.length:0))+' mapped SKU(s)':'BOM · '+(materialPolicy.bomClassifications.find(c=>c.code===str(row.classificationCode))?.name||str(row.classificationCode)||'Production')+' · Components: '+asComponents(row.components).length}</p>
                 <div className='flex flex-wrap items-center justify-between gap-2'>
                     <span className='text-xs text-muted'>Revision {row.revision??1} · effective {str(row.effectiveFrom)||'immediately'}</span>
                     {active==='items'&&['FINISHED','INTERMEDIATE'].includes(str(row.category))&&
@@ -671,6 +683,7 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
                             setViewSkuId(row.id);setDraft(null);setError('');setNotice('');
                         }}>View SKU</Button>}
                     {canSave&&['draft','rejected',''].includes(str(row.status))&&<Button variant='secondary' onClick={()=>void openDraft(row)}>Open / edit</Button>}
+                    {canSave&&active==='routings'&&<Button variant='secondary' onClick={()=>createAlternativeRoute(row)}>Create different route from this</Button>}
                     {canSave&&['active','pending_approval'].includes(str(row.status))&&<Button variant='secondary' onClick={()=>copyVersion(row)}>New version</Button>}
                 </div>
                 {str(row.status)==='draft'&&canSubmit&&<Button variant='secondary' disabled={busy} onClick={()=>void release(row.id,'submit')}>Submit for technical approval</Button>}
