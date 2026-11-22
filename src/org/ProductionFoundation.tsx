@@ -84,7 +84,7 @@ const newRecord=(tab:Tab,policy:MaterialPolicy=defaultMaterialPolicy,
         stockPolicy:policy.defaultIntermediateTracking,sourceMode:'INVENTORY',inventoryMaterialId:'',utilityCode:'',utilityWorkCenterId:'',skuComponents:{}};
     if(tab==='boms')return {id:'',name:'',classificationCode:'PRODUCTION',alternativeCode:defaults.routingAlternativeCode,routingId:'',siteId,
         parentSkuId:'',outputQty:defaults.bomOutputQty,outputUom:'EA',components:[]};
-    if(tab==='resources')return {id:'',name:'',type:defaults.resourceType,rate:defaults.resourceRate,rateUom:'EA',efficiency:defaults.resourceEfficiency,siteId,assetId:''};
+    if(tab==='resources')return {id:'',name:'',siteId,assetId:''}; // Resource class and capacity are inherited from a cost centre and SKU mapping.
     return {id:'',name:'',skuId:'',siteId,processClassId:'',routingModelVersion:2,alternativeCode:defaults.routingAlternativeCode,
         operations:[{code:'STG_000000001',name:'',resourceId:'',setupMinutes:0,
         runMinutesPerUnit:0,producesSkuId:'',costCenterId:'',bomId:'',stageType:'PRODUCE',
@@ -672,7 +672,8 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
                 </div>
             </details>
             <div className='flex justify-end'><Button disabled={!canSkuConfig||busy} onClick={()=>void saveMaterialPolicy()}>Save manufacturing setup</Button></div>
-        </Card>:active==='resources'?<ManufacturingResources onChanged={()=>{void load();}}/>:active==='capacityOverview'?
+        </Card>:active==='resources'?<ManufacturingResources defaultCategory={formDefaults.resourceCostCenterCategory}
+            defaultSubcategory={formDefaults.resourceCostCenterSubcategory} onChanged={()=>{void load();}}/>:active==='capacityOverview'?
         <PlnCapacityOverview sites={refs.sites} processClasses={skuSetup.parameters.filter(p=>p.kind==='processClasses')}
             items={rows.items} units={skuSetup.units}/>:active==='config'?<Card className='space-y-4'>
             <p className='text-sm text-muted'>Initial organization-level planning defaults. Further rule sets and site overrides use the same configuration model in subsequent phases.</p>
