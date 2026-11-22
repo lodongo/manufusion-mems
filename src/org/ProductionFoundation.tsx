@@ -13,6 +13,8 @@ import {configurationProgress,type SetupRow,type SetupStep} from './plnSetupDepe
 import {DEFAULT_FORM_DEFAULTS,formDefaultsFor,preferredSiteId,type FormDefaults} from './plnFormDefaults';
 import PlnFormDefaultsPanel from './PlnFormDefaultsPanel';
 import { bomUomName } from './plnBomUomDisplay';
+import {normalizedMaterialFlow} from '../shared/utilityDistributionCapacity';
+import {navigate} from '../lib/route';
 function Card({children,className=''}:{children:ReactNode;className?:string}){
     return <section className={'min-w-0 rounded-2xl border border-line bg-panel p-3 text-ink sm:p-4 '+className}>{children}</section>;
 }
@@ -37,10 +39,15 @@ type Component={
  skuId:string;warehouseId?:string;materialId?:string;quantity:number;uom:string;scrapPct:number;
  processSupplyKind?:'SKU'|'UTILITY'|'PROCUREMENT';
  utilityWorkCenterId?:string;utilityCode?:string;
+ supplyCostCenterId?:string;supplyUtilityCode?:string;
  quantityMethod?:'PLANNED'|'METERED'|'AS_REQUIRED';
  deliveryMode?:'INLINE'|'BUFFERED'|'BULK_STORAGE'|'CYLINDER';
  requiredFlowPerHour?:number|null;bufferCapacity?:number|null;bufferUsable?:number|null;
 };
+type CostCenterSupplyOption={costCenterId:string;costCenterName:string;siteId:string;
+ code:string;label:string;capacity:number|null;capacityUnit:string;determinantKey:string;
+ demand:number;percentage:number|null;status:string;ready:boolean;values:Record<string,unknown>;
+ sourceCount:number;unknown:number};
 type Operation={code:string;name:string;resourceId:string;setupMinutes:number;runMinutesPerUnit:number;producesSkuId?:string;dependsOn?:string[]};
 type Config={horizonDays:number;freezeDays:number;lotPolicy:string;strategy:string;formDefaults?:FormDefaults};
 type BomClassification={code:string;name:string;enabled:boolean;mrpRelevant:boolean;productionEligible:boolean};
@@ -124,6 +131,16 @@ function BomEditor({draft,onChange,items,refs,skuSetup,materialPolicy}:{
  draft:Row;onChange:(v:Row)=>void;items:Row[];refs:References;skuSetup:SkuSetup;materialPolicy:MaterialPolicy;
 }){
  const output=items.find(i=>i.id===str(draft.parentSkuId));
+ const [costSupplies,setCostSupplies]=useState<CostCenterSupplyOption[]>([]);
+ const [costSupplyError,setCostSupplyError]=useState('');
+ const includesProcess=asComponents(draft.components).some(c=>c.source==='PROCESS_SUPPLY');
+ const refreshCostSupplies=()=>{
+    setCostSupplyError('');
+    void callBackend<{supplies:CostCenterSupplyOption[]}>('/api/org/ast/cost-center-utilities/options',{})
+     .then(result=>setCostSupplies(result.supplies))
+     .catch(e=>setCostSupplyError(e instanceof Error?e.message:'Could not load cost-centre utility capability.'));
+ };
+ useEffect(()=>{if(includesProcess)refreshCostSupplies();},[includesProcess]);
  const components=asComponents(draft.components);
  const quantity=number(draft.outputQty,1);
  const outputUom=str(draft.outputUom)||str(output?.uom)||'EA';
@@ -140,8 +157,10 @@ function BomEditor({draft,onChange,items,refs,skuSetup,materialPolicy}:{
         .map(x=>[x.id,x.name+' · '+str(x.category)] as [string,string])];
  const processProcurementChoices:Array<[string,string]>=[['','Choose an approved bulk/direct procurement material'],
     ...refs.materials.map(m=>[m.id,m.materialNumber+' · '+m.name] as [string,string])];
- const processUtilityChoices:Array<[string,string]>=[['','Choose an existing registered equipment utility'],
-    ...refs.utilities.map(u=>[u.workCenterId+'::'+u.code,u.name+' · '+u.workCenterId] as [string,string])];
+ const processUtilityChoices:Array<[string,string]>=[['','Choose a configured cost-centre utility'],
+    ...costSupplies.filter(s=>!str(draft.siteId)||s.siteId===str(draft.siteId))
+     .map(s=>[s.costCenterId+'::'+s.code,s.costCenterName+' · '+s.label+
+      (s.capacity!==null?' · '+s.capacity+' '+s.capacityUnit:' · supply capacity missing')] as [string,string])];
  const warehouseChoices:Array<[string,string]>=[['','Choose an accessible warehouse'],
     ...refs.warehouses.map(w=>[w.id,(w.code?w.code+' · ':'')+w.name] as [string,string])];
  const siteChoices:Array<[string,string]>=[['','All sites (organization default)'],...refs.sites.map(i=>[i.id,i.name] as [string,string])];
@@ -220,6 +239,7 @@ function BomEditor({draft,onChange,items,refs,skuSetup,materialPolicy}:{
                     const supplyRef=c.processSupplyKind||'SKU';
                     const processMaterial=refs.materials.find(m=>m.id===c.materialId);
                     const processUtility=refs.utilities.find(u=>u.workCenterId===c.utilityWorkCenterId&&u.code===c.utilityCode);
+                    const currentSupply=costSupplies.find(x=>x.costCenterId===c.supplyCostCenterId&&x.code===c.supplyUtilityCode);
                     const material=refs.warehouseMaterials.find(m=>m.warehouseId===c.warehouseId&&m.id===c.materialId);
                     const warehouse=refs.warehouses.find(w=>w.id===c.warehouseId);
                     const selected=items.find(item=>item.id===c.skuId);
@@ -242,7 +262,8 @@ function BomEditor({draft,onChange,items,refs,skuSetup,materialPolicy}:{
                             ]}
                             onChange={v=>update('components',components.map((row,j)=>j===i?{
                                 source:v as Component['source'],skuId:'',warehouseId:'',materialId:'',
-                                utilityWorkCenterId:'',utilityCode:'',processSupplyKind:v==='PROCESS_SUPPLY'?'SKU':undefined,
+                                utilityWorkCenterId:'',utilityCode:'',supplyCostCenterId:'',supplyUtilityCode:'',
+                                processSupplyKind:v==='PROCESS_SUPPLY'?'SKU':undefined,
                                 deliveryMode:v==='PROCESS_SUPPLY'?'INLINE':undefined,
                                 quantityMethod:v==='PROCESS_SUPPLY'?'PLANNED':undefined,
                                 requiredFlowPerHour:null,bufferCapacity:null,bufferUsable:null,
@@ -282,16 +303,60 @@ function BomEditor({draft,onChange,items,refs,skuSetup,materialPolicy}:{
                                 options={processProcurementChoices}
                                 onChange={v=>updateComponent(i,{materialId:v,skuId:'',warehouseId:'',
                                     utilityWorkCenterId:'',utilityCode:'',uom:str(refs.materials.find(m=>m.id===v)?.uom)})}/>}
-                            {supplyRef==='UTILITY'&&<Choice title='Equipment utility source' value={c.utilityWorkCenterId&&c.utilityCode?
-                                c.utilityWorkCenterId+'::'+c.utilityCode:''}
-                                options={processUtilityChoices}
-                                onChange={v=>{
-                                    const ref=refs.utilities.find(u=>u.workCenterId+'::'+u.code===v);
-                                    updateComponent(i,{utilityWorkCenterId:ref?.workCenterId||'',
-                                        utilityCode:ref?.code||'',skuId:'',materialId:'',warehouseId:'',
-                                        uom:ref?.uom||''});
-                                }}/>}
-                            {supplyRef==='UTILITY'&&<p className='text-xs text-muted'>This uses the registered utility reference. Select its approved quantity unit below if the register does not provide one.</p>}
+                            <div className='space-y-2 rounded-lg border border-line bg-panel p-3'>
+                                <div className='flex flex-wrap items-center justify-between gap-2'>
+                                    <p className='text-xs font-semibold'>Supplying cost centre &amp; utility</p>
+                                    <button type='button' className='min-h-9 rounded-lg border border-line px-2 text-xs'
+                                        onClick={refreshCostSupplies}>Refresh utility supplies</button>
+                                </div>
+                                <Choice title='Configured cost-centre utility' value={c.supplyCostCenterId&&c.supplyUtilityCode?
+                                    c.supplyCostCenterId+'::'+c.supplyUtilityCode:''}
+                                    options={processUtilityChoices}
+                                    onChange={v=>{
+                                        const supply=costSupplies.find(x=>x.costCenterId+'::'+x.code===v);
+                                        const next=components.map((row,j)=>j===i?{...row,
+                                            supplyCostCenterId:supply?.costCenterId||'',
+                                            supplyUtilityCode:supply?.code||'',
+                                            utilityWorkCenterId:'',utilityCode:''}:row);
+                                        onChange({...draft,components:next,
+                                            siteId:supply?.siteId||str(draft.siteId)});
+                                    }}/>
+                                {costSupplyError&&<p role='alert' className='text-xs text-red-500'>{costSupplyError}</p>}
+                                {!processUtilityChoices.slice(1).length&&<p className='text-xs text-amber-600'>
+                                    No cost-centre utility supplies configured within this site's permitted scope.
+                                    Open Organization Design → Cost centre → Utility supply &amp; distribution,
+                                    adopt the utility and link a rated source asset.
+                                </p>}
+                                {currentSupply&&<div className='space-y-1 rounded-lg bg-page p-3 text-xs'>
+                                    <p className='font-semibold'>Available capability from the cost-centre master</p>
+                                    <p>{currentSupply.costCenterName} · {currentSupply.label}</p>
+                                    <p>Allocated capacity: {currentSupply.capacity??'Not rated'} {currentSupply.capacityUnit}</p>
+                                    <p>Aggregate equipment demand: {currentSupply.demand} {currentSupply.capacityUnit}</p>
+                                    <p>Loading: {currentSupply.percentage===null?'Not comparable':currentSupply.percentage.toFixed(1)+'%'}
+                                        {' · '}Source assets: {currentSupply.sourceCount}
+                                        {' · '}Status: {currentSupply.status}</p>
+                                    {Object.entries(currentSupply.values).map(([key,value])=>
+                                        <p key={key}>{key}: {String(value)}</p>)}
+                                    {!currentSupply.ready&&<p className='text-amber-600'>Complete the supplying assets, capacity or equipment compatibility before using this utility in a released BOM.</p>}
+                                    {c.requiredFlowPerHour!=null&&c.requiredFlowPerHour>0&&
+                                        currentSupply.capacity!==null&&currentSupply.determinantKey==='flow'&&
+                                        (()=>{const adjusted=normalizedMaterialFlow(c.requiredFlowPerHour,c.uom,currentSupply.capacityUnit);
+                                          return <p className={adjusted!==null&&adjusted>currentSupply.capacity?'text-red-500':'text-muted'}>
+                                            BOM requested flow: {adjusted===null?'Unit conversion not verified · compare manually':
+                                             adjusted.toLocaleString(undefined,{maximumFractionDigits:2})+' '+currentSupply.capacityUnit+
+                                              (adjusted>currentSupply.capacity?' · EXCEEDS AVAILABLE UTILITY CAPACITY':' · within supply allocation')}
+                                          </p>;})()}
+                                    <p className='text-muted'>Existing equipment utility demand is not added to the BOM demand a second time.</p>
+                                </div>}
+                                <button type='button' className='min-h-10 rounded-lg border border-line px-3 text-xs'
+                                    onClick={()=>navigate('organization_admin/structure/'+(c.supplyCostCenterId||''))}>
+                                    Open cost-centre setup / add missing utility or source asset
+                                </button>
+                            </div>
+                            {supplyRef==='UTILITY'&&<p className='text-xs text-muted'>
+                                A registered cost-centre utility supplies this process. Select its consumption UoM below;
+                                the utility source's capacity and conditions are pulled from the cost centre.
+                            </p>}
                             {supplyRef==='SKU'&&selected&&<p className='text-xs text-muted'>
                                 Source SKU {selected.id} · {selected.name}.
                                 {materialSupplyProfile.handlingMode?' Handling: '+materialSupplyProfile.handlingMode.replaceAll('_',' ').toLowerCase()+'.':''}
@@ -671,8 +736,13 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
             if(!parts.length||parts.some(c=>{
                 const missing=c.source==='WAREHOUSE'?(!str(c.warehouseId)||!str(c.materialId)):
                     c.source==='PROCESS_SUPPLY'?(c.processSupplyKind==='SKU'?!str(c.skuId):
-                        c.processSupplyKind==='UTILITY'?(!str(c.utilityWorkCenterId)||!str(c.utilityCode)):
+                        c.processSupplyKind==='UTILITY'?false:
                         c.processSupplyKind==='PROCUREMENT'?!str(c.materialId):true):!str(c.skuId);
+                const missingDistribution=c.source==='PROCESS_SUPPLY'&&
+                    (!str(c.supplyCostCenterId)||!str(c.supplyUtilityCode))&&
+                    // Keep historical read-only-ish process links visible; the
+                    // backend allows only unchanged legacy lines during migration.
+                    !(str(draft.id)&&str(c.utilityWorkCenterId));
                 const needsBuffer=c.source==='PROCESS_SUPPLY'&&
                     ['BUFFERED','BULK_STORAGE'].includes(c.deliveryMode||'INLINE');
                 const invalidBuffer=needsBuffer&&(!Number.isFinite(c.bufferCapacity)||Number(c.bufferCapacity)<=0||
@@ -680,7 +750,7 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
                         c.bufferUsable<0||c.bufferUsable>Number(c.bufferCapacity))));
                 const invalidRate=c.source==='PROCESS_SUPPLY'&&c.requiredFlowPerHour!=null&&
                     (!Number.isFinite(c.requiredFlowPerHour)||c.requiredFlowPerHour<=0);
-                return missing||!str(c.uom)||!Number.isFinite(c.quantity)||c.quantity<=0||
+                return missing||missingDistribution||!str(c.uom)||!Number.isFinite(c.quantity)||c.quantity<=0||
                     invalidBuffer||invalidRate;
             })){
                 setError('Every BOM material needs a valid source, unit and positive planned consumption. For process supplies select a SKU, utility or Procurement material, and check hourly rates and buffer size where used.');return;
