@@ -33,6 +33,23 @@ test('SKU process classification replaces obsolete free-text family without dist
  assert.equal(existing.processClassId,'');
  assert.equal(existing.id,raw.id);
 });
+test('Obsolete Product family is absent from SKU form, validation and saved current master data',()=>{
+ const ui=read('src/org/ProductionFoundation.tsx');
+ const backend=read('backend/plnMfgFoundation.ts');
+ assert.ok(!ui.includes("title='Product family'"));
+ assert.ok(!ui.includes('Product family is required before saving this SKU.'));
+ assert.ok(!backend.includes("'Product family is required.'"));
+ assert.ok(backend.includes("delete raw.family;"));
+ assert.ok(ui.includes("delete body.family;"));
+ assert.ok(ui.includes("Select a manufacturing process classification before saving this manufactured SKU."));
+ assert.ok(backend.includes("['FINISHED','INTERMEDIATE'].includes(str(raw.category))"));
+ for(const input of [sku,{...sku,family:'Old value',processClassId:'PRC_000000001'}]){
+  const normalized=normalizeMaster('items',input);
+  assert.equal(Object.hasOwn(normalized,'family'),false);
+  assert.equal(normalized.id,sku.id);
+  assert.equal(normalized.uom,sku.uom);
+ }
+});
 test('Routing preserves its process class, stages, site and SKU-specific recipe references',()=>{
  const row=normalizeMaster('routings',{
   id:'RTG-001',name:'Organization process',skuId:sku.id,processClassId:'PRC_000000001',
