@@ -1306,6 +1306,12 @@ async function makeMaterialDecision(ctx:OrgContext,kind:'creation'|'extension'):
 }
 
 export const procurementRoutes = {
+    // Wire the shared platform catalog endpoints. The MEMS Admin menu uses these
+    // routes for Material catalog, Service catalog and GL account master.
+    // The handlers were previously defined by catalogRoutes but never mounted,
+    // causing all three status calls to return HTTP 404 ("Not found").
+    ...catalogRoutes('procurement', ['materials', 'services']),
+    ...catalogRoutes('finance', ['gl_accounts']),
     'POST /api/org/inventory/material/metadata': [orgRoute('org.inventory.material.metadata', null, async ctx => {
         const root='organizations/'+ctx.orgId;
         const incoterms=[['EXW','Ex Works'],['FCA','Free Carrier'],['CPT','Carriage Paid To'],['CIP','Carriage and Insurance Paid To'],['DAP','Delivered at Place'],['DPU','Delivered at Place Unloaded'],['DDP','Delivered Duty Paid'],['FAS','Free Alongside Ship'],['FOB','Free on Board'],['CFR','Cost and Freight'],['CIF','Cost Insurance and Freight']].map(([code,description])=>({code,description,enabled:true}));
