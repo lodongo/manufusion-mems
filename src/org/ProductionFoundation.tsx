@@ -134,11 +134,35 @@ function BomEditor({draft,onChange,items,refs,skuSetup,materialPolicy}:{
  const [sectionTab,setSectionTab]=useState<'output'|'materials'|'settings'>('output');
  const [materialsView,setMaterialsView]=useState<'list'|'edit'>('list');
  const [selectedMaterialIndex,setSelectedMaterialIndex]=useState<number|null>(null);
+ const [materialEditorMode,setMaterialEditorMode]=useState<'create'|'edit'>('create');
+ const [materialEditorSnapshot,setMaterialEditorSnapshot]=useState<Row|null>(null);
+ const [materialEditorError,setMaterialEditorError]=useState('');
  useEffect(()=>{
     setSectionTab('output');
     setMaterialsView('list');
     setSelectedMaterialIndex(null);
+    setMaterialEditorSnapshot(null);
+    setMaterialEditorError('');
  },[draft.id]);
+ // Keep the mobile editor independent from the scrolling BOM list.
+ useEffect(()=>{
+    if(materialsView!=='edit')return;
+    const previousOverflow=document.body.style.overflow;
+    document.body.style.overflow='hidden';
+    const onEscape=(event:KeyboardEvent)=>{
+        if(event.key!=='Escape')return;
+        if(materialEditorSnapshot)onChange(materialEditorSnapshot);
+        setMaterialsView('list');
+        setSelectedMaterialIndex(null);
+        setMaterialEditorSnapshot(null);
+        setMaterialEditorError('');
+    };
+    window.addEventListener('keydown',onEscape);
+    return ()=>{
+        document.body.style.overflow=previousOverflow;
+        window.removeEventListener('keydown',onEscape);
+    };
+ },[materialsView,materialEditorSnapshot,onChange]);
  const [costSupplies,setCostSupplies]=useState<CostCenterSupplyOption[]>([]);
  const [costSupplyError,setCostSupplyError]=useState('');
  const includesProcess=asComponents(draft.components).some(c=>c.source==='PROCESS_SUPPLY');
@@ -157,11 +181,58 @@ function BomEditor({draft,onChange,items,refs,skuSetup,materialPolicy}:{
    update('components',components.map((c,j)=>i===j?{...c,...patch}:c));
  const beginAddMaterial=()=>{
     if(!output||components.length>=150)return;
+    setMaterialEditorSnapshot(draft);
+    setMaterialEditorMode('create');
+    setMaterialEditorError('');
     update('components',[...components,{
         source:'INTERMEDIATE',skuId:'',warehouseId:'',materialId:'',quantity:1,uom:'',scrapPct:0,
     }]);
     setSelectedMaterialIndex(components.length);
     setMaterialsView('edit');
+ };
+ const beginEditMaterial=(index:number)=>{
+    if(!components[index])return;
+    setMaterialEditorSnapshot(draft);
+    setMaterialEditorMode('edit');
+    setMaterialEditorError('');
+    setSelectedMaterialIndex(index);
+    setMaterialsView('edit');
+ };
+ const cancelMaterialEditor=()=>{
+    if(materialEditorSnapshot)onChange(materialEditorSnapshot);
+    setMaterialsView('list');
+    setSelectedMaterialIndex(null);
+    setMaterialEditorSnapshot(null);
+    setMaterialEditorError('');
+ };
+ const saveMaterialEditor=()=>{
+    if(selectedMaterialIndex===null||!components[selectedMaterialIndex])return;
+    const c=components[selectedMaterialIndex];
+    const source=c.source||'INTERMEDIATE',kind=c.processSupplyKind||'SKU';
+    const referencePresent=source==='WAREHOUSE'?!!c.warehouseId&&!!c.materialId:
+        source==='PROCESS_SUPPLY'?kind==='SKU'?!!c.skuId:
+            kind==='PROCUREMENT'?!!c.materialId:
+                !!(c.supplyCostCenterId&&c.supplyUtilityCode)||!!(c.utilityWorkCenterId&&c.utilityCode):
+        !!c.skuId;
+    if(!referencePresent||!c.uom||!Number.isFinite(c.quantity)||c.quantity<=0){
+        setMaterialEditorError('Select the required material or utility and enter a positive quantity and valid unit before adding it to the BOM.');
+        return;
+    }
+    if(source==='PROCESS_SUPPLY'&&!(c.supplyCostCenterId&&c.supplyUtilityCode)&&
+        !(c.utilityWorkCenterId&&c.utilityCode)){
+        setMaterialEditorError('Choose a configured supplying cost-centre utility for this process material.');
+        return;
+    }
+    if(source==='PROCESS_SUPPLY'&&['BUFFERED','BULK_STORAGE'].includes(c.deliveryMode||'INLINE')&&
+        (!(Number.isFinite(c.bufferCapacity)&&Number(c.bufferCapacity)>0)||
+            (c.bufferUsable!=null&&(c.bufferUsable<0||c.bufferUsable>Number(c.bufferCapacity))))){
+        setMaterialEditorError('Enter a valid buffer capacity and usable quantity not greater than capacity.');
+        return;
+    }
+    setMaterialsView('list');
+    setSelectedMaterialIndex(null);
+    setMaterialEditorSnapshot(null);
+    setMaterialEditorError('');
  };
  const removeMaterial=(index:number)=>{
     if(!window.confirm('Remove material '+(index+1)+' from this BOM draft? Save the BOM draft to persist the change.'))return;
@@ -313,10 +384,7 @@ function BomEditor({draft,onChange,items,refs,skuSetup,materialPolicy}:{
                             </p>
                         </div>
                         <div className='flex shrink-0 items-center gap-2'>
-                            <Button type='button' variant='secondary' onClick={()=>{
-                                setSelectedMaterialIndex(index);
-                                setMaterialsView('edit');
-                            }}>Edit</Button>
+                            <Button type='button' variant='secondary' onClick={()=>beginEditMaterial(index)}>Edit</Button>
                             <Button type='button' variant='danger' onClick={()=>removeMaterial(index)}>Delete</Button>
                         </div>
                     </div>;
@@ -326,13 +394,17 @@ function BomEditor({draft,onChange,items,refs,skuSetup,materialPolicy}:{
                 </p>}
             </div>
             {materialsView==='edit'&&
-            <div className='space-y-3 rounded-xl border border-line p-3'>
-                <div className='flex items-center justify-between gap-2'>
-                    <h4 className='text-sm font-semibold'>Material {selectedMaterialIndex===null?'':selectedMaterialIndex+1}</h4>
-                    <Button type='button' variant='secondary' onClick={()=>{
-                        setMaterialsView('list');setSelectedMaterialIndex(null);
-                    }}>Close editor</Button>
-                </div>
+            <div className='fixed inset-0 z-[200] flex items-center justify-center bg-black/60 p-0 sm:p-4'>
+                <div role='dialog' aria-modal='true' aria-labelledby='bom-material-editor-title'
+                    className='flex h-full min-h-0 w-full flex-col overflow-hidden bg-panel text-ink shadow-2xl sm:h-auto sm:max-h-[92dvh] sm:max-w-3xl sm:rounded-2xl'>
+                    <div className='flex shrink-0 items-center justify-between gap-3 border-b border-line px-4 py-3'>
+                        <h4 id='bom-material-editor-title' className='text-base font-semibold'>
+                            {materialEditorMode==='create'?'Add material':'Edit material '+(selectedMaterialIndex===null?'':selectedMaterialIndex+1)}
+                        </h4>
+                        <button type='button' aria-label='Cancel and close material editor' onClick={cancelMaterialEditor}
+                            className='flex min-h-10 min-w-10 items-center justify-center rounded-lg border border-line text-xl text-ink'>×</button>
+                    </div>
+                    <div className='min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain p-3 sm:p-5'>
                 {components.map((c,i)=>{
                     if(i!==selectedMaterialIndex)return null;
                     const fromWarehouse=c.source==='WAREHOUSE';
@@ -349,12 +421,7 @@ function BomEditor({draft,onChange,items,refs,skuSetup,materialPolicy}:{
                         (supplyRef==='SKU'?str(selected?.uom):supplyRef==='PROCUREMENT'?processMaterial?.uom:processUtility?.uom):
                         str(selected?.uom);
                     const availableMaterials=refs.warehouseMaterials.filter(m=>m.warehouseId===c.warehouseId);
-                    return <div key={i} className='space-y-3 rounded-lg border border-line bg-page p-3'>
-                        <div className='flex flex-wrap items-center justify-between gap-2'>
-                            <span className='text-sm font-semibold'>Required material {i+1}</span>
-                            <button type='button' className='min-h-10 rounded-lg border border-line px-3 text-xs text-ink'
-                                onClick={()=>removeMaterial(i)}>Remove</button>
-                        </div>
+                    return <div key={i} className='space-y-3'>
                         <Choice title='Material source' value={c.source==='PROCESS_SUPPLY'?'PROCESS_SUPPLY':fromWarehouse?'WAREHOUSE':'INTERMEDIATE'}
                             options={[
                                 ['INTERMEDIATE','Manufactured intermediate / WIP'],
@@ -535,14 +602,17 @@ function BomEditor({draft,onChange,items,refs,skuSetup,materialPolicy}:{
                         </details>}
                     </div>;
                 })}
-                {selectedMaterialIndex!==null&&components[selectedMaterialIndex]&&
-                    <div className='flex flex-wrap justify-end gap-2'>
-                        <Button type='button' variant='secondary' onClick={()=>{
-                            setMaterialsView('list');setSelectedMaterialIndex(null);
-                        }}>Done · View added materials</Button>
-                        <Button type='button' variant='secondary' disabled={components.length>=150}
-                            onClick={beginAddMaterial}>Add another</Button>
-                    </div>}
+                    </div>
+                    <div className='shrink-0 space-y-2 border-t border-line bg-panel p-3 sm:p-4'>
+                        {materialEditorError&&<p role='alert' className='text-sm text-red-500'>{materialEditorError}</p>}
+                        <div className='flex justify-end gap-2'>
+                            <Button type='button' variant='secondary' onClick={cancelMaterialEditor}>Cancel</Button>
+                            <Button type='button' onClick={saveMaterialEditor}>
+                                {materialEditorMode==='create'?'Add material':'Save changes'}
+                            </Button>
+                        </div>
+                    </div>
+                </div>
             </div>}
             </div>}
     </section>
