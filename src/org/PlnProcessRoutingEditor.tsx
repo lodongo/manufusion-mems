@@ -293,6 +293,8 @@ export default function PlnProcessRoutingEditor({value,onChange,items,boms,resou
      <p className='text-xs text-muted'>Choose a card to edit. Parallel stages may share predecessors.</p></div>
     <Action onClick={addStage} primary disabled={ops.length>=60}>Add stage</Action>
    </div>
+   <PlnFlowOpportunities analysis={liveFlow} units={measureUnits}
+    heading='Live capacity opportunities · draft configuration' showUnresolved={false}/>
    {stepNotice&&<p role='status' className='rounded-lg border border-line p-2 text-xs'>{stepNotice}</p>}
    {ops.map((stage,i)=>{
     const expanded=openStep===stage.code;
@@ -492,8 +494,6 @@ export default function PlnProcessRoutingEditor({value,onChange,items,boms,resou
     <Action onClick={()=>setSection('skus')} primary>Next: map SKUs</Action>
    </div>
   </div>}
-  {!legacy&&section==='stages'&&<PlnFlowOpportunities analysis={liveFlow} units={measureUnits}
-   heading='Live capacity opportunities · draft configuration' showUnresolved={false}/>}
   {!legacy&&section==='skus'&&<div className='space-y-3'>
    <div className='rounded-xl border border-line bg-page p-3'>
     <h3 className='text-sm font-semibold'>Which SKUs follow this manufacturing route?</h3>
