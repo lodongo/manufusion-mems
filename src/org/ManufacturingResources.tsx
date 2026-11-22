@@ -130,7 +130,11 @@ export default function ManufacturingResources({onChanged}:{onChanged?:()=>void}
  const [error,setError]=useState(''),[notice,setNotice]=useState('');
  const [le,setLe]=useState(''),[site,setSite]=useState(''),[department,setDepartment]=useState(''),[cc,setCc]=useState('');
  const [selected,setSelected]=useState<string[]>([]);
+ const [showAdd,setShowAdd]=useState(false);
  const [opened,setOpened]=useState('');
+ const closeAdd=()=>{
+  setShowAdd(false);setLe('');setSite('');setDepartment('');setCc('');setSelected([]);
+ };
  const load=async()=>{
   setLoading(true);setError('');
   try{setData(await callBackend<ListData>('/api/org/pln/resource/list'));}
@@ -157,7 +161,9 @@ export default function ManufacturingResources({onChanged}:{onChanged?:()=>void}
   return [...seen.values()].sort((a,b)=>a.name.localeCompare(b.name));
  };
  const available=filtered.filter(x=>!x.resource?.active);
- const configured=filtered.filter(x=>x.resource?.active);
+ // The added-resource list is always visible across the full authorized scope.
+ // Add-form filters must not hide resources after the form is dismissed.
+ const configured=all.filter(x=>x.resource?.active);
  const selectedVisible=new Set(selected.filter(id=>available.some(x=>x.costCenterId===id)));
  const add=async()=>{
   if(!data||!selectedVisible.size)return;
@@ -180,6 +186,7 @@ export default function ManufacturingResources({onChanged}:{onChanged?:()=>void}
   if(count)onChanged?.();
   setNotice(count+' resource(s) added. Click a resource to configure its core and allocate SKUs.');
   if(faults.length)setError('Not added: '+faults.join('; '));
+  else if(count)closeAdd();
   setBusy(false);
  };
  const remove=async(x:CostCenter)=>{
@@ -202,12 +209,21 @@ export default function ManufacturingResources({onChanged}:{onChanged?:()=>void}
   <div className='flex flex-wrap items-center justify-between gap-2'>
    <div><h2 className='text-lg font-semibold text-ink'>Manufacturing Resources</h2>
     <Text>Adopt resources from production cost centres within your authorized organization scope.</Text></div>
-   <button type='button' disabled={loading||busy} className={actionClass} onClick={()=>void load()}>Refresh resources</button>
+   <div className='flex flex-wrap gap-2'>
+    {!showAdd&&<button type='button' disabled={loading||busy} className={actionClass+' bg-brand text-onbrand'+overrideOutline}
+     onClick={()=>{setShowAdd(true);setError('');setNotice('');}}>Add resources</button>}
+    <button type='button' disabled={loading||busy} className={actionClass} onClick={()=>void load()}>Refresh resources</button>
+   </div>
   </div>
   {error&&<Alert tone='error'>{error}</Alert>}
   {notice&&<p role='status' className='rounded-xl border border-line p-3 text-sm text-ink'>{notice}</p>}
   {loading&&!data&&<p className='text-sm text-muted'>Loading permitted production cost centres…</p>}
   {data&&<>
+   {showAdd&&<>
+    <div className='flex flex-wrap items-center justify-between gap-2'>
+     <h3 className='font-semibold text-ink'>Add manufacturing resources</h3>
+     <button type='button' disabled={busy} className={actionClass} onClick={closeAdd}>Cancel</button>
+    </div>
    <div className='space-y-3 rounded-2xl border border-line bg-panel p-3'>
     <p className='text-sm font-semibold text-ink'>Highest permitted scope: {data.highestPermittedScope?.name||'Accessible organization locations'}</p>
     <div className='grid grid-cols-1 gap-3 sm:grid-cols-2'>
@@ -249,6 +265,7 @@ export default function ManufacturingResources({onChanged}:{onChanged?:()=>void}
       {busy?'Adding…':'Add selected resources'}</button>
     </div>
    </section>
+   </>}
    <section className='space-y-3'>
     <h3 className='font-semibold text-ink'>Added manufacturing resources ({configured.length})</h3>
     <div className='grid gap-3 md:grid-cols-2'>
