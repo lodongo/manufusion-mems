@@ -156,16 +156,16 @@ const guide:Chapter[]=[
  ]},
  {id:'routing',title:'9. Process Routings',phase:'Capacity & process',summary:'Create a process once, map compatible SKUs, or create a separate route when the process changes.',screen:'Process Routings',topics:[
   {title:'Create a routing',purpose:'Start a manufacturing method for one site.',steps:[
-   'Choose Add new route, select a site and manufacturing process classification, then select a primary SKU from that classification.',
+   'Choose Add new route, select its production site and manufacturing process classification. No primary SKU is required to define the common process.',
    'Name the route and freely edit its alternative code. Leave it blank while editing, but enter a valid code before saving. The internal routing master ID remains automatically generated.',
    'Open Stages to configure the common activity sequence, resources and dependencies.',
    'Save the draft. Saving does not execute production or issue materials.',
   ],example:'Fictional: An assembly process can involve material preparation, fitting and testing on shared resources.'},
   {title:'Same process, different recipes',purpose:'Reuse stages and resources instead of making duplicate routings.',steps:[
-   'Open SKUs and select Map SKU for each additional compatible product.',
+   'Open SKUs and select Map SKU for the first and subsequent products in the chosen process group.',
    'For each producing stage, choose that SKU’s actual output and corresponding BOM.',
    'Change the batch size or processing time only if it differs from the shared stage.',
-   'Review every mapped SKU before submitting the route for approval.',
+   'Review every mapped SKU before submitting the route for approval. At least one mapped SKU and its valid stage BOMs are required.',
   ],example:'Fictional: Different polymer grades may share extrusion equipment but use different recipes; beverage variants may share the same processing stages.'},
   {title:'Create a different route',purpose:'Use another route when the manufacturing process changes.',steps:[
    'Select Add new route to start from scratch or Create different route from this to copy an existing process.',
