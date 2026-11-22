@@ -10,7 +10,7 @@ const guide:Chapter[]=[
    'Confirm your legal entity, site, manufacturing department and manufacturing-classified cost centres in Organization Design / Finance.',
    'Open Production Planning & MRP. Configure Manufacturing Setup and Product Configuration before creating manufactured SKUs.',
    'Create materials and finished/intermediate products, BOMs and manufacturing resources.',
-   'Configure each manufacturing cost centre’s SKU-specific commissioned throughput, then set up Process Routings.',
+   'Configure each resource’s SKU-specific commissioned throughput using its SKU allocation tab, then set up Process Routings.',
    'Set the planning horizon, frozen period and strategy; enter and review demand.',
    'Use role-specific maker-checker workflow to approve manufacturing BOMs and routings; drafts are not an approved production release.',
   ],example:'Fictional example: Demo LE → Demo Nairobi Site → Manufacturing → Filling/Packaging Cost Centre. This illustration is not live plant master data.',
@@ -19,7 +19,7 @@ const guide:Chapter[]=[
    'Product and SKU configuration requires organization manufacturing configuration permission.',
    'BOMs and routings have separate editing, submission and approval permissions.',
    'New masters are saved as drafts; approved versions must not be overwritten. Create a new managed revision instead.',
-   'Use the explicit Refresh button if another authorized user changes a record. Check the error shown after a failed save.',
+   'Reopen the relevant setup to review changes from other authorized users. Check the error shown after a failed save.',
   ],warning:'Documentation does not grant permissions or bypass required approvals.'},
  ]},
  {id:'manufacturing',title:'1. Manufacturing Setup',phase:'Foundation',summary:'Establish material consumption and intermediate tracking policies.',screen:'Manufacturing Setup',topics:[
@@ -124,18 +124,18 @@ const guide:Chapter[]=[
    'Review the full manufacturing chain to prevent circular BOM dependencies.',
   ]},
  ]},
- {id:'resources',title:'8. Manufacturing Resources',phase:'Master data',summary:'Configure process resources and optional links to active equipment.',screen:'Manufacturing Resources',topics:[
-  {title:'Resource master',purpose:'Assign a resource class and valid rate basis.',steps:[
-   'Open Manufacturing Resources and add a resource such as line, work centre, machine or batch vessel.',
-   'Set its rated units/hour, unit of measure and planning efficiency.',
-   'Optionally link an existing active Asset Register equipment record at the same site.',
-   'Save. Resource records and equipment references are distinct from the SKU cost-centre commissioned speed master.',
-  ],example:'Fictional: Demo KHS filling resource rated at 28,000 discrete units/hour. This is an illustrative planning reference, not a commissioned site speed.'},
+ {id:'resources',title:'8. Manufacturing Resources',phase:'Master data',summary:'Adopt authorized production cost centres, configure core information and allocate SKUs.',screen:'Manufacturing Resources',topics:[
+  {title:'Resource master',purpose:'Configure core information in the shared manufacturing resource master.',steps:[
+   'Open Manufacturing Resources and select Add resources.',
+   'Filter your authorized hierarchy and add the required production cost centres.',
+   'Open an added resource and save its name, rate unit and notes under Core information.',
+   'Use SKU allocation for SKU mapping and commissioned ratings. These share the cost-centre setup used elsewhere.',
+  ],example:'Fictional: Demo bottling-line resource with separate commissioned outputs for its mapped SKUs.'},
  ]},
- {id:'capacity',title:'9. Manufacturing Cost Centre & SKUs',phase:'Capacity & process',summary:'Set site-specific commissioned throughput and calculate equivalent product outputs.',screen:'Manufacturing Cost Centre & SKUs',topics:[
+ {id:'capacity',title:'SKU allocation in Manufacturing Resources',phase:'Capacity & process',summary:'Commission SKU throughput within an added resource, rather than a separate setup step.',screen:'Manufacturing Resources → SKU allocation',topics:[
   {title:'Select the manufacturing hierarchy',purpose:'Make sure the correct line/cost centre owns the speed.',steps:[
-   'Choose Legal Entity → Site → Manufacturing Department → Manufacturing Cost Centre.',
-   'After selecting the cost centre, the hierarchy collapses into a compact summary; use Change cost centre if needed.',
+   'Open Manufacturing Resources and select an added resource.',
+   'Open its SKU allocation tab to access the shared cost-centre SKU editor.',
    'Choose Add SKU and select an eligible manufactured SKU.',
   ],example:'Fictional: Demo Plant → Bottling Line A cost centre → Demo Orange 400 mL PET 12-pack.'},
   {title:'Commission rated output',purpose:'Record exact counts for one period without ambiguous output types.',steps:[
@@ -148,7 +148,7 @@ const guide:Chapter[]=[
   ],example:'Fictional: 24,000 bottles/h, 12 bottles/case → 2,000 cases/h. Or enter 2,000 cases/h to derive 24,000 bottles/h from that SKU ratio.',
    checks:['The physical container size matches the selected SKU.','Every derived output retains the configured time denominator.','The output name makes bottles/hour and cases/hour distinguishable.']},
  ]},
- {id:'routing',title:'10. Process Routings',phase:'Capacity & process',summary:'Create sequential or parallel production steps using stage BOMs and authorized cost centres.',screen:'Process Routings',topics:[
+ {id:'routing',title:'9. Process Routings',phase:'Capacity & process',summary:'Create sequential or parallel production steps using stage BOMs and authorized cost centres.',screen:'Process Routings',topics:[
   {title:'Routing header',purpose:'A versioned route belongs to a finished or intermediate SKU.',steps:[
    'Add routing and select production site, main manufactured SKU, route name, alternative and effective date.',
    'Open Stages to add each manufacturing activity.',
@@ -162,7 +162,7 @@ const guide:Chapter[]=[
    'Submit release-ready routings for independent approval. Published versions remain immutable.',
   ],example:'Fictional parallel graph: Prep + Blow → Fill/Cap → Label → Case Pack → Palletize.'},
  ]},
- {id:'planning',title:'11. Planning Configuration',phase:'Planning',summary:'Set planning rules after the manufacturing masters are established.',screen:'Planning Configuration',topics:[
+ {id:'planning',title:'10. Planning Configuration',phase:'Planning',summary:'Set planning rules after the manufacturing masters are established.',screen:'Planning Configuration',topics:[
   {title:'Horizon and freeze period',purpose:'Provide a reproducible date horizon and constraints.',steps:[
    'Open Planning Configuration.',
    'Set planning horizon days and frozen period days (freeze must not exceed horizon).',
@@ -170,7 +170,7 @@ const guide:Chapter[]=[
    'Choose lot-sizing policy and save the controlled configuration.',
   ],example:'Fictional training setup: 90-day horizon, 7-day frozen period, Make to Stock, Lot-for-Lot. These are demonstration settings, not recommended site defaults.'},
  ]},
- {id:'demand',title:'12. Demand & S&OP',phase:'Planning',summary:'Review demand inputs using approved product identities and dates.',screen:'Demand & S&OP',topics:[
+ {id:'demand',title:'11. Demand & S&OP',phase:'Planning',summary:'Review demand inputs using approved product identities and dates.',screen:'Demand & S&OP',topics:[
   {title:'Enter or review demand',purpose:'Keep demand source and SKU allocation auditable.',steps:[
    'Open Demand & S&OP and choose the authorized site and SKU scope.',
    'Enter or import supported demand records according to the current UI.',
@@ -178,7 +178,7 @@ const guide:Chapter[]=[
    'Check records for conflicts before using them as inputs to later planning calculations.',
   ],example:'Fictional: Demo Orange 400 mL 12-pack, 10,000 cases required in a future planning week. This is training data only.'},
  ]},
- {id:'future',title:'13. Subsequent planning and execution',phase:'Roadmap',summary:'Understand which advanced areas still require implementation and verification.',status:'Planned / not part of this guide’s live setup',topics:[
+ {id:'future',title:'12. Subsequent planning and execution',phase:'Roadmap',summary:'Understand which advanced areas still require implementation and verification.',status:'Planned / not part of this guide’s live setup',topics:[
   {title:'MPS, finite capacity, MRP and production orders',purpose:'Do not mistake design intent for an operational transaction function.',steps:[
    'Master Production Scheduling should translate approved demand into feasible proposed production quantities, using versioned BOMs and routings.',
    'Rough-cut and finite capacity should use validated output units and calendars without double-counting rated efficiency or downtime.',
@@ -200,7 +200,7 @@ const guide:Chapter[]=[
    'Warehouse palletizer: use Pallet and a configured transport packaging relationship so pallets/hour can resolve to SKU primary units.',
   ],warning:'A tonne/hour flow cannot be converted to pieces/hour without an explicit production-form and per-piece size relationship.'},
  ]},
- {id:'trouble',title:'14. Troubleshooting and verification',phase:'Reference',summary:'Interpret save faults, missing speed mappings and incompatible conversions.',topics:[
+ {id:'trouble',title:'13. Troubleshooting and verification',phase:'Reference',summary:'Interpret save faults, missing speed mappings and incompatible conversions.',topics:[
   {title:'SKU does not save',purpose:'Resolve each required field rather than guessing a default.',steps:[
    'Open the SKU card with the displayed validation issue.',
    'Verify selected SKU, primary container and size match the adopted Product Configuration.',
@@ -220,7 +220,7 @@ const guide:Chapter[]=[
 ];
 const pageTargets:Record<string,string>={
  manufacturing:'materialPolicy',product:'skuSetup',primary:'skuSetup',packs:'skuSetup',naming:'skuSetup',
- skus:'items',bom:'boms',resources:'resources',capacity:'costCenterSku',routing:'routings',
+ skus:'items',bom:'boms',resources:'resources',capacity:'resources',routing:'routings',
  planning:'config',demand:'demand',
 };
 function ExampleScreen(){
