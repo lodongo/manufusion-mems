@@ -52,8 +52,7 @@ export default function PlnCostCenterSetup({onMappingsChanged,defaultSiteId='',o
    <div className='min-w-0'><h2 className='text-base font-semibold sm:text-lg'>Manufacturing cost-centre SKU setup</h2>
     <p className='hidden text-xs text-muted sm:block'>Select the manufacturing cost centre; no equipment selection is required.</p>
    </div>
-   <button type='button' onClick={()=>void reload()} disabled={loading}
-    className='min-h-11 shrink-0 rounded-xl border border-line px-3 text-sm disabled:opacity-50'>Refresh</button>
+
   </div>
   {error&&<Alert tone='error'>{error}</Alert>}
   {cc&&!showLocation&&<div className='flex flex-wrap items-center justify-between gap-2 rounded-xl border border-line bg-panel p-3'>
