@@ -82,7 +82,11 @@ export const plnMfgReleaseRoutes={
                     data.productVariantId=str(data.productVariantId)||str(data.flavorVariantId);
                     delete data.type;delete data.flavorVariantId;
                 }
-                return {id:row.id,...data,alternativeCode:str(data.alternativeCode)};
+                return {id:row.id,...data,alternativeCode:str(data.alternativeCode),
+                    siteId:str(data.siteId),status:str(data.status),
+                    effectiveFrom:str(data.effectiveFrom),approvedAt:str(data.approvedAt),
+                    applicability:str(data.applicability)||'SKU',
+                    processClassId:str(data.processClassId),parentSkuId:str(data.parentSkuId)};
             });
             if(kind==='boms'){
                 const usage=str(ctx.body.usage)||'PRODUCTION';
