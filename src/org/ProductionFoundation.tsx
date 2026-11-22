@@ -166,6 +166,8 @@ function BomEditor({draft,onChange,items,refs,skuSetup,materialPolicy}:{
  draft:Row;onChange:(v:Row)=>void;items:Row[];refs:References;skuSetup:SkuSetup;materialPolicy:MaterialPolicy;
 }){
  const output=items.find(i=>i.id===str(draft.parentSkuId));
+ const outputReady=!!output&&(str(draft.applicability)||'SKU')==='SKU'||
+    ['PROCESS_CLASS','ALL'].includes(str(draft.applicability));
  const [sectionTab,setSectionTab]=useState<'output'|'materials'|'settings'>('settings');
  const [materialsView,setMaterialsView]=useState<'list'|'edit'>('list');
  const [selectedMaterialIndex,setSelectedMaterialIndex]=useState<number|null>(null);
@@ -218,7 +220,7 @@ function BomEditor({draft,onChange,items,refs,skuSetup,materialPolicy}:{
  const updateComponent=(i:number,patch:Partial<Component>)=>
    update('components',components.map((c,j)=>i===j?{...c,...patch}:c));
  const beginAddMaterial=()=>{
-    if(!output||components.length>=150)return;
+    if(!outputReady||components.length>=150)return;
     setMaterialEditorSnapshot(draft);
     setEstimatedRunHours('');
     setMaterialEditorMode('create');
@@ -417,10 +419,10 @@ function BomEditor({draft,onChange,items,refs,skuSetup,materialPolicy}:{
         </div>
         <div className='flex flex-wrap items-center justify-between gap-2'>
             <span className='text-sm font-semibold'>Added materials ({components.length})</span>
-            <Button type='button' variant='secondary' disabled={!output||components.length>=150}
+            <Button type='button' variant='secondary' disabled={!outputReady||components.length>=150}
                 onClick={beginAddMaterial}>Add material</Button>
         </div>
-        {!output?<p className='text-sm text-muted'>Choose the output in the Output tab first.</p>:
+        {!outputReady?<p className='text-sm text-muted'>Choose an applicable SKU in Settings before adding materials.</p>:
             <div className='space-y-3'>
             <div className='space-y-2'>
                 {components.map((component,index)=>{
