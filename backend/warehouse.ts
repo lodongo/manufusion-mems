@@ -1002,6 +1002,80 @@ export const warehouseRoutes = {
         }),
     ],
 
+    // Explicitly expand an existing non-segregated cluster to accommodate a material from
+    // another subcategory in the SAME material category. The selected cluster's
+    // restrictions stay unchanged. Physical stock placement is never performed here.
+    'POST /api/org/warehouse/cluster/adopt-subcategory': [
+        orgRoute('org.warehouse.cluster.adopt-subcategory', null, async ctx => {
+            if(!canEdit(ctx)||!(ctx.role==='org_super_admin'||hasPerm(ctx.directPermissions,'ADM.structure')||
+                ['INV.cluster.create','WHS.cluster.create','WMS.cluster.create','INV.warehouse.configure','WHS.warehouse.configure','WMS.warehouse.configure'].some(p=>hasPerm(ctx.permissions,p))))
+                throw new HttpError(403,'Warehouse configuration permission is required to add a subcategory to an existing cluster.');
+            if(ctx.body.confirm!==true)throw new HttpError(400,'Confirm that this cluster may be shared with the selected material subcategory.');
+            const node=await storageCostCenter(ctx,str(ctx.body.costCenterId));
+            const code=str(ctx.body.code),subcategoryCode=str(ctx.body.subcategoryCode),categoryCode=str(ctx.body.categoryCode);
+            if(!CLUSTER_RE.test(code)||!subcategoryCode||!categoryCode)throw new HttpError(400,'Choose a cluster and material subcategory.');
+            return withLock(ctx,node.id,async()=>{
+                const path=clusterCol(ctx.orgId,node.id)+'/'+code;
+                const [doc,wh,master,catalog]=await Promise.all([
+                    getDoc(path),getDoc(whPath(ctx.orgId,node.id)),
+                    warehouseRestrictionMaster(),materialCategories(),
+                ]);
+                if(!doc||!wh)throw new HttpError(404,'Warehouse cluster not found.');
+                const subcategory=catalog.find(c=>c.code===categoryCode)?.subcategories
+                    .find(sc=>sc.code===subcategoryCode);
+                if(!subcategory||!categoryCodesOf(wh.data).includes(categoryCode))
+                    throw new HttpError(409,'This material subcategory is not enabled for the warehouse.');
+                const cls={code:subcategory.code,name:subcategory.name,categoryCode};
+                const cluster=clusterOut(doc,layoutOf(wh.data));
+                const location=locationsOf(wh.data).find(l=>l.code===cluster.locationCode);
+                if(!location||!location.active)throw new HttpError(409,'The cluster storage location is inactive or missing.');
+                if((location.materialCategoryCode&&location.materialCategoryCode!==categoryCode)||
+                    (cluster.materialCategoryCode&&cluster.materialCategoryCode!==categoryCode)||
+                    cluster.subcategories.some(x=>x.categoryCode&&x.categoryCode!==categoryCode))
+                    throw new HttpError(409,'Only material subcategories within the same warehouse and storage-location category can share a cluster.');
+                const codes=restrictionCodesOf(cluster.restrictionCodes,cluster.restrictionCode||location.restrictionCode);
+                const issue=locationBlock(codes,master,'cluster '+code);
+                if(issue)throw new HttpError(409,issue);
+                const existing=cluster.subcategories.length?cluster.subcategories:
+                    cluster.materialSubcategoryCode
+                        ?[{code:cluster.materialSubcategoryCode,name:cluster.name,categoryCode}]
+                        :[];
+                if(!existing.length)throw new HttpError(409,'Align this cluster with a material subcategory in Warehouse Setup before sharing it.');
+                const already=existing.some(sc=>sc.code===subcategoryCode);
+                if(!already&&codes.some(x=>SEGREGATED_RESTRICTIONS.has(x)))
+                    throw new HttpError(409,'This cluster has segregated storage restrictions and cannot mix material subcategories. Create a separate cluster.');
+                if(!already&&existing.length>=MAX_CLUSTER_SUBCATEGORIES)
+                    throw new HttpError(409,'Cluster material subcategory limit reached. Configure another cluster.');
+                const newLocationCodes=Array.from(new Set([...location.materialSubcategoryCodes,subcategoryCode]));
+                if(newLocationCodes.length>MAX_CLUSTER_SUBCATEGORIES)
+                    throw new HttpError(409,'Storage location subcategory limit reached. Configure a separate location.');
+                const stamp=nowIso();
+                if(!location.materialSubcategoryCodes.includes(subcategoryCode)){
+                    const locations=(Array.isArray(wh.data.storageLocations)?wh.data.storageLocations:[])
+                        .filter(isObj).map(l=>str(l.code)===location.code
+                            ?{...l,materialSubcategoryCodes:newLocationCodes as unknown as Plain}:l);
+                    if(!await writeDoc(whPath(ctx.orgId,node.id),{
+                        ...wh.data,storageLocations:locations as unknown as Plain,updatedAt:stamp,
+                    },{updateTime:wh.updateTime}))
+                        throw new HttpError(409,'Warehouse setup changed. Reload and try again.');
+                }
+                if(!already){
+                    if(!await writeDoc(path,{
+                        ...doc.data,subcategories:[...existing,cls] as unknown as Plain,
+                        updatedBy:ctx.uid,updatedAt:stamp,
+                    },{updateTime:doc.updateTime}))
+                        throw new HttpError(409,'Cluster configuration changed. Reload and try again.');
+                    await record(ctx,'org.warehouse.cluster.adopt_subcategory',
+                        'Cluster '+code+' of '+str(node.data.code),
+                        'Added material subcategory '+subcategoryCode+' without changing restrictions '+codes.join(', '));
+                }
+                return {ok:true,code,restrictionCodes:codes,
+                    subcategoryCodes:already?existing.map(x=>x.code):[...existing.map(x=>x.code),subcategoryCode],
+                    expanded:!already};
+            });
+        }),
+    ],
+
     'POST /api/org/warehouse/cluster/delete': [
         orgRoute('org.warehouse.cluster.delete', null, async (ctx) => {
             if (!canEdit(ctx)||!(ctx.role==='org_super_admin'||hasPerm(ctx.directPermissions,'ADM.structure')||['INV.cluster.delete','WHS.cluster.delete','WMS.cluster.delete'].some(p=>hasPerm(ctx.permissions,p)))) throw new HttpError(403, 'Delete cluster permission required.');
