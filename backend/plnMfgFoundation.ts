@@ -15,6 +15,8 @@ import {eligibleManufacturingHierarchy,routingManufacturingCostCenter,routingCom
 import {physicalRatingUnits} from './plnPhysicalCapacity';
 import { allowedNodeIds } from './positions';
 import {reviewManufacturingRouting} from './mfgRoutingReadiness';
+import {analyzeFlowCapacity} from '../src/shared/mfgFlowCapacity';
+import {PROCUREMENT_UNITS} from './procurementUnits';
 import {normalizeMaterialSupplyProfile} from './mfgMaterialSupplyProfile';
 import {routingSkuIds,routingForSku} from './mfgRoutingSkuMappings';
 
@@ -687,6 +689,69 @@ export const plnMfgFoundationRoutes={
                 details:'Classification metadata only: '+(before||'unclassified')+' → '+processClassId+
                     '; SKU identity, BOM and site/resource mapping preserved.'}]);
             return {ok:true,record:out({id:skuId,data})};
+        }),
+    ],
+    'POST /api/org/pln-mfg/foundation/capacity-overview':[
+        orgRoute('org.mfg.routing.capacity.overview','MFG.view',async ctx=>{
+            const siteId=str(ctx.body.siteId);
+            const requestedOffset=Number(ctx.body.offset??0),requestedLimit=Number(ctx.body.limit??6);
+            if(!Number.isSafeInteger(requestedOffset)||requestedOffset<0||
+               !Number.isSafeInteger(requestedLimit)||requestedLimit<1||requestedLimit>10)
+                throw new HttpError(400,'Choose a valid capacity analysis page and page size (maximum 10).');
+            if(siteId&&!await recordAccess(ctx,'MFG.view',siteId))
+                throw new HttpError(403,'This production site is outside your authorized scope.');
+            const docs=await listDocs(ROOT(ctx.orgId,'routings'));
+            const accessible=[];
+            for(const doc of docs){
+                if(['deleted','removed'].includes(str(doc.data.status)))continue;
+                if(siteId&&str(doc.data.siteId)!==siteId)continue;
+                if(!await recordAccess(ctx,'MFG.view',str(doc.data.siteId)))continue;
+                accessible.push(doc);
+            }
+            accessible.sort((a,b)=>str(a.data.name).localeCompare(str(b.data.name))||
+                a.id.localeCompare(b.id));
+            const page=accessible.slice(requestedOffset,requestedOffset+requestedLimit);
+            const flows=[];
+            for(const doc of page){
+                const result=await reviewManufacturingRouting(ctx,doc.data);
+                let skuReviews=Array.isArray(result.skuReviews)?result.skuReviews:[];
+                if(!skuReviews.length){
+                    // Draft stage analysis is still useful before allocating
+                    // the first SKU, but it must never be represented as approved.
+                    const stages=ARR(doc.data.operations);
+                    const prelim=analyzeFlowCapacity(stages.map(stage=>({
+                        code:str(stage.code),name:str(stage.name),
+                        dependsOn:Array.isArray(stage.dependsOn)?stage.dependsOn.map(str):[],
+                        ratePerHour:str(stage.capacityBasis)==='CONTINUOUS_FLOW'?
+                            num(stage.flowRatePerHour)??0:
+                            str(stage.capacityBasis)==='BATCH_CYCLE'&&num(stage.cycleMinutes)?
+                                (num(stage.batchSize)??0)*60/(num(stage.cycleMinutes)??1):0,
+                        unitCode:str(stage.flowRateUom),
+                        bufferAvailable:stage.flowBufferAvailable===null||stage.flowBufferAvailable===undefined?
+                            undefined:num(stage.flowBufferAvailable)??undefined,
+                        inputFactor:num(stage.flowInputFactor)??1,
+                    })),PROCUREMENT_UNITS);
+                    skuReviews=[{skuId:'',ready:false,issues:result.issues,
+                        stages:[],bottlenecks:[],flowAnalysis:prelim}];
+                }
+                flows.push({
+                    id:doc.id,name:str(doc.data.name),siteId:str(doc.data.siteId),
+                    processClassId:str(doc.data.processClassId),
+                    alternativeCode:str(doc.data.alternativeCode),status:str(doc.data.status),
+                    revision:num(doc.data.revision)??1,
+                    mappedSkus:routingSkuIds(doc.data),
+                    skuReviews:skuReviews.map(variant=>({
+                        skuId:variant.skuId,ready:variant.ready,issueCount:variant.issues.length,
+                        flowAnalysis:variant.flowAnalysis,
+                        stages:variant.stages.map(stage=>({
+                            code:stage.code,name:stage.name,dependsOn:stage.dependsOn,
+                            capacity:stage.capacity,
+                        })),
+                    })),
+                });
+            }
+            return {total:accessible.length,offset:requestedOffset,limit:requestedLimit,
+                hasMore:requestedOffset+page.length<accessible.length,flows};
         }),
     ],
     'POST /api/org/pln-mfg/foundation/list':[
