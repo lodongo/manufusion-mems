@@ -719,6 +719,14 @@ export const plnMfgFoundationRoutes={
                     dependsOn:(Array.isArray(o.dependsOn)?o.dependsOn.map(str):(i>0?[oldCodes[i-1]]:[]))
                         .map(dep=>lookup.get(dep)||dep),
                 }));
+                // Stage codes are canonicalized on save. SKU-specific BOM/output
+                // overrides must follow exactly the same renumbering to remain attached
+                // to the correct process step after stages are inserted or moved.
+                raw.skuMappings=ARR(raw.skuMappings).map(mapping=>({
+                    ...mapping,stages:ARR(mapping.stages).map(stage=>({
+                        ...stage,code:lookup.get(str(stage.code))||str(stage.code),
+                    })),
+                }));
             }
             const requiredPermission=kind==='boms'?'MFG.bom.edit':kind==='routings'?'MFG.routing.edit':'MFG.master.edit';
             const scopeSite=str(raw.siteId);
