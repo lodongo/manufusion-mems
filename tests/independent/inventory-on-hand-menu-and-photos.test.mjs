@@ -66,3 +66,26 @@ test('Android wrapper: Take photo starts the camera app through a private FilePr
     assert.match(read('android-dev-wrapper/app/src/main/res/xml/file_paths.xml'), /<cache-path name="captures" path="captures\/" \/>/, 'only the capture folder is shared');
     assert.match(read('android-dev-wrapper/app/build.gradle.kts'), /androidx\.core:core:/);
 });
+
+test('inventory on hand uses reconciled journal balances, calculates net available and assigns actionable stock colours',()=>{
+    const backend=read('backend/procurement.ts');
+    const endpoint=backend.slice(
+        backend.indexOf("'POST /api/org/inventory/on-hand':"),
+        backend.indexOf("'POST /api/org/procurement/materials/options':"));
+    const ui=read('src/org/InventoryOnHand.tsx');
+    for(const field of ['material_journal','inventory_material_info','procurement_material_info','warehouse_bin_occupancy'])
+        assert.ok(endpoint.includes(field), 'on-hand must load '+field);
+    assert.ok(endpoint.includes("str(d.status)!=='posted'||d.reconciled!==true"),'do not show incomplete journal balances');
+    assert.ok(endpoint.includes('stock.physical-stock.reserved-stock.quarantined-'),'available stock must exclude all blocked buckets');
+    assert.ok(endpoint.includes("emptyBin?'Empty bin'"),'empty assigned bin status');
+    assert.ok(endpoint.includes("physical>max?'Overstock'"),'overstock threshold');
+    assert.ok(endpoint.includes("net<min?'Understock'"),'understock threshold');
+    assert.ok(endpoint.includes("priceUom===stockUom"),'no unverified unit-price conversion');
+    assert.ok(ui.includes("label: 'Net available'"));
+    assert.ok(ui.includes("label: 'Net stock value'"));
+    assert.ok(ui.includes("label: 'Physical on hand'"));
+    assert.ok(ui.includes('bg-red-100'));
+    assert.ok(ui.includes('bg-yellow-100'));
+    assert.ok(ui.includes('bg-orange-100'));
+    assert.ok(!endpoint.includes('quantityOnHand:0,stockLedgerAvailable:false'),'placeholder must be gone');
+});
