@@ -140,8 +140,11 @@ export function normalizeMaster(kind:MasterKind, raw:unknown): Obj {
             (!!str(raw.utilitySourceCostCenterId)||!!str(raw.utilitySourceSubcategoryCode));
         const legacyUtilitySource=sourceMode==='UTILITY'&&!newUtilitySource&&
             !!str(raw.utilityCode)&&!!str(raw.utilityWorkCenterId);
-        if(sourceMode==='UTILITY'&&!newUtilitySource&&!legacyUtilitySource)
+        if(sourceMode==='UTILITY'&&!newUtilitySource&&!legacyUtilitySource){
+            if(str(raw.utilityCode)&&!str(raw.utilityWorkCenterId))
+                throw new HttpError(400,'Utility work center is required for an incomplete historical equipment utility reference. Otherwise select a Utilities cost centre and an activated source.');
             throw new HttpError(400,'Choose a Utilities cost centre and one of its activated source subcategories.');
+        }
         const utilitySourceCostCenterId=newUtilitySource?
             VALID_ID(raw.utilitySourceCostCenterId,'Utilities cost centre'):'';
         const utilitySourceSubcategoryCode=newUtilitySource?
