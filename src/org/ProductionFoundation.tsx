@@ -669,7 +669,7 @@ function BomEditor({draft,onChange,items,refs,skuSetup,materialPolicy}:{
                                 <p className='font-semibold text-ink'>Adopted process material · {selected.name}</p>
                                 <p className='mt-1'>Source SKU {selected.id} · {str(selected.category)}. This BOM uses its registered material identity, unit and supply setup directly. No extra supplying cost centre or utility needs to be selected here.</p>
                                 {materialSupplyProfile.handlingMode&&<p className='mt-1'>Handling: {materialSupplyProfile.handlingMode.replaceAll('_',' ').toLowerCase()}</p>}
-                                {materialSupplyProfile.sources?.length>0&&<p className='mt-1'>{materialSupplyProfile.sources.length} material supply source(s) are already configured.</p>}
+                                {(materialSupplyProfile.sources?.length??0)>0&&<p className='mt-1'>{materialSupplyProfile.sources?.length??0} material supply source(s) are already configured.</p>}
                                 {str(selected.utilitySourceCostCenterId)&&str(selected.utilitySourceSubcategoryCode)&&
                                     <p className='mt-1'>Adopted utility origin: cost centre {str(selected.utilitySourceCostCenterId)} · activated source {str(selected.utilitySourceSubcategoryCode)}</p>}
                                 <p className='mt-1'>Changes to the source master stay managed under Materials &amp; Products rather than being duplicated in this BOM.</p>
