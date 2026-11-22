@@ -45,6 +45,22 @@ test('Routing preserves its process class, stages, site and SKU-specific recipe 
  assert.equal(row.operations.length,1);
  assert.equal(row.skuMappings[0].skuId,'SKU-PROCESS-002');
 });
+test('A new routing can be defined for a process classification before assigning a primary SKU',()=>{
+ const route=normalizeMaster('routings',{
+  id:'RTG-CLASS-ONLY',name:'Reusable processing method',siteId:'SITE-01',
+  skuId:'',processClassId:'PRC_000000001',routingModelVersion:2,
+  alternativeCode:'STANDARD',operations:[stage],
+  skuMappings:[{skuId:'SKU-PROCESS-001',stages:[{code:stage.code,bomId:'BOM-001'}]}],
+ });
+ assert.equal(route.skuId,'');
+ assert.equal(route.processClassId,'PRC_000000001');
+ assert.equal(route.skuMappings[0].skuId,'SKU-PROCESS-001');
+ assert.throws(()=>normalizeMaster('routings',{
+  id:'RTG-BAD',name:'Unclassified route',siteId:'SITE-01',
+  skuId:'',processClassId:'',routingModelVersion:2,alternativeCode:'STANDARD',
+  operations:[stage],
+ }),/Routed SKU/);
+});
 test('SKU classification drives route choices without rewriting cost-centre capacity or BOM data',()=>{
  const ui=read('src/org/ProductionFoundation.tsx');
  const editor=read('src/org/PlnProcessRoutingEditor.tsx');
