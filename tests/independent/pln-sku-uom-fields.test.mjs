@@ -4,15 +4,13 @@ import {readFileSync} from 'node:fs';
 
 const read=path=>readFileSync(new URL('../../'+path,import.meta.url),'utf8');
 
-test('SKU product family is mandatory on the form and server',()=>{
+test('legacy SKU product family is not offered or persisted; process classification governs SKUs',()=>{
   const form=read('src/org/ProductionFoundation.tsx');
   const api=read('backend/plnMfgFoundation.ts');
-  assert.ok(form.includes("<Field title='Product family' value={str(draft.family)} required"));
-  assert.ok(!form.includes("Product family (optional)"));
-  assert.ok(form.includes("Product family is required before saving this SKU."));
-  assert.ok(api.includes("if(!str(raw.family).trim())throw new HttpError(400,'Product family is required.');"));
+  // Removed deliberately in c9e3031: the governed process classification replaces it.
+  assert.ok(!form.includes("<Field title='Product family' value={str(draft.family)} required"));
+  assert.ok(api.includes('delete raw.family;'));
 });
-
 test('SKU base measurement uses the existing MEMS category and unit picker',()=>{
   const form=read('src/org/ProductionFoundation.tsx');
   const catalogue=read('src/org/MfgSkuSetup.tsx');
