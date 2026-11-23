@@ -27,7 +27,8 @@ test('BOM create and edit show names across output, input, quantity descriptions
     assert.ok(ui.includes('[current,bomUomName(current,skuSetup.units)]'));
     assert.ok(ui.includes('[u.code,bomUomName(u.code,skuSetup.units)]'));
     assert.ok(ui.includes("onChange={code=>changeComponentUnit(i,code)}"));
-    assert.ok(ui.includes("onChange={v=>update('outputUom',v)}"));
+    assert.ok(ui.includes("function BomOutputUnitSelector("));
+    assert.ok(ui.includes("outputUom:code"));
     assert.equal(ui.includes("{c.uom||'Select a material'}"),false);
     assert.equal(ui.includes(">{outputUom}</p>"),false);
 });

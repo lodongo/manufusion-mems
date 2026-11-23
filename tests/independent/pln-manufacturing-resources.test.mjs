@@ -75,7 +75,7 @@ test('Products, Asset Management and Manufacturing Resources invoke the same SKU
     assert.ok(asset.includes('<AssetManufacturingSkuAllocation'));
     assert.ok(asset.includes('<ManufacturingResourceDetail'));
     assert.ok(foundation.includes("active==='resources'?<ManufacturingResources/>"));
-    assert.ok(editor.includes('Available organization SKUs'));
+    assert.ok(editor.includes('SKU list'));
     assert.ok(editor.includes("initialSkuId=''"));
     assert.ok(editor.includes("'/api/org/pln/cost-center/save'"));
     assert.ok(pln.includes("const ROOT=(org:string)=>'organizations/'+org+'/pln_cost_center_capacity'"));

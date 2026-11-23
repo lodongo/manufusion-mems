@@ -44,7 +44,8 @@ test('Editing active BOM maintains original code with internal audit revisions a
     assert.ok(!frontend.includes("onClick={()=>str(row.status)==='active'?copyVersion(row):void openDraft(row)}"));
     assert.ok(backend.includes("kind==='boms'?'mfg.bom.overwrite'"));
     assert.ok(backend.includes("path:path+'/revisions/'"));
-    assert.ok(backend.includes("return {...item,status:'draft',revision"));
+    assert.ok(backend.includes("status:testBomOverride?'active':'draft',revision"));
+    assert.ok(backend.includes("superseded by revision"),'a revision-superseded audit must be written');
 });
 test('Measurement-system subcategory choices are not shown',()=>{
     const frontend=read('src/org/ProductionFoundation.tsx');
