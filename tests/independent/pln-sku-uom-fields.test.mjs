@@ -4,13 +4,16 @@ import {readFileSync} from 'node:fs';
 
 const read=path=>readFileSync(new URL('../../'+path,import.meta.url),'utf8');
 
-test('SKU product family is mandatory on the form and server',()=>{
+test('retired product family is neither asked for nor stored; manufactured SKUs need a governed process class',()=>{
+  // Product family was replaced by the organization-managed process classification on Nov 22.
   const form=read('src/org/ProductionFoundation.tsx');
   const api=read('backend/plnMfgFoundation.ts');
-  assert.ok(form.includes("<Field title='Product family' value={str(draft.family)} required"));
-  assert.ok(!form.includes("Product family (optional)"));
-  assert.ok(form.includes("Product family is required before saving this SKU."));
-  assert.ok(api.includes("if(!str(raw.family).trim())throw new HttpError(400,'Product family is required.');"));
+  assert.ok(!form.includes("title='Product family'"));
+  assert.ok(!form.includes('Product family is required'));
+  assert.ok(api.includes('delete raw.family;'),'stale family values are stripped on save');
+  assert.ok(!api.includes("Product family is required."));
+  assert.ok(api.includes("if(kind==='items'&&['FINISHED','INTERMEDIATE'].includes(str(raw.category))&&"));
+  assert.ok(api.includes("throw new HttpError(400,'Select the manufacturing process classification for this SKU. Configure it in Product Configuration.');"));
 });
 
 test('SKU base measurement uses the existing MEMS category and unit picker',()=>{

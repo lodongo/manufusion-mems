@@ -48,25 +48,27 @@ seed(r + '/warehouses/WH', { costCenterId: 'WH', materialCategoryCodes: ['MAT'],
 seed(r + '/warehouses/WH/clusters/CL-0001', { kind: 'run', mode: 'next', startOrd: 0, count: 10, dims: { racks: 2, columns: 2, positions: 5 }, floorFrom: 1, floorTo: 1, rowFrom: 1, rackFrom: 1, colFrom: 1, posFrom: 1, rowTo: 1, rackTo: 1, colTo: 2, posTo: 5, firstCode: 'AA_01_A_01', lastCode: 'AA_01_B_05', name: 'Bearings', locationCode: 'SL-01', subcategories: [{ code: 'SPARES', name: 'Spares', categoryCode: 'MAT' }], positions: 10 });
 seed(r + '/materials/MAT1', { materialNumber: '100001', name: 'Bearing', status: 'approved', categoryCode: 'MAT', subcategoryCode: 'SPARES', warehouseIds: ['WH'], warehouseRestriction: 'RS15' });
 let wh = await call(warehouseRoutes, '/api/org/warehouse/get', 'me', { costCenterId: 'WH' });
-assert.deepEqual(wh.alignment.pending.map((p) => [p.code, p.suggestedRestrictionCode]), [['SL-01', 'RS15']]);
+// Since 75caf02/38bd7d4 (Nov 21) restrictions belong to clusters (one or more each); a legacy location code is only a fallback.
+assert.deepEqual(wh.alignment.pending.map((p) => [p.code, p.suggestedRestrictionCode]), [['CL-0001', '']]);
 assert.equal(wh.alignment.binningOpen, false);
 assert.ok(wh.restrictions.some((x) => x.code === 'RS15'), 'restrictions come from the shared master');
 const BIN = 'CL-0001__AA_01_A_01';
-await rejects(call(procurementRoutes, '/api/org/inventory/material/bin/link', 'me', { id: 'MAT1', warehouseId: 'WH', binId: BIN }), /restriction of SL-01 Main store is not set/, 'unaligned location blocks binning');
-assert.ok((await listDocs(r + '/audit_events')).length >= 0);
+await rejects(call(procurementRoutes, '/api/org/inventory/material/bin/link', 'me', { id: 'MAT1', warehouseId: 'WH', binId: BIN }), /Select at least one warehouse restriction for/, 'unconfigured cluster blocks binning');
 const cand = await call(procurementRoutes, '/api/org/inventory/material/bin/candidates', 'me', { warehouseId: 'WH', binId: BIN });
-assert.match(cand.blockedReason, /not set/);
-await rejects(call(warehouseRoutes, '/api/org/warehouse/cluster/create', 'me', { costCenterId: 'WH', confirm: true, mode: 'next', floor: 1, count: 2, expectStart: 10, locationCode: 'SL-01', subcategoryCodes: ['SPARES'] }), /not aligned to the warehouse restriction master/, 'cluster on unaligned location');
+assert.match(cand.blockedReason, /Select at least one warehouse restriction/);
+await rejects(call(warehouseRoutes, '/api/org/warehouse/cluster/create', 'me', { costCenterId: 'WH', confirm: true, mode: 'next', floor: 1, count: 2, expectStart: 10, locationCode: 'SL-01', subcategoryCodes: ['SPARES'] }), /Select at least one warehouse restriction/, 'a new cluster needs a restriction');
+await rejects(call(warehouseRoutes, '/api/org/warehouse/cluster/create', 'me', { costCenterId: 'WH', confirm: true, mode: 'next', floor: 1, count: 2, expectStart: 10, locationCode: 'SL-01', subcategoryCodes: ['SPARES'], restrictionCodes: ['RS99'] }), /unknown warehouse restriction RS99/, 'unknown restriction rejected');
 
-// 2. Align the location to the restriction master (explicit, audited).
-const setup = (rs) => ({ costCenterId: 'WH', confirm: true, setup: { materialCategoryCodes: ['MAT'], storageTypeCode: 'BIN', conditionCode: 'AMB', layout, capacity: { totalAreaM2: 100, storageAreaM2: 80, clearHeightM: 6, positionMaxKg: 100 }, storageLocations: [{ code: 'SL-01', name: 'Main store', typeCode: 'SLT-001', restrictionCode: rs, active: true }] } });
-await rejects(call(warehouseRoutes, '/api/org/warehouse/save', 'me', setup('')), /choose the warehouse restriction/, 'restriction is mandatory');
-await call(warehouseRoutes, '/api/org/warehouse/save', 'me', setup('RS15'));
+// 2. Configure the cluster restriction (explicit confirmation, audited route).
+const clusterUpdate = (codes, extra = {}) => call(warehouseRoutes, '/api/org/warehouse/cluster/update', 'me', { costCenterId: 'WH', code: 'CL-0001', confirm: true, storageTypeCode: 'BIN', conditionCode: 'AMB', restrictionCodes: codes, ...extra });
+await rejects(clusterUpdate([], { confirm: false }), /confirm/, 'cluster edits must be confirmed');
+await rejects(clusterUpdate([]), /Select at least one warehouse restriction/, 'restriction is mandatory');
+await clusterUpdate(['RS15']);
 wh = await call(warehouseRoutes, '/api/org/warehouse/get', 'me', { costCenterId: 'WH' });
 assert.equal(wh.alignment.binningOpen, true);
-assert.equal(wh.clusters[0].restrictionCode, 'RS15');
+assert.deepEqual(wh.clusters[0].restrictionCodes, ['RS15']);
 
-// 3. Binning: material restriction must match; Stock Control overrides the material master.
+// 3. Binning: material restriction must be one the cluster permits; Stock Control overrides the material master.
 seed(r + '/inventory_material_info/MAT1_WH', { materialId: 'MAT1', warehouseId: 'WH', warehouseRestriction: 'RS02' });
 await rejects(call(procurementRoutes, '/api/org/inventory/material/bin/link', 'me', { id: 'MAT1', warehouseId: 'WH', binId: BIN }), /mismatch/i, 'restriction mismatch');
 assert.equal((await call(procurementRoutes, '/api/org/inventory/material/bin/candidates', 'me', { warehouseId: 'WH', binId: BIN })).materials.length, 0);
@@ -74,10 +76,13 @@ seed(r + '/inventory_material_info/MAT1_WH', { materialId: 'MAT1', warehouseId: 
 assert.equal((await call(procurementRoutes, '/api/org/inventory/material/bin/candidates', 'me', { warehouseId: 'WH', binId: BIN })).materials.length, 1, 'material master default RS15 matches');
 await call(procurementRoutes, '/api/org/inventory/material/bin/link', 'me', { id: 'MAT1', warehouseId: 'WH', binId: BIN });
 assert.equal(snapshot(r + '/warehouse_bin_occupancy/WH_' + BIN).data.restrictionCode, 'RS15');
-// The location restriction cannot change while it holds binned stock.
-await rejects(call(warehouseRoutes, '/api/org/warehouse/save', 'me', setup('RS02')), /Delink them before changing the restriction/, 'retag with stock');
-// Nor can the material's restriction drift away from its bin.
-await rejects(call(procurementRoutes, '/api/org/inventory/material/update', 'me', { id: 'MAT1', warehouseId: 'WH', section: 'inventory', values: { warehouseRestriction: 'RS02' } }), /Delink the bin/, 'material restriction locked by bin');
+// The cluster cannot drop the restriction its binned stock needs, but may add another one alongside it.
+await rejects(clusterUpdate(['RS02']), /Linked material 100001: Restriction mismatch/, 'retag with stock');
+await clusterUpdate(['RS15', 'RS02']);
+assert.deepEqual(snapshot(r + '/warehouses/WH/clusters/CL-0001').data.restrictionCodes, ['RS15', 'RS02']);
+await clusterUpdate(['RS15']);
+// Nor can the material's restriction drift to one its cluster does not permit.
+await rejects(call(procurementRoutes, '/api/org/inventory/material/update', 'me', { id: 'MAT1', warehouseId: 'WH', section: 'inventory', values: { warehouseRestriction: 'RS02' } }), /already stored at .*delink the material first/s, 'material restriction locked by bin');
 // Keeping the bin's own restriction in Stock Control is allowed, and only the changed field is checked.
 assert.equal((await call(procurementRoutes, '/api/org/inventory/material/update', 'me', { id: 'MAT1', warehouseId: 'WH', section: 'inventory', values: { warehouseRestriction: 'RS15' } })).changed, 1, 'same restriction as the bin');
 console.log('restrictions ok');

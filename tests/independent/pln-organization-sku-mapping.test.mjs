@@ -23,10 +23,10 @@ test('SKU form cannot assign site while BOM, resource and routing retain site fi
  const ui=read('src/org/ProductionFoundation.tsx');
  assert.match(ui,/tab!=='items'&&<Choice title='Site applicability'/);
  assert.match(ui,/if\(tab==='items'\)return \{id:'',name:'',category:defaults\.skuCategory[^\n]*siteId:''/);
- assert.match(ui,/Manufacturing Cost Centre &amp; SKUs/);
+ assert.match(read('src/org/PlnSkuCostCenterRatings.tsx'),/Manufacturing Resources → open the resource → Allocate SKU/);
  assert.match(ui,/siteId:str\(draft\.siteId\),productVariantId:''/);
  const backend=read('backend/plnMfgFoundation.ts');
- assert.match(backend,/if\(kind==='items'\)\{\s*raw\.siteId=''/);
+ assert.match(backend,/if\(kind==='items'\)\{(?:\s*\/\/[^\n]*)*\s*raw\.siteId=''/);
  assert.match(read('backend/plnManufacturingResources.ts'),/costCenterId:ccId/);
  assert.match(backend,/const siteId=kind==='items'\?'':str\(raw\.siteId\)\.trim\(\)/);
  assert.match(backend,/const siteId=kind==='items'\?'':str\(record\.data\.siteId\)/);

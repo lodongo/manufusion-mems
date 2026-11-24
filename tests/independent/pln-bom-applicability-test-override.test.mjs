@@ -26,6 +26,15 @@ test('BOM applicability: exact SKU, manufacturing class and global default',()=>
     assert.throws(()=>normalizeMaster('boms',{...source,applicability:'PROCESS_CLASS'}),/classification/i);
     assert.throws(()=>normalizeMaster('boms',{...source,applicability:'SKU'}),/SKU/i);
 });
+test('a SKU still cannot consume itself, while class and global BOMs may use utility supply',()=>{
+    const selfSupply={...source,applicability:'SKU',parentSkuId:'SKU_001',components:[{source:'PROCESS_SUPPLY',processSupplyKind:'SKU',
+      skuId:'SKU_001',quantity:1,uom:'L',scrapPct:0,deliveryMode:'INLINE',quantityMethod:'PLANNED'}]};
+    assert.throws(()=>normalizeMaster('boms',selfSupply),/cannot consume itself/);
+    const selfComponent={...source,applicability:'SKU',parentSkuId:'SKU_001',components:[{skuId:'SKU_001',quantity:1,uom:'L',scrapPct:0}]};
+    assert.throws(()=>normalizeMaster('boms',selfComponent),/cannot consume itself/);
+    for(const scope of [{applicability:'PROCESS_CLASS',processClassId:'PRC_00001'},{applicability:'ALL'}])
+        assert.equal(normalizeMaster('boms',{...source,...scope}).components.length,1,'utility line has no SKU, so it is never a self-reference');
+});
 test('BOM editor defaults to Settings and displays the three controlled scope options',()=>{
     const ui=read('src/org/ProductionFoundation.tsx');
     assert.ok(ui.includes("{key:'settings',title:'1. Settings'}"));

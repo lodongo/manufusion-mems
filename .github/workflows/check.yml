@@ -37,20 +37,41 @@ jobs:
       - run: npm run test:corporate
       - run: node --import tsx --test tests/independent/*.test.mjs automation/test/*.test.mjs
 
-  # Only a fully green, current develop commit may dispatch the isolated development
-  # workflow. GitHub's workflow_dispatch exception allows GITHUB_TOKEN to start it.
+  # The ONLY automatic route to the development deployment. A develop commit deploys once,
+  # and only when this validation AND "Maintenance governance validation" (commit status
+  # mems/maintenance-phase2-validation) have both passed for that exact commit.
+  # GitHub's workflow_dispatch exception allows GITHUB_TOKEN to start it.
   # This does NOT expand Google Cloud WIF credentials or give MEMS website visitors deploy keys.
   deploy-on-green:
     needs: code-check
     if: github.event_name == 'push' && github.ref == 'refs/heads/develop' && github.repository == 'lodongo/manufusion-mems'
     runs-on: ubuntu-latest
+    timeout-minutes: 40
     permissions:
       contents: read
+      statuses: read
       actions: write
     concurrency:
       group: mems-dev-green-dispatch
       cancel-in-progress: true
     steps:
+      - name: Wait for maintenance governance validation of this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 70); do
+            state="$(gh api "repos/lodongo/manufusion-mems/commits/$GITHUB_SHA/status" \
+              --jq '[.statuses[] | select(.context=="mems/maintenance-phase2-validation") | .state][0] // "missing"')"
+            case "$state" in
+              success) echo "Maintenance governance validation passed for $GITHUB_SHA"; exit 0 ;;
+              failure|error) echo "::error::Maintenance governance validation is $state for $GITHUB_SHA. Not deploying."; exit 1 ;;
+            esac
+            echo "Maintenance governance validation is $state (check $attempt/70); waiting 30s"
+            sleep 30
+          done
+          echo "::error::Maintenance governance validation did not finish within 35 minutes. Not deploying."
+          exit 1
       - name: Dispatch the verified current develop branch
         env:
           GH_TOKEN: ${{ github.token }}

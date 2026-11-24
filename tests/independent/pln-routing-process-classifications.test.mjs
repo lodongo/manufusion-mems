@@ -93,7 +93,8 @@ test('SKU classification drives route choices without rewriting cost-centre capa
  assert.ok(editor.includes('onChange({...value,processClassId})'));
  assert.ok(foundation.includes('does not belong to the routing manufacturing process classification'));
  assert.ok(foundation.includes("raw.siteId='';"));
- assert.ok(foundation.includes("'/api/org/pln-mfg/foundation/sku/process-classify'"));
+ assert.ok(foundation.includes("'POST /api/org/pln-mfg/foundation/sku/process-classify'"));
+ assert.ok(read('src/org/ProductionFoundation.tsx').includes("'/api/org/pln-mfg/foundation/sku/process-classify'"),'the UI calls the registered route');
  assert.ok(foundation.includes("routingSkuIds(route.data).includes(skuId)"));
  assert.ok(foundation.includes("action:'mfg.sku.process.classify'"));
  assert.ok(config.includes("kind==='processClasses'&&normalized.enabled===false"));

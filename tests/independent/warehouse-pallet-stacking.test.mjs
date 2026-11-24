@@ -61,7 +61,7 @@ test('warehouse form, cluster creation and backend persist explicit stacking met
   assert.ok(ui.includes("label='Stacking arrangement *'"));
   assert.ok(ui.includes("value='PYRAMID'"));
   assert.ok(ui.includes("value='STRAIGHT'"));
-  assert.ok(ui.includes("stackingPattern:palletPattern"));
+  assert.ok(ui.includes("stackingPattern,bottomRowPallets:stackValues[1]"));
   assert.ok(ui.includes("bottomRowPallets:stackValues[1]"));
   assert.ok(ui.includes("bottomRows:stackValues[0]"));
   assert.ok(api.includes('palletPositionCapacity(b,str(wh.data.storageTypeCode),total)'));

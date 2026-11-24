@@ -93,10 +93,12 @@ test('PLN navigation gates configurations rather than manufacturing stage execut
  assert.ok(ui.includes('const missing=prerequisiteNames(tab)'));
  assert.ok(ui.includes('if(missing.length)'));
  assert.ok(ui.includes('setSetupBlocked('));
- assert.ok(ui.includes('Next step requires:'));
- assert.ok(ui.includes('nextMissing.length>0'));
+ // 209877a consolidated navigation: a blocked step names its prerequisites and offers to walk back to the first one.
+ assert.ok(ui.includes('Review prerequisites'));
+ assert.ok(ui.includes('while(step&&setupProgress[step].missing.length&&!visited.has(step))'));
  assert.ok(ui.includes('configuration dependencies before continuing'));
- assert.ok(ui.includes('<PlnCostCenterSetup onMappingsChanged={refreshCapacitySetup}')&&ui.includes('onEditSku={skuId=>'));
+ assert.ok(ui.includes("if(step==='costCenterSku')changeTab('resources');"),'cost-centre SKU allocation lives under Manufacturing Resources');
+ assert.ok(ui.includes("active==='resources'?<ManufacturingResources")&&ui.includes('onEditSku={skuId=>'));
  assert.ok(costCenter.includes('onMappingsChanged?.()'));
  assert.ok(rules.includes("SETUP_REQUIREMENTS"));
  const backend=read('backend/plnMfgFoundation.ts');

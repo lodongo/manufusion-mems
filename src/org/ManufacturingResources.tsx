@@ -23,9 +23,9 @@ function Text({children}:{children:ReactNode}){return <p className='text-xs text
 const defaultRateUnit=(options:Unit[])=>options.find(u=>u.name.toLowerCase()==='each')?.code||
  options.find(u=>u.code==='UOM-20-001')?.code||options.find(u=>u.category==='Count')?.code||options[0]?.code||'';
 
-export function ManufacturingResourceDetail({costCenterId,initialTab='core',initialSkuId='',onBack,onSaved}:{
+export function ManufacturingResourceDetail({costCenterId,initialTab='core',initialSkuId='',onBack,onSaved,onEditSku}:{
  costCenterId:string;initialTab?:'core'|'sku';initialSkuId?:string;
- onBack?:()=>void;onSaved?:()=>void;
+ onBack?:()=>void;onSaved?:()=>void;onEditSku?:(skuId:string)=>void;
 }){
  const [data,setData]=useState<DetailData|null>(null),[loading,setLoading]=useState(true);
  const [tab,setTab]=useState<'core'|'sku'>(initialTab);
@@ -112,7 +112,7 @@ export function ManufacturingResourceDetail({costCenterId,initialTab='core',init
     All views read and save one record in the manufacturing cost-centre capacity master.
    </p>
    <PlnCostCenterSkuSetup costCenterId={costCenterId} initialSkuId={initialSkuId}
-    onMappingsChanged={onSaved}/>
+    onMappingsChanged={onSaved} onEditSku={onEditSku}/>
   </section>}
  </section>;
 }
@@ -129,8 +129,8 @@ function ScopeChoice({label,value,items,onChange}:{
 
 /** Scope-filtered manufacturing resources. Newly added cost centres disappear
  * from the available list and open the same shared detail editor as an asset. */
-export default function ManufacturingResources({onChanged,defaultCategory='MFG',defaultSubcategory=''}:{
- onChanged?:()=>void;defaultCategory?:string;defaultSubcategory?:string;
+export default function ManufacturingResources({onChanged,onEditSku,defaultCategory='MFG',defaultSubcategory=''}:{
+ onChanged?:()=>void;onEditSku?:(skuId:string)=>void;defaultCategory?:string;defaultSubcategory?:string;
 }={}){
  const [data,setData]=useState<ListData|null>(null),[busy,setBusy]=useState(false),[loading,setLoading]=useState(true);
  const [error,setError]=useState(''),[notice,setNotice]=useState('');
@@ -216,7 +216,7 @@ export default function ManufacturingResources({onChanged,defaultCategory='MFG',
   }catch(e){setError(e instanceof Error?e.message:'Resource could not be removed.');}
   finally{setBusy(false);}
  };
- if(opened)return <ManufacturingResourceDetail key={opened} costCenterId={opened}
+ if(opened)return <ManufacturingResourceDetail key={opened} costCenterId={opened} onEditSku={onEditSku}
     onBack={()=>{setOpened('');void load();}} onSaved={()=>{
      void load();onChanged?.();
     }}/>;
