@@ -1,7 +1,7 @@
 import {useEffect,useState} from 'react';
 import {FileCheck2,ShieldCheck,RefreshCcw,LockKeyhole} from 'lucide-react';
 import {callBackend} from '../lib/backend';
-import {SelectField} from '../components/ui';
+import { SelectField, Field } from '../components/ui';
 import {useConfirm} from '../components/screen';
 
 type Entity={id:string;code:string;name:string};
@@ -11,7 +11,6 @@ type GateStatus={
  approvalRef:string;signedOffBy:string;developmentServerEnabled:boolean;
  affectsSelectedLegalEntity:boolean;note:string;
 };
-const field='min-h-11 w-full min-w-0 rounded-xl border border-line bg-page px-3 text-base text-ink';
 const button='min-h-12 w-full rounded-xl border border-line bg-panel px-3 text-sm font-semibold text-ink disabled:opacity-40';
 export default function PoBudgetPilotPage({canEdit}:{canEdit:boolean}){
  const [entities,setEntities]=useState<Entity[]>([]);
@@ -82,10 +81,7 @@ export default function PoBudgetPilotPage({canEdit}:{canEdit:boolean}){
    <option value="off">Disable future service-PO budget reservations</option>
    <option value="service_pilot">Enable OPEX service-PO budget reservations</option>
   </SelectField>
-  <label className="block text-sm text-muted">Effective date
-   <input type="date" className={field} value={date}
-    disabled={!canEdit} onChange={e=>setDate(e.target.value)}/>
-  </label>
+  <Field label='Effective date' type="date" value={date} disabled={!canEdit} onChange={e=>setDate(e.target.value)}/>
   <button type="button" className={button} onClick={()=>void refresh()} disabled={!legalEntityId}>
    <RefreshCcw className="mr-2 inline h-4 w-4"/>Refresh pilot status
   </button>

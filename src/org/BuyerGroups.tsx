@@ -178,7 +178,7 @@ function Editor({ group, users, onClose, onSaved }: { group: Group | null; users
                 <p className='text-xs text-muted'>Only subcategories your organization has approved, and that no other buyer group holds, are shown.</p>
                 <div className='relative'>
                     <Search className='pointer-events-none absolute left-3 top-3.5 h-4 w-4 text-muted' />
-                    <input aria-label='Search subcategories' value={q} onChange={(e) => setQ(e.target.value)} placeholder='Search' className='h-12 w-full rounded-xl border border-line bg-panel pl-9 pr-3 text-base text-ink placeholder:text-muted focus:border-brand focus:outline-none' />
+                    <Field label='Search subcategories' hideLabel value={q} onChange={(e) => setQ(e.target.value)} placeholder='Search'/>
                 </div>
                 {avail.loading && !avail.data ? (
                     <Spinner />

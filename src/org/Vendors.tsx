@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Download, FileText, Paperclip, Pencil, Plus, Trash2, X } from 'lucide-react';
 import { callBackend } from '../lib/backend';
 import { navigate } from '../lib/route';
-import { Alert, Field, SelectField } from '../components/ui';
+import { Alert, Field, SelectField, TextArea } from '../components/ui';
 import RichTable, { type Column } from '../components/RichTable';
 import { Badge, Button, Spinner, useLoad } from '../admin/kit';
 import { fmtDate } from '../admin/format';
@@ -641,17 +641,9 @@ function VendorForm({ id }: { id: string }) {
                         ))}
                     </SelectField>
                     {src?.needsJustification === true && (
-                        <label className='block'>
-                            <span className='mb-1 block text-sm text-soft'>Justification for {src.label.toLowerCase()} *</span>
-                            <textarea value={f.sourcingJustification} rows={4} maxLength={600} onChange={(e) => set({ sourcingJustification: e.target.value })} placeholder='Why is competition not possible or not wanted? For example proprietary design, warranty, standardisation or a named requirement.' className='w-full rounded-xl border border-line bg-panel p-3 text-base text-ink placeholder:text-muted focus:border-brand focus:outline-none' />
-                            <span className='text-xs text-muted'>{f.sourcingJustification.trim().length < 20 ? 'At least 20 characters are needed before you submit. ' : ''}{f.sourcingJustification.length}/600. The approver will read this.</span>
-                        </label>
+                        <TextArea label={'Justification for '+src.label.toLowerCase()+' *'} value={f.sourcingJustification} rows={4} maxLength={600} onChange={(e) => set({ sourcingJustification: e.target.value })} placeholder='Why is competition not possible or not wanted? For example proprietary design, warranty, standardisation or a named requirement.' hint={`${f.sourcingJustification.trim().length < 20 ? 'At least 20 characters are needed before you submit. ' : ''}${f.sourcingJustification.length}/600. The approver will read this.`} />
                     )}
-                    <label className='block'>
-                        <span className='mb-1 block text-sm text-soft'>Brands or manufacturers represented{cls?.needsAuthorisation === true ? ' *' : ', optional'}</span>
-                        <textarea value={f.brands} rows={3} onChange={(e) => set({ brands: e.target.value })} placeholder='One per line, up to 10' className='w-full rounded-xl border border-line bg-panel p-3 text-base text-ink placeholder:text-muted focus:border-brand focus:outline-none' />
-                        {cls?.needsAuthorisation === true && <span className='text-xs text-muted'>This class needs a manufacturer authorisation letter for these brands (step 6).</span>}
-                    </label>
+                    <TextArea label={'Brands or manufacturers represented'+(cls?.needsAuthorisation === true ? ' *' : ', optional')} value={f.brands} rows={3} onChange={(e) => set({ brands: e.target.value })} placeholder='One per line, up to 10' hint={cls?.needsAuthorisation === true ? 'This class needs a manufacturer authorisation letter for these brands (step 6).' : undefined} />
                 </>
             )}
 
@@ -723,10 +715,7 @@ function VendorForm({ id }: { id: string }) {
                             <option key={t.code} value={t.code}>{t.label}</option>
                         ))}
                     </SelectField>
-                    <label className='block'>
-                        <span className='mb-1 block text-sm text-soft'>Notes on the rating, optional</span>
-                        <textarea value={f.riskNotes} rows={3} maxLength={600} onChange={(e) => set({ riskNotes: e.target.value })} className='w-full rounded-xl border border-line bg-panel p-3 text-base text-ink focus:border-brand focus:outline-none' />
-                    </label>
+                    <TextArea label='Notes on the rating, optional' value={f.riskNotes} rows={3} maxLength={600} onChange={(e) => set({ riskNotes: e.target.value })}/>
                     <fieldset className='space-y-2 rounded-2xl border border-line bg-panel p-3'>
                         <legend className='px-1 text-sm font-semibold text-ink'>Conflict of interest</legend>
                         <p className='text-xs text-muted'>Does anyone in your organization have a personal, family or financial interest in this vendor?</p>
@@ -739,7 +728,7 @@ function VendorForm({ id }: { id: string }) {
                                 {x.label}
                             </label>
                         ))}
-                        {f.conflict === 'declared' && <textarea aria-label='Conflict details' value={f.conflictNotes} rows={3} maxLength={600} onChange={(e) => set({ conflictNotes: e.target.value })} placeholder='Who, and what the interest is' className='w-full rounded-xl border border-line bg-page p-3 text-base text-ink placeholder:text-muted focus:border-brand focus:outline-none' />}
+                        {f.conflict === 'declared' && <TextArea label='Conflict details' hideLabel value={f.conflictNotes} rows={3} maxLength={600} onChange={(e) => set({ conflictNotes: e.target.value })} placeholder='Who, and what the interest is'/>}
                     </fieldset>
                     <label className='flex min-h-11 items-start gap-3 rounded-xl border border-line bg-panel p-3 text-sm text-ink'>
                         <input type='checkbox' className='mt-0.5 h-5 w-5 shrink-0 accent-emerald-500' checked={f.sanctionsScreened} onChange={(e) => set({ sanctionsScreened: e.target.checked })} />
@@ -969,11 +958,11 @@ function SlaPanel({ v, onDone }: { v: Full; onDone: (message: string) => void })
                     <h2 className='text-sm font-semibold text-ink'>New agreement</h2>
                     <Field id='sla-title' label='Title *' value={f.title} maxLength={120} onChange={(e) => setF({ ...f, title: e.target.value })} />
                     <Field id='sla-ref' label='Contract reference, optional' value={f.ref} maxLength={40} onChange={(e) => setF({ ...f, ref: e.target.value })} />
-                    <div className='grid grid-cols-2 gap-2'>
+                    <div className='grid grid-cols-1 gap-3 sm:grid-cols-2'>
                         <Field id='sla-from' label='Starts *' type='date' value={f.validFrom} onChange={(e) => setF({ ...f, validFrom: e.target.value })} />
                         <Field id='sla-to' label='Ends *' type='date' value={f.validTo} onChange={(e) => setF({ ...f, validTo: e.target.value })} />
                     </div>
-                    <div className='grid grid-cols-2 gap-2'>
+                    <div className='grid grid-cols-1 gap-3 sm:grid-cols-2'>
                         <Field id='sla-lead' label='Longest lead time (days)' inputMode='numeric' value={f.maxLeadTimeDays} onChange={(e) => setF({ ...f, maxLeadTimeDays: e.target.value.replace(/\D/g, '').slice(0, 3) })} />
                         <Field id='sla-war' label='Shortest warranty (months)' inputMode='numeric' value={f.minWarrantyMonths} onChange={(e) => setF({ ...f, minWarrantyMonths: e.target.value.replace(/\D/g, '').slice(0, 3) })} />
                     </div>
@@ -1055,11 +1044,7 @@ function OverridePanel({ v, onDone, onError }: { v: Full; onDone: (message: stri
                     <option key={t.code} value={t.code}>{t.label}</option>
                 ))}
             </SelectField>
-            <label className='block'>
-                <span className='mb-1 block text-sm text-soft'>Why can it not be uploaded? *</span>
-                <textarea value={reason} rows={3} maxLength={300} onChange={(e) => setReason(e.target.value)} className='w-full rounded-xl border border-line bg-panel p-3 text-base text-ink focus:border-brand focus:outline-none' />
-                <span className='text-xs text-muted'>{reason.trim().length < 20 ? 'At least 20 characters. ' : ''}{reason.length}/300</span>
-            </label>
+            <TextArea label='Why can it not be uploaded? *' value={reason} rows={3} maxLength={300} onChange={(e) => setReason(e.target.value)} hint={(reason.trim().length < 20 ? 'At least 20 characters. ' : '')+reason.length+'/300'} />
             <label className='flex min-h-11 items-start gap-3 text-sm text-ink'>
                 <input type='checkbox' className='mt-0.5 h-5 w-5 shrink-0 accent-emerald-500' checked={sure} onChange={(e) => setSure(e.target.checked)} />
                 <span>I accept responsibility for this override and know the document is still outstanding.</span>

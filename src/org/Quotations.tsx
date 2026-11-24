@@ -4,7 +4,7 @@ import { callBackend } from '../lib/backend';
 import { navigate } from '../lib/route';
 import { downloadDataUrl } from '../lib/xlsx';
 import { downloadReportPdf } from '../lib/report';
-import { Alert, Field, SelectField } from '../components/ui';
+import { Alert, Field, SelectField, TextArea } from '../components/ui';
 import RichTable, { type Column } from '../components/RichTable';
 import { Badge, Button, Spinner, useLoad } from '../admin/kit';
 import { fmtDate } from '../admin/format';
@@ -576,11 +576,11 @@ function QuoteForm({ c, vendorId, options, onClose, onSaved }: { c: CaseOut; ven
             <section className='space-y-3 rounded-2xl border border-line bg-panel p-3'>
                 <h2 className='text-sm font-semibold text-ink'>Quote details</h2>
                 <Field id='q-ref' label='Quote reference *' maxLength={40} value={d.ref} onChange={(e) => set({ ref: e.target.value })} />
-                <div className='grid grid-cols-2 gap-3'>
+                <div className='grid grid-cols-1 gap-3 sm:grid-cols-2'>
                     <Field id='q-date' label='Quote date *' type='date' max={today} value={d.date} error={dateErr} onChange={(e) => set({ date: e.target.value })} />
                     <Field id='q-valid' label='Valid until *' type='date' value={d.validUntil} error={validErr} onChange={(e) => set({ validUntil: e.target.value })} />
                 </div>
-                <div className='grid grid-cols-2 gap-3'>
+                <div className='grid grid-cols-1 gap-3 sm:grid-cols-2'>
                     <SelectField id='q-cur' label='Currency *' value={d.currency} onChange={(e) => set({ currency: e.target.value, fxRate: e.target.value === options.currency ? '' : String(options.rates[e.target.value] ?? '') })}>
                         <option value=''>Choose</option>
                         {d.currency && !options.currencies.some((x) => x.code === d.currency) && <option value={d.currency}>{d.currency}</option>}
@@ -596,7 +596,7 @@ function QuoteForm({ c, vendorId, options, onClose, onSaved }: { c: CaseOut; ven
                         <option key={t.code} value={t.code}>{t.label}</option>
                     ))}
                 </SelectField>
-                <div className='grid grid-cols-2 gap-3'>
+                <div className='grid grid-cols-1 gap-3 sm:grid-cols-2'>
                     <Field id='q-lead' label='Lead time, days *' type='number' inputMode='numeric' min='0' step='1' value={d.leadTimeDays} onChange={(e) => set({ leadTimeDays: e.target.value })} />
                     <Field id='q-war' label='Warranty, months' type='number' inputMode='numeric' min='0' step='1' value={d.warrantyMonths} onChange={(e) => set({ warrantyMonths: e.target.value })} />
                 </div>
@@ -613,10 +613,7 @@ function QuoteForm({ c, vendorId, options, onClose, onSaved }: { c: CaseOut; ven
                     <option value='yes'>Yes</option>
                     <option value='no'>No</option>
                 </SelectField>
-                <label className='block'>
-                    <span className='mb-1 block text-sm text-soft'>Notes</span>
-                    <textarea id='q-notes' value={d.notes} maxLength={600} rows={3} onChange={(e) => set({ notes: e.target.value })} className='w-full rounded-xl border border-line bg-panel p-3 text-base text-ink focus:border-brand focus:outline-none' />
-                </label>
+                <TextArea label='Notes' id='q-notes' value={d.notes} maxLength={600} rows={3} onChange={(e) => set({ notes: e.target.value })}/>
             </section>
 
             <section className='space-y-3 rounded-2xl border border-line bg-panel p-3'>
@@ -643,7 +640,7 @@ function QuoteForm({ c, vendorId, options, onClose, onSaved }: { c: CaseOut; ven
                                 ))}
                             </optgroup>
                         </SelectField>
-                        <div className='grid grid-cols-2 gap-3'>
+                        <div className='grid grid-cols-1 gap-3 sm:grid-cols-2'>
                             <SelectField id={`ch-b-${i}`} label='Basis' value={x.basis} onChange={(e) => setCharge(i, { basis: e.target.value as ChargeDraft['basis'] })}>
                                 <option value='amount'>Amount ({d.currency || 'currency'})</option>
                                 <option value='percent'>% of discounted price</option>
@@ -666,7 +663,7 @@ function QuoteForm({ c, vendorId, options, onClose, onSaved }: { c: CaseOut; ven
                     <div className='flex justify-between'><dt className='text-muted'>Taxes and charges</dt><dd className='text-ink'>{money(overheads, d.currency)}</dd></div>
                     <div className='flex justify-between font-semibold'><dt className='text-ink'>Quote total</dt><dd className='text-ink'>{money(total + overheads, d.currency)}</dd></div>
                 </dl>
-                <p className='text-[11px] text-muted'>The chart of authority uses the discounted price plus taxes and charges, not the price before discount.</p>
+                <p className='text-xs text-muted'>The chart of authority uses the discounted price plus taxes and charges, not the price before discount.</p>
             </section>
 
             {c.lines.map((l) => {
@@ -688,16 +685,16 @@ function QuoteForm({ c, vendorId, options, onClose, onSaved }: { c: CaseOut; ven
                             <p className='text-xs text-muted'>This vendor did not quote this item. A quote that does not cover every item is not ranked.</p>
                         ) : (
                             <>
-                                <div className='grid grid-cols-2 gap-3'>
+                                <div className='grid grid-cols-1 gap-3 sm:grid-cols-2'>
                                     <Field id={`l-p-${l.no}`} label={`Unit price (${d.currency || '...'}) *`} type='number' inputMode='decimal' min='0' step='any' value={x.unitPrice} onChange={(e) => setLine(l.no, { unitPrice: e.target.value })} />
                                     <Field id={`l-q-${l.no}`} label={`Quantity (${l.unit}) *`} type='number' inputMode='decimal' min='0' step='any' value={x.quantity} onChange={(e) => setLine(l.no, { quantity: e.target.value })} />
                                 </div>
-                                <div className='grid grid-cols-3 gap-3'>
+                                <div className='grid grid-cols-1 gap-3 sm:grid-cols-3'>
                                     <Field id={`l-d-${l.no}`} label='Discount %' type='number' inputMode='decimal' min='0' max='100' step='any' value={x.discountPct} onChange={(e) => setLine(l.no, { discountPct: e.target.value })} />
                                     <Field id={`l-t-${l.no}`} label='Lead days' type='number' inputMode='numeric' min='0' step='1' value={x.leadTimeDays} onChange={(e) => setLine(l.no, { leadTimeDays: e.target.value })} />
                                     <Field id={`l-w-${l.no}`} label='Warranty mo.' type='number' inputMode='numeric' min='0' step='1' value={x.warrantyMonths} onChange={(e) => setLine(l.no, { warrantyMonths: e.target.value })} />
                                 </div>
-                                <div className='grid grid-cols-2 gap-3'>
+                                <div className='grid grid-cols-1 gap-3 sm:grid-cols-2'>
                                     <Field id={`l-b-${l.no}`} label='Brand or make' maxLength={80} value={x.brand} onChange={(e) => setLine(l.no, { brand: e.target.value })} />
                                     <Field id={`l-o-${l.no}`} label='Country of origin' maxLength={60} value={x.origin} onChange={(e) => setLine(l.no, { origin: e.target.value })} />
                                 </div>
@@ -966,24 +963,14 @@ function ReviewTab({ c, o, confirm }: { c: CaseOut; o: Options; confirm: Confirm
                             <option value='consult'>Not sure yet: consult</option>
                         </SelectField>
                         {research ? (
-                            <label className='block'>
-                                <span className='mb-1 block text-sm text-soft'>{mode === 'research' ? 'What is being researched? *' : 'Who is being consulted, and about what? *'}</span>
-                                <textarea id='rv-note' value={note} maxLength={600} rows={3} onChange={(e) => setNote(e.target.value)} className='w-full rounded-xl border border-line bg-panel p-3 text-base text-ink focus:border-brand focus:outline-none' />
-                                {noteErr && <span className='text-xs text-red-400'>{noteErr}</span>}
-                            </label>
+                            <TextArea id='rv-note' label={mode === 'research' ? 'What is being researched? *' : 'Who is being consulted, and about what? *'} value={note} maxLength={600} rows={3} onChange={(e) => setNote(e.target.value)} error={noteErr || undefined} />
                         ) : (
                             mode !== '' && (
                                 <>
                                     <Field id='rv-est' label={`Estimated value (${c.currency})${budgetSum > 0 ? '' : ' *'}`} type='number' inputMode='decimal' min='0' step='any' value={estimate} onChange={(e) => setEstimate(e.target.value)} hint={budgetSum > 0 ? `Left empty, the budgets on the items are used: ${money(budgetSum, c.currency)}` : 'No budget was given on the items, so enter the estimate.'} />
                                     <Field id='rv-close' label='Closing date for quotes' type='date' min={today} value={closing} error={closingErr} onChange={(e) => setClosing(e.target.value)} />
-                                    <label className='block'>
-                                        <span className='mb-1 block text-sm text-soft'>Notes on the review</span>
-                                        <textarea id='rv-note2' value={note} maxLength={600} rows={2} onChange={(e) => setNote(e.target.value)} className='w-full rounded-xl border border-line bg-panel p-3 text-base text-ink focus:border-brand focus:outline-none' />
-                                    </label>
-                                    <label className='block'>
-                                        <span className='mb-1 block text-sm text-soft'>Reason for choosing less competition than the chart asks for, or for single source</span>
-                                        <textarea id='rv-dev' value={deviation} maxLength={600} rows={2} onChange={(e) => setDeviation(e.target.value)} className='w-full rounded-xl border border-line bg-panel p-3 text-base text-ink focus:border-brand focus:outline-none' />
-                                    </label>
+                                    <TextArea label='Notes on the review' id='rv-note2' value={note} maxLength={600} rows={2} onChange={(e) => setNote(e.target.value)}/>
+                                    <TextArea label='Reason for choosing less competition than the chart asks for, or for single source' id='rv-dev' value={deviation} maxLength={600} rows={2} onChange={(e) => setDeviation(e.target.value)}/>
                                 </>
                             )
                         )}
@@ -1042,7 +1029,7 @@ function VendorsTab({ c, confirm, onRecord }: { c: CaseOut; confirm: Confirm; on
                     <h2 className='text-sm font-semibold text-ink'>Invite an approved vendor</h2>
                     <div className='relative'>
                         <Search className='pointer-events-none absolute left-3 top-3.5 h-4 w-4 text-muted' />
-                        <input aria-label='Search vendors' value={q} onChange={(e) => void search(e.target.value)} placeholder='Vendor name or number' className='h-12 w-full rounded-xl border border-line bg-panel pl-9 pr-3 text-base text-ink placeholder:text-muted focus:border-brand focus:outline-none' />
+                        <Field label='Search vendors' hideLabel value={q} onChange={(e) => void search(e.target.value)} placeholder='Vendor name or number'/>
                     </div>
                     {err && <Alert tone='error'>{err}</Alert>}
                     {searching && <Spinner />}

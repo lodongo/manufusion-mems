@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ChevronDown, ChevronRight, Save, Search } from 'lucide-react';
+import { ChevronDown, ChevronRight, Save } from 'lucide-react';
 import { callBackend } from '../lib/backend';
 import { navigate } from '../lib/route';
-import { Alert } from '../components/ui';
+import { Alert, SelectField, SearchField } from '../components/ui';
 import RichTable, { type Column } from '../components/RichTable';
 import { Badge, Button, Spinner, useLoad } from '../admin/kit';
 import { fmtDate } from '../admin/format';
@@ -139,10 +139,7 @@ function KindEditor({ kind, canManage, onSaved }: { kind: Kind; canManage: boole
         <div className='space-y-3'>
             {notice && <Alert tone='success'>{notice}</Alert>}
             <div className='flex flex-wrap items-center gap-2'>
-                <label className='flex h-11 min-w-0 flex-1 items-center gap-2 rounded-xl border border-line bg-panel px-3'>
-                    <Search className='h-4 w-4 shrink-0 text-muted' />
-                    <input aria-label='Search categories' value={q} onChange={(e) => setQ(e.target.value)} placeholder='Search categories and subcategories' className='h-full min-w-0 flex-1 bg-transparent text-base text-ink outline-none placeholder:text-muted' />
-                </label>
+                <SearchField label='Search categories' className='min-w-0 flex-1' value={q} onChange={(e) => setQ(e.target.value)} placeholder='Search categories and subcategories' />
                 <Badge tone='muted'>{Object.keys(sel).length} categories · {countOf(sel)} subcategories</Badge>
                 {kind.updatedAt && <span className='text-xs text-muted'>Version {kind.version}, {fmtDate(kind.updatedAt)}</span>}
             </div>
@@ -230,15 +227,11 @@ function StockConfigurationCatalogue(){
             <p className='mt-1 text-xs text-muted'>Canonical codified masters maintained in MEMS Admin → Procurement → Metadata. These definitions are shared with Inventory material configuration; they are not duplicated as tenant-specific lists.</p>
             <p className='mt-2 text-xs text-soft'>{groups.length} master dimensions · {groups.reduce((n,g)=>n+g.items.length,0)} codified values</p>
         </section>
-        <label className='block text-xs font-medium text-ink'>Configuration dimension
-          <select className='mt-1 w-full rounded-xl border border-line bg-panel p-3 text-base text-ink' value={current?.key||''} onChange={e=>{setSelected(e.target.value);setSearch('');}}>
-            {groups.map(g=><option key={g.key} value={g.key}>{g.title} ({g.items.length})</option>)}
-          </select>
-        </label>
+        <SelectField label='Configuration dimension' value={current?.key||''} onChange={e=>{setSelected(e.target.value);setSearch('');}}>{groups.map(g=><option key={g.key} value={g.key}>{g.title} ({g.items.length})</option>)}</SelectField>
         {current&&<div className='space-y-2'>
             <p className='text-sm font-semibold text-ink'>{current.title}</p>
             <p className='text-xs text-muted'>{current.description}</p>
-            <label className='block text-xs text-ink'>Filter entries (optional)<input type='search' className='mt-1 w-full rounded-xl border border-line bg-panel p-3 text-base text-ink' placeholder='Code, label or description' value={search} onChange={e=>setSearch(e.target.value)}/></label>
+            <SearchField label='Filter entries (optional)' className='mt-1' placeholder='Code, label or description' value={search} onChange={e=>setSearch(e.target.value)}/>
             <div className='space-y-2'>{records.map(item=><div className='min-w-0 rounded-xl border border-line bg-panel p-3' key={item.code}>
                 <div className='flex flex-wrap items-center justify-between gap-2'><p className='text-sm font-semibold text-ink'><span className='font-mono text-xs text-brandsoft'>{item.code}</span> · {item.label}</p><Badge tone={item.enabled?'brand':'muted'}>{item.enabled?'Enabled':'Disabled'}</Badge></div>
                 <p className='mt-1 text-xs text-muted'>{item.description}</p>

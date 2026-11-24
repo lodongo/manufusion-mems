@@ -294,7 +294,7 @@ function Legend() {
         </span>
     );
     return (
-        <div className='flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-muted'>
+        <div className='flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted'>
             {item(COLORS.receipt, 'Receipts')}
             {item(COLORS.issue, 'Issues')}
             {item(COLORS.reversal, 'Reversals')}
@@ -310,9 +310,9 @@ function Legend() {
 function Tile({ label, value, note }: { label: string; value: ReactNode; note?: ReactNode }) {
     return (
         <div className='min-w-0 rounded-xl border border-line bg-panel p-2.5'>
-            <p className='text-[11px] text-muted'>{label}</p>
+            <p className='text-xs text-muted'>{label}</p>
             <p className='truncate text-sm font-semibold text-ink'>{value}</p>
-            {note && <p className='text-[11px] leading-snug text-muted'>{note}</p>}
+            {note && <p className='text-xs leading-snug text-muted'>{note}</p>}
         </div>
     );
 }
@@ -346,7 +346,7 @@ function EventsEditor({ events, onChange, disabled }: { events: PlannedEvent[]; 
                 <div key={e.id} className='flex items-center gap-2 rounded-xl border border-line px-2 py-1.5'>
                     <div className='min-w-0 flex-1'>
                         <p className='truncate text-sm text-ink'>{e.label}</p>
-                        <p className='text-[11px] text-muted'>
+                        <p className='text-xs text-muted'>
                             {e.kind} · {e.recurrence === 'once' ? monthLabel(e.month) : `every ${MONTH_NAMES[Number(e.month) - 1]}`}
                             {e.qty ? ` · +${e.qty}` : ''}
                             {e.upliftPct ? ` · +${e.upliftPct}%` : ''}
@@ -362,7 +362,7 @@ function EventsEditor({ events, onChange, disabled }: { events: PlannedEvent[]; 
             {draft && (
                 <div className='space-y-2 rounded-xl border border-brand/40 p-2'>
                     <Field id='fc-ev-label' label='Event' maxLength={80} value={draft.label} placeholder='e.g. Boiler overhaul' onChange={(e) => setDraft({ ...draft, label: e.target.value })} />
-                    <div className='grid grid-cols-2 gap-2'>
+                    <div className='grid grid-cols-1 gap-3 sm:grid-cols-2'>
                         <SelectField id='fc-ev-kind' label='Kind' value={draft.kind} onChange={(e) => setDraft({ ...draft, kind: e.target.value as PlannedEvent['kind'] })}>
                             <option value='overhaul'>Overhaul / shutdown</option>
                             <option value='peak'>Peak demand</option>
@@ -386,7 +386,7 @@ function EventsEditor({ events, onChange, disabled }: { events: PlannedEvent[]; 
                             ))}
                         </SelectField>
                     )}
-                    <div className='grid grid-cols-2 gap-2'>
+                    <div className='grid grid-cols-1 gap-3 sm:grid-cols-2'>
                         <Field id='fc-ev-qty' label='Extra quantity' inputMode='decimal' value={draft.qty ? String(draft.qty) : ''} onChange={(e) => setDraft({ ...draft, qty: Number(e.target.value) || 0 })} />
                         <Field id='fc-ev-pct' label='Uplift %' inputMode='decimal' value={draft.upliftPct ? String(draft.upliftPct) : ''} onChange={(e) => setDraft({ ...draft, upliftPct: Number(e.target.value) || 0 })} />
                     </div>
@@ -602,7 +602,7 @@ export function MaterialForecast({ materialId, warehouseId, onChanged }: { mater
                     <Button className='w-full' disabled={!!data.material.onDemand || simSource.source !== 'forecast' || inputProblems.length > 0} onClick={propose}>
                         <Send className='h-4 w-4' /> Propose simulated levels
                     </Button>
-                    {data.material.onDemand ? <p className='text-[11px] text-muted'>Bought on demand: no levels to propose.</p> : simSource.source !== 'forecast' && <p className='text-[11px] text-muted'>The levels are manual: {simSource.why}</p>}
+                    {data.material.onDemand ? <p className='text-xs text-muted'>Bought on demand: no levels to propose.</p> : simSource.source !== 'forecast' && <p className='text-xs text-muted'>The levels are manual: {simSource.why}</p>}
                 </div>
             )}
             {!sim && data.can.edit && !pending && (
@@ -613,9 +613,9 @@ export function MaterialForecast({ materialId, warehouseId, onChanged }: { mater
                     <Button disabled={dirty || data.source.source !== 'forecast' || !!data.material.onDemand} onClick={propose}>
                         <Send className='h-4 w-4' /> Propose levels
                     </Button>
-                    {dirty && <p className='col-span-2 text-[11px] text-muted'>Save the inputs before proposing: the server uses the saved inputs.</p>}
-                    {!dirty && data.material.onDemand && <p className='col-span-2 text-[11px] text-muted'>Bought on demand: no minimum or maximum to propose.</p>}
-                    {!dirty && !data.material.onDemand && data.source.source !== 'forecast' && <p className='col-span-2 text-[11px] text-muted'>The levels are manual, so this forecast is advisory. {data.can.switch ? 'Switch the material to forecasting to propose them.' : ''}</p>}
+                    {dirty && <p className='col-span-2 text-xs text-muted'>Save the inputs before proposing: the server uses the saved inputs.</p>}
+                    {!dirty && data.material.onDemand && <p className='col-span-2 text-xs text-muted'>Bought on demand: no minimum or maximum to propose.</p>}
+                    {!dirty && !data.material.onDemand && data.source.source !== 'forecast' && <p className='col-span-2 text-xs text-muted'>The levels are manual, so this forecast is advisory. {data.can.switch ? 'Switch the material to forecasting to propose them.' : ''}</p>}
                 </div>
             )}
             {!sim && dirty && (
@@ -646,7 +646,7 @@ export function MaterialForecast({ materialId, warehouseId, onChanged }: { mater
                 </div>
                 {sim ? (
                     <>
-                        <div className='grid grid-cols-2 gap-2'>
+                        <div className='grid grid-cols-1 gap-3 sm:grid-cols-2'>
                             <SelectField id='fc-sim-profile' label='Consumption' value={profile} onChange={(e) => { setProfile(e.target.value as SimProfile); setSimMasked(new Set()); }}>
                                 {SIM_PROFILES.map((p) => (
                                     <option key={p.code} value={p.code}>
@@ -672,7 +672,7 @@ export function MaterialForecast({ materialId, warehouseId, onChanged }: { mater
                                 <option value='3'>Last 3 years</option>
                             </SelectField>
                         </div>
-                        <p className='text-[11px] text-muted'>{SIM_DISTRIBUTIONS.find((d) => d.code === distribution)?.note}.</p>
+                        <p className='text-xs text-muted'>{SIM_DISTRIBUTIONS.find((d) => d.code === distribution)?.note}.</p>
                         <Button variant='secondary' className='w-full' onClick={() => { setSeed((s) => (s * 7919 + 13) % 100000); setSimMasked(new Set()); }}>
                             <RefreshCw className='h-4 w-4' /> New random data
                         </Button>
@@ -767,7 +767,7 @@ export function MaterialForecast({ materialId, warehouseId, onChanged }: { mater
                     <>
                         <DemandChart result={result} selected={month} onPick={(m) => setMonth(m === month ? '' : m)} />
                         <Legend />
-                        <p className='text-[11px] text-muted'>Tap a month to see each movement day by day; a red dot marks months with masked movements. Demand = issues − reversals; receipts are never demand. The current month is partial and not used for fitting.</p>
+                        <p className='text-xs text-muted'>Tap a month to see each movement day by day; a red dot marks months with masked movements. Demand = issues − reversals; receipts are never demand. The current month is partial and not used for fitting.</p>
                     </>
                 ) : (
                     <RichTable<Instance>
@@ -797,7 +797,7 @@ export function MaterialForecast({ materialId, warehouseId, onChanged }: { mater
                     </div>
                     <MonthSummary row={monthRow} />
                     {inMonth.length ? <DayChart month={month} instances={inMonth} masked={activeMasked} onToggle={toggle} /> : <p className='text-sm text-muted'>No movements in this month.</p>}
-                    <p className='text-[11px] text-muted'>{locked && !sim ? 'Read only.' : 'Tap a column to mask it (dashed red) or include it again. Masked movements are left out of the demand.'}</p>
+                    <p className='text-xs text-muted'>{locked && !sim ? 'Read only.' : 'Tap a column to mask it (dashed red) or include it again. Masked movements are left out of the demand.'}</p>
                 </Card>
             )}
 
@@ -813,7 +813,7 @@ export function MaterialForecast({ materialId, warehouseId, onChanged }: { mater
                         </option>
                     ))}
                 </SelectField>
-                <div className='grid grid-cols-2 gap-2'>
+                <div className='grid grid-cols-1 gap-3 sm:grid-cols-2'>
                     <Field id='fc-past' label='Past months' inputMode='numeric' maxLength={2} disabled={locked && !sim} placeholder={String(setup.pastMonths)} value={pastMonths} onChange={(e) => setPastMonths(e.target.value.replace(/\D/g, ''))} />
                     <Field id='fc-future' label='Future months' inputMode='numeric' maxLength={2} disabled={locked && !sim} placeholder={String(setup.futureMonths)} value={futureMonths} onChange={(e) => setFutureMonths(e.target.value.replace(/\D/g, ''))} />
                 </div>
@@ -877,7 +877,7 @@ export function MaterialForecast({ materialId, warehouseId, onChanged }: { mater
                 <p className='text-sm font-semibold text-ink'>Minimum, maximum and reorder levels</p>
                 {L.onDemand && <p className='text-xs text-amber-300'>Bought on demand: no stock is held, so every level is zero.</p>}
                 <LevelTable current={data.material.current} proposed={Object.fromEntries(LEVEL_FIELDS.map((k) => [k, L[k]]))} />
-                <div className='space-y-0.5 text-[11px] text-muted'>
+                <div className='space-y-0.5 text-xs text-muted'>
                     <p>
                         Lead time {fmt(L.leadDays)} days ({fmt(L.externalLeadDays)} external + {fmt(L.internalLeadDays)} internal) = {fmt(L.leadMonths, 2)} months · service level {L.serviceLevel}% (class {data.material.criticalityClass || 'not assessed'}) → z {L.z}
                     </p>
@@ -907,7 +907,7 @@ function LeadTimeCard({ lead, samples, material, setup }: { lead: LeadTime; samp
                 <Tile label='Internal (requirement → PO approved or acknowledged)' value={`${fmt(lead.internalDays)} days`} note={`${src(lead.internalSource, material.materialInternalDays)} · ${lead.internalSamples} orders`} />
                 <Tile label='External (PO approved or acknowledged → delivered)' value={`${fmt(lead.externalDays)} days`} note={`${src(lead.externalSource, material.materialExternalDays)} · ${lead.externalSamples} orders`} />
             </div>
-            <p className='text-[11px] text-muted'>
+            <p className='text-xs text-muted'>
                 Internal {range(lead.internal)}; external {range(lead.external)} (days, last {setup.leadTimeLookbackMonths} months). Actual lead times are used from {setup.leadTimeMinSamples} order{setup.leadTimeMinSamples === 1 ? '' : 's'}; otherwise the material's lead times in Inventory Information.
             </p>
             {samples.length > 0 && (
@@ -937,14 +937,14 @@ function LeadTimeCard({ lead, samples, material, setup }: { lead: LeadTime; samp
                     </table>
                 </div>
             )}
-            {samples.length > 0 && <p className='text-[11px] text-muted'>✓ supplier acknowledgement used as the start; otherwise the final approval.</p>}
+            {samples.length > 0 && <p className='text-xs text-muted'>✓ supplier acknowledgement used as the start; otherwise the final approval.</p>}
         </Card>
     );
 }
 
 function MonthSummary({ row }: { row: MonthRow }) {
     return (
-        <div className='grid grid-cols-4 gap-1 text-center text-[11px]'>
+        <div className='grid grid-cols-4 gap-1 text-center text-xs'>
             {(
                 [
                     ['Receipts', row.receipts, COLORS.receipt],
@@ -1090,7 +1090,7 @@ export function ForecastSetupForm() {
                         </option>
                     ))}
                 </SelectField>
-                <div className='grid grid-cols-3 gap-2'>
+                <div className='grid grid-cols-1 gap-2 sm:grid-cols-3'>
                     {numField('window', 'Window (months)', { max: 2 })}
                     {numField('alpha', 'Alpha', { mode: 'decimal' })}
                     {numField('beta', 'Beta (trend)', { mode: 'decimal' })}

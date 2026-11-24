@@ -173,7 +173,7 @@ function PoView({ id }: { id: string }) {
                                 <div className='h-2 overflow-hidden rounded-full bg-page'>
                                     <div className={`h-full rounded-full ${pct >= 100 ? 'bg-emerald-500' : 'bg-sky-500'}`} style={{ width: `${pct}%` }} />
                                 </div>
-                                <p className='text-[11px] text-muted'>
+                                <p className='text-xs text-muted'>
                                     {l.kind === 'stock' ? `Stock · ${l.warehouseCode}` : l.kind === 'asset' ? `Asset · received at ${l.warehouseCode}` : `Direct charge · received at ${l.warehouseCode}`} · needed {l.dateRequired || '-'}
                                 </p>
                             </li>

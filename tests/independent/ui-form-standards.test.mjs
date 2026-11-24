@@ -2,15 +2,17 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync,readdirSync} from 'node:fs';
 
-// Maintenance, Production Planning / MRP and Manufacturing screens use the MEMS standard form templates.
+// Maintenance, Production Planning / MRP, Manufacturing and Procurement screens use the MEMS standard form templates.
 const read=(p)=>readFileSync(new URL('../../'+p,import.meta.url),'utf8');
 const SCOPE=/^(Mnt|mnt|Pln|Mfg)\w*\.tsx$|^(ProductionFoundation|ManufacturingResources|WorkRequests|WorkOrders)\.tsx$/;
-const screens=readdirSync(new URL('../../src/org/',import.meta.url)).filter(f=>SCOPE.test(f)).map(f=>['src/org/'+f,read('src/org/'+f)]);
+// Procurement and MRP screens (requisitions, quotations, purchase orders, vendors, replenishment, forecasting).
+const PROCUREMENT=/^(AccountsPayable|BuyerGroups|CriticalityAnalysis|Forecasting|InventoryPendingPos|InventoryRequirements|MaterialsMaster|PoBudgetPilotPage|PoConsolidation|PoDeliveries|PoExtras|ProcurementCatalog|ProcurementDashboard|ProcurementPlaceholder|ProcurementRules|ProcurementSetup|PurchaseOrders|PurchaseRequirements|Quotations|ReplenishmentRequests|RequirementInsights|StoresIssueVouchers|Vendors|materialCreateUi)\.tsx$/;
+const screens=readdirSync(new URL('../../src/org/',import.meta.url)).filter(f=>SCOPE.test(f)||PROCUREMENT.test(f)).map(f=>['src/org/'+f,read('src/org/'+f)]);
 const NON_TEXT=/type=['"{](checkbox|radio|file|hidden|range|color)/;
 
 test('scope covers the maintenance, planning and manufacturing screens',()=>{
-    assert.ok(screens.length>=45,'found '+screens.length);
-    for(const name of ['WorkRequests','MntTaskAssessment','ProductionFoundation','PlnProcessRoutingEditor','MfgSkuSetup'])
+    assert.ok(screens.length>=69,'found '+screens.length);
+    for(const name of ['WorkRequests','MntTaskAssessment','ProductionFoundation','PlnProcessRoutingEditor','MfgSkuSetup','PurchaseRequirements','Quotations','PurchaseOrders','Vendors','ReplenishmentRequests','Forecasting'])
         assert.ok(screens.some(([f])=>f.endsWith('/'+name+'.tsx')),name);
 });
 

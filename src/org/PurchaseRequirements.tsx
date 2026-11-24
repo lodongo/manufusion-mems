@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Check, ChevronDown, ChevronRight, Download, FileText, Paperclip, Pencil, Plus, Search, Trash2, X } from 'lucide-react';
 import { callBackend } from '../lib/backend';
 import { navigate } from '../lib/route';
-import { Alert, Field, SelectField } from '../components/ui';
+import { Alert, Field, SelectField, TextArea } from '../components/ui';
 import RichTable, { type Column } from '../components/RichTable';
 import { Badge, Button, Spinner, useLoad } from '../admin/kit';
 import { fmtDate } from '../admin/format';
@@ -232,7 +232,7 @@ function Lookup({ label, path, body, onPick, placeholder }: { label: string; pat
                 <span className='mb-1 block text-sm text-soft'>{label}</span>
                 <span className='flex h-12 items-center gap-2 rounded-xl border border-line bg-panel px-3'>
                     <Search className='h-4 w-4 shrink-0 text-muted' />
-                    <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={placeholder} className='h-full min-w-0 flex-1 bg-transparent text-base text-ink outline-none placeholder:text-muted' />
+                    <Field label={placeholder} hideLabel className='min-w-0 flex-1' value={q} onChange={(e) => setQ(e.target.value)} placeholder={placeholder}/>
                     {busy && <span className='text-xs text-muted'>Searching</span>}
                 </span>
             </label>
@@ -337,7 +337,7 @@ function CostCenterPicker({ tree, value, onChange }: { tree: TreeNode[]; value: 
                 <span className='mb-1 block text-sm text-soft'>Cost center (type to search)</span>
                 <span className='flex h-12 items-center gap-2 rounded-xl border border-line bg-panel px-3'>
                     <Search className='h-4 w-4 shrink-0 text-muted' />
-                    <input value={q} onChange={(e) => setQ(e.target.value)} placeholder='Code, name or unit' className='h-full min-w-0 flex-1 bg-transparent text-base text-ink outline-none placeholder:text-muted' />
+                    <Field label='Code, name or unit' hideLabel className='min-w-0 flex-1' value={q} onChange={(e) => setQ(e.target.value)} placeholder='Code, name or unit'/>
                 </span>
             </label>
             {found.length > 0 && (
@@ -412,7 +412,7 @@ function GlPicker({ costCenterId, code, name, onChange }: { costCenterId: string
             <button type='button' onClick={() => setBrowse((b) => !b)} className='min-h-11 text-sm text-brand'>{browse ? 'Hide browse' : 'Browse by class and category'}</button>
             {browse && (
                 <div className='space-y-2 rounded-xl border border-line bg-page p-3'>
-                    <div className='grid grid-cols-2 gap-2'>
+                    <div className='grid grid-cols-1 gap-3 sm:grid-cols-2'>
                         <SelectField id='gl-class' label='Account class' value={cls} onChange={(e) => { setCls(e.target.value); setCat(''); }}>
                             <option value=''>Choose</option>
                             {tree.map((c) => (
@@ -1049,13 +1049,7 @@ function ItemEditor({ id, no }: { id: string; no: string }) {
                     )}
                     {!f.itemCode && <Alert tone='info'>This item is not tied to a catalogue entry, so there are no attributes. Describe it in the technical notes.</Alert>}
                     <StepSection title='Technical notes' hint='Specification, standard, size, grade, scope of work or performance. At least 10 characters before you submit.'>
-                        <label className='block'>
-                            <span className='sr-only'>Technical notes</span>
-                            <textarea value={technical} maxLength={2000} rows={5} onChange={(e) => setTechnical(e.target.value)}
-                                placeholder='Specifications, standard, size, grade, scope of work, performance'
-                                className='w-full rounded-xl border border-line bg-page p-3 text-base text-ink placeholder:text-muted focus:border-brand focus:outline-none' />
-                            <span className={`text-xs ${technical.trim().length < 10 ? 'text-amber-400' : 'text-muted'}`}>{technical.length}/2000</span>
-                        </label>
+                        <TextArea label='Technical notes' hideLabel value={technical} maxLength={2000} rows={5} onChange={(e) => setTechnical(e.target.value)} placeholder='Specifications, standard, size, grade, scope of work, performance' hint={technical.length+'/2000'+(technical.trim().length < 10 ? ' · at least 10 characters before you submit' : '')} />
                     </StepSection>
                     <StepSection title='Files for this item' hint={`PDF, JPEG or PNG, up to ${o.limits.fileKb} KB each.`}>
                         <label className='flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-line text-sm text-soft active:bg-page'>
@@ -1210,7 +1204,7 @@ function ProcessTrail({ status, trail }: { status: string; trail?: Trail }) {
                     return (
                         <li key={x.name} className='relative flex gap-3 pb-3 last:pb-0'>
                             {i < stages.length - 1 && <span aria-hidden className={`absolute left-[11px] top-6 h-[calc(100%-1rem)] w-0.5 ${x.done ? 'bg-brand/60' : 'bg-line'}`} />}
-                            <span className={`relative z-[1] flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-bold ${x.done ? 'bg-brand text-onbrand' : now ? 'bg-amber-400 text-black' : 'border border-line bg-page text-muted'}`}>
+                            <span className={`relative z-[1] flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-bold ${x.done ? 'bg-brand text-onbrand' : now ? 'bg-amber-400 text-black' : 'border border-line bg-page text-muted'}`}>
                                 {x.done ? <Check className='h-3.5 w-3.5' /> : i + 1}
                             </span>
                             <div className='min-w-0 flex-1'>
@@ -1557,7 +1551,7 @@ function List() {
         const counts = list.data?.counts ?? {};
         const all = [
             { value: 'mine', label: 'My requirements', show: true },
-            { value: 'approvals', label: 'Needs my approval', show: !!can?.approve },
+            { value: 'approvals', label: 'Approve or review', show: !!can?.approve },
             { value: 'approved', label: 'Approved by me', show: !!can?.approve },
             { value: 'desk', label: 'Procurement desk', show: !!can?.desk },
             { value: 'all', label: 'All my submissions', show: true },
@@ -1590,7 +1584,7 @@ function List() {
                     rows={list.data?.rows ?? []}
                     rowKey={(r) => r.id}
                     onRowClick={(r) => navigate(`${BASE}/${r.id}`)}
-                    empty={view === 'approvals' ? 'Nothing is waiting for your approval.' : 'No purchase requirements here yet.'}
+                    empty={view === 'approvals' ? 'Nothing is waiting for your approval or review.' : 'No purchase requirements here yet.'}
                     fileName={`purchase-requirements-${view}`}
                     height='h-[calc(100dvh-17rem)]'
                 />

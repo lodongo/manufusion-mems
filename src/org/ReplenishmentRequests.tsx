@@ -171,7 +171,7 @@ function Numbers({ items }: { items: Array<[string, number | null | undefined]> 
         <div className='grid grid-cols-2 gap-2 sm:grid-cols-4'>
             {items.filter(([, v]) => v !== null && v !== undefined).map(([label, value]) => (
                 <div key={label} className='rounded-xl border border-line p-2'>
-                    <p className='text-[11px] text-muted'>{label}</p>
+                    <p className='text-xs text-muted'>{label}</p>
                     <p className='font-semibold tabular-nums text-ink'>{fmt(value as number)}</p>
                 </div>
             ))}
@@ -283,7 +283,7 @@ function RequestSheet({ req, canVerify, onClose, onDone }: { req: Req; canVerify
                     <h3 className='text-sm font-semibold text-ink'>Verify</h3>
                     <Field id='rpl-qty' label={`Quantity (${req.unit || 'unit'})`} inputMode='decimal' required value={quantity} error={show('quantity')} onChange={(e) => setQuantity(e.target.value)} />
                     {changed && <Field id='rpl-reason' label='Why the quantity changes' required maxLength={300} value={reason} error={show('reason')} onChange={(e) => setReason(e.target.value)} />}
-                    <div className='grid grid-cols-2 gap-2'>
+                    <div className='grid grid-cols-1 gap-3 sm:grid-cols-2'>
                         <Field id='rpl-date' label='Needed by' type='date' min={minDate} required value={date} error={show('date')} onChange={(e) => setDate(e.target.value)} />
                         <SelectField id='rpl-urgency' label='Urgency' value={urgency} onChange={(e) => setUrgency(e.target.value)}>
                             <option value='low'>Low</option>

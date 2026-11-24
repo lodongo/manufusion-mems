@@ -22,15 +22,43 @@ const authorityPath = (orgId: string) => `organizations/${orgId}/procurement_set
 export interface BuyingPolicy {
     /** true: materials may be bought for any cost center. false: only for warehouses that hold that material type. */
     directToCostCenters: boolean;
+    /**
+     * Immediate-manager step for purchase requirements.
+     * approve (default): every requirement waits for the manager's approval.
+     * review_below: a requirement whose lines are all budgeted and total at most `threshold` goes straight to
+     * procurement; the manager is still shown it and can return it until procurement acknowledges it.
+     * Purchase orders are approved under the chart of authority on their real value either way.
+     */
+    requirementApproval: RequirementApproval;
     version: number;
     updatedAt: string;
     updatedBy: string;
+}
+
+export interface RequirementApproval {
+    mode: 'approve' | 'review_below';
+    threshold: number;
+}
+const REQUIREMENT_APPROVAL_DEFAULT: RequirementApproval = { mode: 'approve', threshold: 0 };
+/** Anything not exactly a valid review rule reads as the strict default. */
+export function readRequirementApproval(v: unknown): RequirementApproval {
+    const o = v && typeof v === 'object' ? (v as Record<string, unknown>) : {};
+    const threshold = Number(o.threshold);
+    if (o.mode === 'review_below' && Number.isFinite(threshold) && threshold > 0) return { mode: 'review_below', threshold: Math.round(threshold * 100) / 100 };
+    return { ...REQUIREMENT_APPROVAL_DEFAULT };
+}
+/** Does this requirement need the immediate manager's approval under the policy? Unbudgeted lines always do. */
+export function requirementNeedsApproval(rule: RequirementApproval, budgets: Array<number | null>): boolean {
+    if (rule.mode !== 'review_below' || !budgets.length) return true;
+    if (budgets.some((b) => b === null || !Number.isFinite(b) || b <= 0)) return true;
+    return budgets.reduce<number>((a, b) => a + (b as number), 0) > rule.threshold;
 }
 
 export async function buyingPolicy(orgId: string): Promise<BuyingPolicy> {
     const doc = await getDoc(policyPath(orgId));
     return {
         directToCostCenters: doc?.data.directToCostCenters === true,
+        requirementApproval: readRequirementApproval(doc?.data.requirementApproval),
         version: Number(doc?.data.version) || 0,
         updatedAt: str(doc?.data.updatedAt),
         updatedBy: str(doc?.data.updatedBy),
@@ -258,7 +286,7 @@ export const procurementPolicyRoutes = {
     'POST /api/org/procurement/policy/get': [
         orgRoute('org.procurement.policy.get', null, async (ctx) => {
             requireProcurement(ctx);
-            return { policy: await buyingPolicy(ctx.orgId), canManage: can(ctx, 'PRC.setup.manage') };
+            return { policy: await buyingPolicy(ctx.orgId), canManage: can(ctx, 'PRC.setup.manage'), canManageApproval: can(ctx, 'PRC.setup.manage') && can(ctx, 'PRC.authority.manage') };
         }),
     ],
 
@@ -269,12 +297,26 @@ export const procurementPolicyRoutes = {
             const reason = reasonOf(ctx.body);
             const current = await buyingPolicy(ctx.orgId);
             if (Number(ctx.body.expectedVersion) !== current.version) throw new HttpError(409, 'Someone else changed the buying rules. Reload and try again.');
-            if (ctx.body.directToCostCenters === current.directToCostCenters) throw new HttpError(400, 'Nothing has changed.');
+            let requirementApproval = current.requirementApproval;
+            if (ctx.body.requirementApproval !== undefined) {
+                const raw = (ctx.body.requirementApproval ?? {}) as Record<string, unknown>;
+                if (!['approve', 'review_below'].includes(String(raw.mode))) throw new HttpError(400, 'Choose how purchase requirements reach procurement.');
+                if (raw.mode === 'review_below') {
+                    const t = Number(raw.threshold);
+                    if (!Number.isFinite(t) || t <= 0 || t > 1e12) throw new HttpError(400, 'Enter the review limit as an amount greater than zero.');
+                }
+                requirementApproval = readRequirementApproval(raw);
+            }
+            const approvalChanged = JSON.stringify(requirementApproval) !== JSON.stringify(current.requirementApproval);
+            // Relaxing or tightening an approval step is a chart-of-authority decision, kept apart from buying setup.
+            if (approvalChanged && !can(ctx, 'PRC.authority.manage')) throw new HttpError(403, 'Changing the manager approval of purchase requirements needs the chart of authority permission.');
+            if (ctx.body.directToCostCenters === current.directToCostCenters && !approvalChanged) throw new HttpError(400, 'Nothing has changed.');
             const version = current.version + 1;
-            const data = { directToCostCenters: ctx.body.directToCostCenters, version, updatedAt: nowIso(), updatedBy: ctx.uid };
-            await writeDoc(`${policyPath(ctx.orgId)}/versions/${version}`, { ...data, reason }, { exists: false });
+            const data = { directToCostCenters: ctx.body.directToCostCenters, requirementApproval: { ...requirementApproval }, version, updatedAt: nowIso(), updatedBy: ctx.uid };
+            await writeDoc(`${policyPath(ctx.orgId)}/versions/${version}`, { ...data, reason, previous: { directToCostCenters: current.directToCostCenters, requirementApproval: { ...current.requirementApproval } } }, { exists: false });
             await writeDoc(policyPath(ctx.orgId), data);
-            await record(ctx, 'org.procurement.policy.save', 'Buying rules', `Version ${version}: materials can be bought ${data.directToCostCenters ? 'for any cost center' : 'only for matching warehouses'}. Reason: ${reason}`);
+            const approvalText = requirementApproval.mode === 'approve' ? 'every purchase requirement needs the immediate manager\'s approval' : `requirements fully budgeted at or below ${requirementApproval.threshold} go to procurement with manager review; larger or unbudgeted ones need approval`;
+            await record(ctx, 'org.procurement.policy.save', 'Buying rules', `Version ${version}: materials can be bought ${data.directToCostCenters ? 'for any cost center' : 'only for matching warehouses'}; ${approvalText}. Reason: ${reason}`);
             return { ok: true, version };
         }),
     ],

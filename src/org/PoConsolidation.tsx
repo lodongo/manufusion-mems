@@ -145,7 +145,7 @@ export function SpecOrderForm({ onClose }: { onClose: () => void }) {
                             </div>
                         </div>
                     )}
-                    <div className='grid grid-cols-2 gap-2'>
+                    <div className='grid grid-cols-1 gap-3 sm:grid-cols-2'>
                         <SelectField id='spec-currency' label='Currency *' value={cur} onChange={(e) => setCurrency(e.target.value)}>
                             {data.currencies.map((c) => <option key={c.code} value={c.code}>{c.code} — {c.name}</option>)}
                         </SelectField>
@@ -424,7 +424,7 @@ export function TraceBreakdown({ steps, byParty, totalHours }: { steps: StepRow[
                     </tbody>
                 </table>
             </div>
-            <p className='flex items-center gap-1 text-[11px] text-muted'>
+            <p className='flex items-center gap-1 text-xs text-muted'>
                 <CheckCircle2 className='h-3.5 w-3.5' /> Total {span(totalHours)} from the requirement to the latest milestone.
             </p>
         </div>

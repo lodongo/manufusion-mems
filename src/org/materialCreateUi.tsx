@@ -76,7 +76,7 @@ export function StepProgress({ steps, stage, onStep }: { steps: WizardStep[]; st
                             aria-label={`Step ${n}: ${s.label}${done ? ' (complete)' : s.open ? ` (${s.open} open)` : ''}`}
                             className='group block w-full text-left disabled:cursor-default'>
                             <span className={`block h-1.5 rounded-full ${active ? 'bg-brand' : done ? 'bg-brand/60' : n < stage ? 'bg-amber-400/70' : 'bg-line'}`} />
-                            <span className={`mt-1 hidden truncate text-[11px] sm:block ${active ? 'font-semibold text-ink' : 'text-muted group-enabled:group-hover:text-soft'}`}>{s.label}</span>
+                            <span className={`mt-1 hidden truncate text-xs sm:block ${active ? 'font-semibold text-ink' : 'text-muted group-enabled:group-hover:text-soft'}`}>{s.label}</span>
                         </button>
                     </li>
                 );
@@ -108,7 +108,7 @@ export function OptionCard({ selected, onSelect, title, text, badge }: { selecte
             className={`relative flex min-h-[5.5rem] w-full flex-col rounded-xl border p-3 text-left transition ${selected ? 'border-brand bg-brand/10 ring-1 ring-brand' : 'border-line bg-page active:bg-panel'}`}>
             <span className='flex items-center gap-2 pr-6'>
                 <span className='text-sm font-semibold text-ink'>{title}</span>
-                {badge && <span className='rounded-full bg-brand/15 px-2 py-0.5 text-[11px] font-medium text-brand'>{badge}</span>}
+                {badge && <span className='rounded-full bg-brand/15 px-2 py-0.5 text-xs font-medium text-brand'>{badge}</span>}
             </span>
             <span className='mt-1 text-xs text-muted'>{text}</span>
             {selected && <Check className='absolute right-3 top-3 h-5 w-5 text-brand' />}
@@ -160,7 +160,7 @@ export function ReviewSection({ title, items, onEdit }: { title: string; items: 
             <div className='mb-2 flex items-center justify-between gap-2'>
                 <h3 className='text-sm font-semibold text-ink'>{title}</h3>
                 {onEdit && (
-                    <button type='button' onClick={onEdit} className='flex min-h-9 items-center gap-1 rounded-lg px-2 text-xs font-medium text-brand active:bg-page'>
+                    <button type='button' onClick={onEdit} className='flex min-h-11 items-center gap-1 rounded-lg px-2 text-xs font-medium text-brand active:bg-page'>
                         <Pencil className='h-3.5 w-3.5' /> Edit
                     </button>
                 )}
@@ -188,7 +188,7 @@ export function MatchCard({ score, name, shortText, status, meta, action }: { sc
             <div className='min-w-0 flex-1'>
                 <p className='break-words text-sm font-semibold text-ink'>{name}</p>
                 <p className='line-clamp-2 break-words text-xs text-muted'>{shortText}</p>
-                <p className='mt-1 text-[11px] uppercase tracking-wide text-muted'>{status.replaceAll('_', ' ')}</p>
+                <p className='mt-1 text-xs uppercase tracking-wide text-muted'>{status.replaceAll('_', ' ')}</p>
                 {meta && <div className='mt-1 text-xs text-soft'>{meta}</div>}
                 {action && <div className='mt-2'>{action}</div>}
             </div>
