@@ -1,4 +1,4 @@
-import { useEffect, useState, type ButtonHTMLAttributes, type ReactNode, type TextareaHTMLAttributes } from 'react';
+import { useEffect, useState, type ButtonHTMLAttributes, type ReactNode } from 'react';
 import { ChevronRight, Loader2, PanelLeft, X } from 'lucide-react';
 
 export function Card({ children, className = '', tone }: { children: ReactNode; className?: string; tone?: 'danger' }) {
@@ -82,18 +82,8 @@ export function Toggle({ checked, onChange, disabled, label }: { checked: boolea
     );
 }
 
-export function TextArea({ label, id, ...rest }: TextareaHTMLAttributes<HTMLTextAreaElement> & { label: string; id: string }) {
-    return (
-        <label htmlFor={id} className='block'>
-            <span className='mb-1 block text-sm text-slate-300'>{label}</span>
-            <textarea
-                id={id}
-                {...rest}
-                className='min-h-[6rem] w-full rounded-xl border border-slate-700 bg-slate-950 p-3 text-base text-white placeholder:text-slate-500 focus:border-emerald-500 focus:outline-none'
-            />
-        </label>
-    );
-}
+/** The standard multi-line field lives with the other form templates. */
+export { TextArea } from '../components/ui';
 
 /** Section menu: shows the current section and opens a side panel listing all sections. */
 export function SubTabs<T extends string>({ value, tabs, onChange }: { value: T; tabs: Array<{ key: T; label: string }>; onChange: (key: T) => void }) {

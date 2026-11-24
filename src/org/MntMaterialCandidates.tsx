@@ -1,6 +1,6 @@
 import {useEffect,useState} from 'react';
 import {callBackend} from '../lib/backend';
-import {Alert} from '../components/ui';
+import { Alert, Field } from '../components/ui';
 import {Button,Card,PageTitle,Spinner,useLoad} from '../admin/kit';
 import {workspaceNavigate as navigate} from '../lib/route';
 import {CatalogPicker} from './MntTaskAssessment';
@@ -79,9 +79,7 @@ export default function MntMaterialCandidates(){
     {specError&&<Alert tone='error'>{specError}</Alert>}
     {spec&&<div className='mt-3 space-y-3'>
      <p className='font-semibold'>{spec.name}</p>
-     {(spec.attributes||[]).map(a=><label key={a.code} className='block text-sm text-soft'>{a.name}{a.required?' *':''}{a.unit?' ('+a.unit+')':''}
-      <input className={input} value={attributes[a.code]||''} onChange={e=>setAttributes(old=>({...old,[a.code]:e.target.value}))}/>
-     </label>)}
+     {(spec.attributes||[]).map(a=><Field key={a.code} label={(a.name)+(a.required?' *':'')+(a.unit?' ('+a.unit+')':'')} value={attributes[a.code]||''} onChange={e=>setAttributes(old=>({...old,[a.code]:e.target.value}))}/>)}
     </div>}
     <div className='mt-4 flex flex-wrap gap-2'>
      <Button disabled={!spec||busy||spec.attributes.some(a=>a.required&&!attributes[a.code]?.trim())} busy={busy} onClick={()=>void adopt()}>Create controlled material draft</Button>

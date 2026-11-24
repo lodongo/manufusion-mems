@@ -1,6 +1,6 @@
 import {useEffect,useState,type ReactNode} from 'react';
 import {callBackend} from '../lib/backend';
-import {Alert,Field,SelectField} from '../components/ui';
+import { Alert, Field, SelectField, TextArea } from '../components/ui';
 import PlnCostCenterSkuSetup from './PlnCostCenterSkuSetup';
 import {COST_CENTER_CATEGORIES,costCenterCategoryLabel,costCenterSubcategories,costCenterSubcategoriesLabel} from '../shared/costCenterTaxonomy';
 
@@ -17,7 +17,6 @@ type ListData={costCenters:CostCenter[];highestPermittedScope:ScopePart|null;uni
 type DetailData={location:{costCenterId:string;code:string;name:string;siteId:string;
  costCenterCategory:string;costCenterSubcategories:string[]};
  resource:Resource|null;canConfigure:boolean;unitOptions:Unit[];testOverride?:boolean};
-const fieldClass='min-h-11 w-full rounded-xl border border-line bg-panel px-3 py-2 text-sm text-ink';
 const actionClass='min-h-11 rounded-xl border border-line px-4 py-2 text-sm font-semibold disabled:opacity-50';
 function Text({children}:{children:ReactNode}){return <p className='text-xs text-muted'>{children}</p>;}
 const defaultRateUnit=(options:Unit[])=>options.find(u=>u.name.toLowerCase()==='each')?.code||
@@ -92,12 +91,7 @@ export function ManufacturingResourceDetail({costCenterId,initialTab='core',init
       <option key={u.code} value={u.code}>{u.name} ({u.symbol})</option>)}
     </optgroup>)}
    </SelectField>
-   <label className='block space-y-1 text-sm text-ink'>
-    <span>Notes</span>
-    <textarea className={fieldClass} rows={4} maxLength={600} value={notes}
-     disabled={!data.canConfigure||saving} onChange={e=>setNotes(e.target.value)}
-     placeholder='Operating context, constraints and reference notes'/>
-   </label>
+   <TextArea label='Notes' rows={4} maxLength={600} value={notes} disabled={!data.canConfigure||saving} onChange={e=>setNotes(e.target.value)} placeholder='Operating context, constraints and reference notes'/>
    <Text>Resource ID: {data.resource?.id||'Allocated automatically on save'} · Production cost centre: {data.location.name}</Text>
    {data.canConfigure&&<div className='flex flex-wrap justify-end gap-2'>
     <button type='button' disabled={saving||name.trim().length<2||!rateUom}

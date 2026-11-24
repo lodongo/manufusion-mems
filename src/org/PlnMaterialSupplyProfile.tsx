@@ -1,5 +1,5 @@
 import {useId} from 'react';
-import {SelectField} from '../components/ui';
+import { SelectField, Field } from '../components/ui';
 
 type Source={id:string;name:string;type:string;siteId?:string;rateUom?:string;
  meterReference?:string;unitCost?:number|null;currency?:string;notes?:string};
@@ -7,7 +7,6 @@ export type SupplyProfile={productionMode?:string;handlingMode?:string;
  qualitySpecification?:string;sources?:Source[]};
 type Site={id:string;name:string};
 type Unit={code:string;label:string;symbol:string;categoryCode:string;baseUnit?:string};
-const textClass='w-full min-h-11 rounded-xl border border-line bg-panel px-3 py-2 text-sm text-ink';
 const sourceTypes:Array<[string,string]>=[
  ['PURCHASED','Purchased / supplier'],['EXTRACTED','Extracted / withdrawn at source'],
  ['MANUFACTURED','Produced on site'],['RECOVERED','Recovered / recycled'],
@@ -24,12 +23,7 @@ function Pick({title,value,options,onChange}:{title:string;value:string;options:
 function Input({title,value,onChange,type='text',placeholder}:{
  title:string;value:string|number;onChange:(v:string)=>void;type?:string;placeholder?:string}){
  const id=useId();
- return <label className='block space-y-1'>
-  <span className='text-xs font-medium text-muted' id={id+'-label'}>{title}</span>
-  <input id={id} aria-labelledby={id+'-label'} className={textClass} type={type}
-   min={type==='number'?'0':undefined} step={type==='number'?'any':undefined}
-   placeholder={placeholder} value={value} onChange={e=>onChange(e.target.value)}/>
- </label>;
+ return <Field label={title} id={id} aria-labelledby={id+'-label'} type={type} min={type==='number'?'0':undefined} step={type==='number'?'any':undefined} placeholder={placeholder} value={value} onChange={e=>onChange(e.target.value)}/>;
 }
 /** Configuration only: saved source rates never post invoices or inventory movements. */
 export default function PlnMaterialSupplyProfile({value,onChange,sites,units,materialUom}:{

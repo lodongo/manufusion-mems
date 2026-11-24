@@ -1,6 +1,7 @@
 import {useEffect,useState} from 'react';
 import {callBackend} from '../lib/backend';
 import {ManufacturingResourceDetail} from './ManufacturingResources';
+import { SelectField } from '../components/ui';
 
 type RatedQuantity={quantity:number|null;unit:string;name:string;reason?:string};
 type Projection={
@@ -84,11 +85,7 @@ export default function PlnSkuCostCenterRatings({skuId}:{skuId:string}){
    <h4 className='text-sm font-semibold'>Allocate this SKU to a production cost centre</h4>
    <p className='text-xs text-muted'>Select an authorized cost centre. Intermediate/WIP SKUs are allocated without commissioned speeds; finished goods can be rated using the same shared editor.</p>
    {scopeError&&<p role='alert' className='text-xs text-red-600'>{scopeError}</p>}
-   <select aria-label='Production cost centre' className='min-h-11 w-full rounded-xl border border-line bg-panel p-2 text-sm'
-    value={selectedCc} onChange={e=>setSelectedCc(e.target.value)}>
-    <option value=''>Select production cost centre</option>
-    {scopeCenters.map(c=><option key={c.costCenterId} value={c.costCenterId}>{c.costCenterName} · {c.costCenterCode}</option>)}
-   </select>
+   <SelectField label='Production cost centre' value={selectedCc} onChange={e=>setSelectedCc(e.target.value)}><option value=''>Select production cost centre</option>{scopeCenters.map(c=><option key={c.costCenterId} value={c.costCenterId}>{c.costCenterName} · {c.costCenterCode}</option>)}</SelectField>
    <div className='flex gap-2'>
     <button type='button' disabled={!selectedCc} className='min-h-11 rounded-xl bg-brand px-4 text-sm font-semibold text-onbrand disabled:opacity-50'
      onClick={()=>setOpened(selectedCc)}>Configure SKU allocation</button>

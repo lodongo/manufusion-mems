@@ -1,5 +1,5 @@
 import { useEffect, useId, useMemo, useState, type ButtonHTMLAttributes, type ReactNode } from 'react';
-import { Alert, Field as MemsField, SelectField } from '../components/ui';
+import { Alert, Field as MemsField, SelectField, TextArea } from '../components/ui';
 import { Spinner } from '../admin/kit';
 import { SkuConfigurationFields, SkuSetupPanel, SkuIdentityGuide, UnitChoice, emptySkuSetup, type SkuSelections, type SkuSetup } from './MfgSkuSetup';
 import PlnDemand from './PlnDemand';
@@ -91,8 +91,6 @@ const tabs:{key:Tab;label:string;shortLabel:string;phase:Phase;hint:string}[]=[
     {key:'documentation',label:'Documentation & Setup Guide',shortLabel:'Documentation',phase:'guide',hint:'Search guided setup, topics, troubleshooting and fictional examples'},
 ];
 const emptyRows:Record<Kind,Row[]>={items:[],boms:[],resources:[],routings:[]};
-const fld='w-full min-h-11 rounded-xl border border-line bg-panel px-3 py-2 text-sm text-ink outline-none focus:border-brand';
-const label='mb-1 block text-xs font-medium text-soft';
 const newRecord=(tab:Tab,policy:MaterialPolicy=defaultMaterialPolicy,
     defaults:FormDefaults=DEFAULT_FORM_DEFAULTS,sites:References['sites']=[]):Row=>{
     const siteId=preferredSiteId(defaults.defaultSiteId,sites);
@@ -125,7 +123,7 @@ function Choice({title,value,options,onChange,disabled=false}:{title:string;valu
     </SelectField>;
 }
 function TextField({title,value,onChange}:{title:string;value:string;onChange:(v:string)=>void}){
-    return <label className='block'><span className={label}>{title}</span><textarea rows={2} className={fld} value={value} onChange={e=>onChange(e.target.value)}/></label>;
+    return <TextArea label={title} rows={2} value={value} onChange={e=>onChange(e.target.value)}/>;
 }
 
 
@@ -602,7 +600,7 @@ function BomEditor({draft,onChange,items,refs,skuSetup,materialPolicy}:{
                             {supplyRef==='UTILITY'&&<div className='space-y-2 rounded-lg border border-line bg-panel p-3'>
                                 <div className='flex flex-wrap items-center justify-between gap-2'>
                                     <p className='text-xs font-semibold'>Supplying cost centre &amp; utility</p>
-                                    <button type='button' className='min-h-9 rounded-lg border border-line px-2 text-xs'
+                                    <button type='button' className='min-h-11 rounded-lg border border-line px-3 text-xs'
                                         onClick={refreshCostSupplies}>Refresh utility supplies</button>
                                 </div>
                                 <Choice title='Supplying cost centre' value={c.supplyCostCenterId||''}
@@ -1473,7 +1471,7 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
                     </>}
                 </>:<p className='text-sm text-muted'>SKU not found. Refresh the Materials &amp; Products list.</p>}
             </Card>:<div className='grid gap-3 md:grid-cols-2 xl:grid-cols-3'>{filtered.map(row=><Card key={row.id} className='space-y-2'>
-                <div className='flex items-start justify-between gap-2'><span className='font-mono text-xs text-brand'>{row.id}</span><span className='rounded-full bg-page px-2 py-1 text-[11px] uppercase text-soft'>{str(row.status)||'draft'}</span></div>
+                <div className='flex items-start justify-between gap-2'><span className='font-mono text-xs text-brand'>{row.id}</span><span className='rounded-full bg-page px-2 py-1 text-xs uppercase text-soft'>{str(row.status)||'draft'}</span></div>
                 <h3 className='break-words font-semibold'>{row.name}</h3>
                 <p className='text-xs text-muted'>{active==='items'?
                     str(row.category)+' · '+str(row.uom)+' · Process: '+(skuSetup.parameters.find(p=>p.id===str(row.processClassId))?.name||'Not classified'):

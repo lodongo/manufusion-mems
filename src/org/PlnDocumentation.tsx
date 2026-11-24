@@ -1,4 +1,5 @@
 import {useMemo,useRef,useState} from 'react';
+import { SearchField } from '../components/ui';
 
 type Chapter={
  id:string;title:string;phase:string;summary:string;screen?:string;status?:string;
@@ -332,9 +333,7 @@ export default function PlnDocumentation({onNavigate}:{onNavigate:(tab:string)=>
    <h2 className='text-lg font-semibold'>Production Planning & MRP · Documentation</h2>
    <p className='mt-1 text-sm text-muted'>Step-by-step setup, reference topics, validation checks and explicitly fictional examples. The guide is read-only; configurations must be saved in their own screens.</p>
    <label className='mt-3 block text-xs font-semibold' htmlFor='production-help-search'>Search topics, examples and errors</label>
-   <input id='production-help-search' className='mt-1 min-h-11 w-full rounded-lg border border-line bg-page px-3 text-sm'
-    value={query} onChange={e=>setQuery(e.target.value)}
-    placeholder='e.g. cases/hour, BOM, cost centre, MRP'/>
+   <SearchField label='Search production help' className='mt-1' id='production-help-search' value={query} onChange={e=>setQuery(e.target.value)} placeholder='e.g. cases/hour, BOM, cost centre, MRP'/>
   </header>
   <div className='grid min-w-0 gap-3 lg:grid-cols-[minmax(215px,270px)_minmax(0,1fr)]'>
    <nav aria-label='Documentation topics' className='min-w-0 rounded-xl border border-line bg-panel p-3 lg:sticky lg:top-3 lg:max-h-[72vh] lg:overflow-y-auto'>
@@ -343,7 +342,7 @@ export default function PlnDocumentation({onNavigate}:{onNavigate:(tab:string)=>
      {visible.map(ch=><button key={ch.id} type='button' aria-current={current?.id===ch.id?'page':undefined}
       className={'w-full rounded-lg border p-2 text-left text-xs '+(current?.id===ch.id?'border-brand bg-brand/10 text-brand':'border-transparent text-ink hover:bg-page')}
       onClick={()=>choose(ch.id)}>
-      <span className='block text-[10px] font-semibold text-muted'>{ch.phase}</span>
+      <span className='block text-xs font-semibold text-muted'>{ch.phase}</span>
       <span className='mt-1 block break-words font-medium'>{ch.title}</span>
      </button>)}
     </div>

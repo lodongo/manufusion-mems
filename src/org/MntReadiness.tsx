@@ -2,10 +2,10 @@ import MntSpareRisk from './MntSpareRisk';
 import MntExpectedDates from './MntExpectedDates';
 import { useState } from 'react';
 import { CheckCircle2, Circle, ClipboardCheck, Lock, ShieldCheck, Wallet } from 'lucide-react';
-import { Alert } from '../components/ui';
+import { Alert, Field, TextArea } from '../components/ui';
 import { Badge, Button, Card } from '../admin/kit';
 import { workspaceNavigate as navigate } from '../lib/route';
-import { mntApi, mntInput, type MntData } from './MntWorkOrder';
+import { mntApi, type MntData } from './MntWorkOrder';
 import MntGateHint from './MntGateHint';
 
 // The planner's readiness checklist on a work order: spares, services and people come from the task tabs; the
@@ -95,16 +95,16 @@ export default function MntReadiness({ code, wo, cycle, checklist, canPlan, curr
 
             {editable && (
                 <>
-                    {(wo.assessmentTasks||[]).filter((t:MntData)=>t.externalResource?.type).map((t:MntData)=>{const saved=wo.taskPlanning?.[t.id]?.externalSpecialist,form=specialist[t.id]||{};const set=(key:string,value:string)=>setSpecialist(old=>({...old,[t.id]:{...old[t.id],[key]:value}}));return <section key={t.id} className='space-y-2 rounded-xl border border-line p-3'><p className='font-semibold'>External specialist · {t.title||t.description}</p><p className='text-sm text-soft'>{t.externalResource.persons} required · {t.externalResource.hours??'—'} hours per person</p><p className='text-sm text-soft'>{t.externalResource.notes}</p>{t.externalResource.skillRequirements?.map((r:MntData)=><p key={r.skillCode} className='text-xs text-soft'>{r.skillLabel||r.skillCode} · {r.level}</p>)}{saved?.at&&<p className='text-sm'>Confirmed: {saved.provider} · {saved.availableDate} · {saved.reference}</p>}{[['provider','Provider','text'],['reference','Booking / contract / order reference','text'],['persons','Number of specialists','number'],['availableDate','Confirmed availability','date'],['note','Confirmation evidence','text']].map(([key,label,type])=><label key={key} className='block text-sm'>{label}<input type={type} className='mt-1 w-full rounded-lg border border-line bg-panel p-2' value={form[key]||''} onChange={e=>set(key,e.target.value)}/></label>)}<Button testOverride={testModeOverride} variant='secondary' busy={busy==='confirm_external_specialist'} disabled={!form.provider||!form.reference||!form.persons||!form.availableDate||!form.note} onClick={()=>act('confirm_external_specialist',{taskId:t.id,...form},'External specialist confirmed')}>Confirm external specialist</Button></section>;})}
+                    {(wo.assessmentTasks||[]).filter((t:MntData)=>t.externalResource?.type).map((t:MntData)=>{const saved=wo.taskPlanning?.[t.id]?.externalSpecialist,form=specialist[t.id]||{};const set=(key:string,value:string)=>setSpecialist(old=>({...old,[t.id]:{...old[t.id],[key]:value}}));return <section key={t.id} className='space-y-2 rounded-xl border border-line p-3'><p className='font-semibold'>External specialist · {t.title||t.description}</p><p className='text-sm text-soft'>{t.externalResource.persons} required · {t.externalResource.hours??'—'} hours per person</p><p className='text-sm text-soft'>{t.externalResource.notes}</p>{t.externalResource.skillRequirements?.map((r:MntData)=><p key={r.skillCode} className='text-xs text-soft'>{r.skillLabel||r.skillCode} · {r.level}</p>)}{saved?.at&&<p className='text-sm'>Confirmed: {saved.provider} · {saved.availableDate} · {saved.reference}</p>}{[['provider','Provider','text'],['reference','Booking / contract / order reference','text'],['persons','Number of specialists','number'],['availableDate','Confirmed availability','date'],['note','Confirmation evidence','text']].map(([key,label,type])=><Field key={key} label={label} className='mt-1' type={type} value={form[key]||''} onChange={e=>set(key,e.target.value)}/>)}<Button testOverride={testModeOverride} variant='secondary' busy={busy==='confirm_external_specialist'} disabled={!form.provider||!form.reference||!form.persons||!form.availableDate||!form.note} onClick={()=>act('confirm_external_specialist',{taskId:t.id,...form},'External specialist confirmed')}>Confirm external specialist</Button></section>;})}
                     <section className='space-y-2 rounded-xl border border-line p-3'>
                         <MntExpectedDates start={wo.expectedStart} end={wo.expectedEnd} source={wo.expectedDateSource}/><div className='rounded-xl border border-line p-3 space-y-2'><p className='font-semibold text-sm'>Spare availability & scheduling analysis</p><p className='text-xs text-soft'>Analyse all submitted task spare requirements together, using current issuable stock, this order’s reservations, and 13 weeks of lead-time history. Expected dates are locked risk targets; only scheduled dates may be changed.</p>{spareCount>0?<MntSpareRisk code={code} spareCount={spareCount} expectedStart={wo.expectedStart} onRecommend={(s,e)=>{setStart(s);setEnd(e);setDateNote('');setInfo('Recommended scheduled dates loaded. Review, add a reason and lock dates to apply.');}}/>:<p className='text-xs text-soft'>No spares required for this work order.</p>}</div><p className='flex items-center gap-2 text-sm font-semibold text-ink'><Lock className='h-4 w-4' />Schedule dates {done('schedule') && <Badge tone='brand'>Locked</Badge>}</p>
-                        <div className='grid grid-cols-2 gap-2'>
-                            <label className='text-sm text-soft'>Scheduled start<input type='date' className={mntInput} disabled={moves>=2} min={start===wo.scheduledStart?undefined:minNewStart} value={start} onChange={(e) => setStart(e.target.value)} /></label>
-                            <label className='text-sm text-soft'>Scheduled end<input type='date' className={mntInput} min={start} value={end} onChange={(e) => setEnd(e.target.value)} /></label>
+                        <div className='grid grid-cols-1 gap-3 sm:grid-cols-2'>
+                            <Field label='Scheduled start' type='date' disabled={moves>=2} min={start===wo.scheduledStart?undefined:minNewStart} value={start} onChange={(e) => setStart(e.target.value)}/>
+                            <Field label='Scheduled end' type='date' min={start} value={end} onChange={(e) => setEnd(e.target.value)}/>
                         </div>
                         {cycle?.restrictedTypes?.includes(wo.maintenanceTypeCode)&&<p className='text-xs text-soft'>New start dates must be in the next weekly cycle or later ({minNewStart}). Previously accepted start dates remain valid.</p>}
                         <p className="text-xs text-soft">Scheduled start date changes: {moves}/2 {moves>=2?'· locked':''}</p>
-                        {datesChanged && <label className='block text-sm text-soft'>Why do the dates change? *<input className={mntInput} value={dateNote} onChange={(e) => setDateNote(e.target.value)} /></label>}
+                        {datesChanged && <Field label='Why do the dates change? *' value={dateNote} onChange={(e) => setDateNote(e.target.value)}/>}
                         <Button testOverride={testModeOverride} variant='secondary' busy={busy === 'lock_schedule'} disabled={!start || !end || end < start || invalidNewStart || (datesChanged && dateNote.trim().length < 10)}
                             onClick={() => act('lock_schedule', { scheduledStart: start, scheduledEnd: end, note: dateNote.trim() }, 'Dates locked')}>{done('schedule') && !datesChanged ? 'Locked' : 'Lock dates'}</Button>
                     </section>
@@ -112,7 +112,7 @@ export default function MntReadiness({ code, wo, cycle, checklist, canPlan, curr
                     <section className='space-y-2 rounded-xl border border-line p-3'>
                         <p className='flex items-center gap-2 text-sm font-semibold text-ink'><ShieldCheck className='h-4 w-4' />Risk assessment {done('risk') && <Badge tone='brand'>Reviewed</Badge>}</p>
                         <p className='text-xs text-soft'>Review each task's hazards, machine status, LOTO and permits on the Risk assessment tab, then record the review.</p>
-                        {!done('risk') && <label className='block text-sm text-soft'>Review notes *<textarea rows={2} className={mntInput} value={riskNote} onChange={(e) => setRiskNote(e.target.value)} /></label>}
+                        {!done('risk') && <TextArea label='Review notes *' rows={2} value={riskNote} onChange={(e) => setRiskNote(e.target.value)}/>}
                         {!done('risk') && <Button testOverride={testModeOverride} variant='secondary' busy={busy === 'review_risk'} disabled={riskNote.trim().length < 10} onClick={() => act('review_risk', { note: riskNote.trim() }, 'Risk review recorded')}>Confirm risk review</Button>}
                     </section>
 
@@ -133,9 +133,9 @@ export default function MntReadiness({ code, wo, cycle, checklist, canPlan, curr
                         )}
                         {cost.status !== 'pending' && !cost.current && (
                             <>
-                                <label className='block text-sm text-soft'>Allowance for items without a cost<input type='number' inputMode='decimal' min={0} className={mntInput} value={allowance} onChange={(e) => setAllowance(e.target.value)} /></label>
-                                {overBudget && <label className='block text-sm text-soft'>{budget.budget === null || budget.budget === undefined ? 'No budget is set for this period: why must the work go ahead? *' : 'Over budget: why? *'}<textarea rows={2} className={mntInput} value={justification} onChange={(e) => setJustification(e.target.value)} /></label>}
-                                <label className='block text-sm text-soft'>Reason for the request *<input className={mntInput} value={reason} onChange={(e) => setReason(e.target.value)} /></label>
+                                <Field label='Allowance for items without a cost' type='number' inputMode='decimal' min={0} value={allowance} onChange={(e) => setAllowance(e.target.value)}/>
+                                {overBudget && <TextArea label={budget.budget === null || budget.budget === undefined ? 'No budget is set for this period: why must the work go ahead? *' : 'Over budget: why? *'} rows={2} value={justification} onChange={(e) => setJustification(e.target.value)}/>}
+                                <Field label='Reason for the request *' value={reason} onChange={(e) => setReason(e.target.value)}/>
                                 <Button testOverride={testModeOverride} busy={busy === 'submit_cost'} disabled={reason.trim().length < 10 || (overBudget && justification.trim().length < 20) || allowanceNum < 0}
                                     onClick={() => act('submit_cost', { allowance: allowanceNum, reason: reason.trim(), justification: justification.trim() }, 'Sent for Chart of Authority approval')}>Submit cost for approval</Button>
                             </>

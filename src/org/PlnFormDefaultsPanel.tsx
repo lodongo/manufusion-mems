@@ -107,12 +107,7 @@ export default function PlnFormDefaultsPanel({initial,revision,sites,canEdit,onS
     <div className='mt-3 grid gap-3 sm:grid-cols-2'>
      <Quantity title='BOM standard output quantity' value={draft.bomOutputQty}
       min='0.000001' disabled={!canEdit||busy} onChange={v=>change('bomOutputQty',v)}/>
-     <label className='block text-xs font-medium text-soft'>
-      <span className='mb-1 block'>BOM/routing alternative code</span>
-      <input className='min-h-11 w-full rounded-xl border border-line bg-panel px-3 text-sm text-ink'
-       value={draft.routingAlternativeCode} disabled={!canEdit||busy} maxLength={32}
-       onChange={e=>change('routingAlternativeCode',e.target.value.toUpperCase())}/>
-     </label>
+     <Field label='BOM/routing alternative code' value={draft.routingAlternativeCode} disabled={!canEdit||busy} maxLength={32} onChange={e=>change('routingAlternativeCode',e.target.value.toUpperCase())}/>
     </div>
    </details>
    <details className='rounded-xl border border-line p-3'>
