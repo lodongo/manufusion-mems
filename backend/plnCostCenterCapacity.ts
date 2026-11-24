@@ -44,9 +44,12 @@ const lineage=(nodes:Map<string,ScopeNode>,id:string):ScopeNode[]=>{
 export function isManufacturingCostType(code:string,raw:unknown){
  // Primary categories have stable operational meaning regardless of an unseeded
  // or customised Finance reference list. A subcategory never changes the module.
- if(code==='MFG')return true;
  if(code==='INV'||code==='WHS')return false;
  const items=Array.isArray(raw)?raw.filter(isObj):[];
+ // Finance decides: a category it has explicitly deactivated is never eligible, MFG included.
+ if(items.some(x=>str(x.code)===code&&x.active===false))return false;
+ // MFG stays eligible when the Finance list is unseeded or customised without it.
+ if(code==='MFG')return true;
  const match=items.find(x=>str(x.code)===code&&x.active!==false);
  if(!match)return false;
  const words=[match.code,match.name,match.label,match.description,match.category].map(str).join(' ').toLowerCase();

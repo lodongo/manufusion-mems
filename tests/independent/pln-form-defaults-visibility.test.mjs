@@ -26,6 +26,7 @@ test('form default saves do not complete planning configuration or rewrite saved
  assert.match(backend,/const formDefaults=normalizePlanningFormDefaults\(prev\?\.data\.formDefaults\?\?raw\.formDefaults\)/);
  const readiness=read('src/org/plnSetupDependencies.ts');
  assert.match(readiness,/config:\{complete:input\.planningConfigurationRevision>0/);
- const form=read('src/org/ProductionFoundation.tsx');
- assert.match(form,/t\.key!=='formDefaults'&&t\.key!=='demand'/);
+ // Form defaults are optional: no configuration step depends on them.
+ assert.match(readiness,/formDefaults:\[\],/);
+ assert.doesNotMatch(readiness,/:\[[^\]]*'formDefaults'/);
 });

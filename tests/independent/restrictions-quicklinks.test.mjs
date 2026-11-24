@@ -23,15 +23,15 @@ test('warehouse restrictions: one master for materials and storage locations, wi
 });
 
 test('binning is blocked until the location and the material carry the same enabled restriction', () => {
-    assert.match(binningBlock('RS15', '', MASTER, 'SL-01 Spares'), /not set/);
-    assert.match(binningBlock('RS15', 'RS99', MASTER), /not in the warehouse restriction master/);
+    assert.match(binningBlock('RS15', '', MASTER, 'SL-01 Spares'), /Select at least one warehouse restriction for SL-01 Spares/);
+    assert.match(binningBlock('RS15', 'RS99', MASTER), /unknown warehouse restriction RS99/);
     const disabled = MASTER.map((m) => (m.code === 'RS02' ? { ...m, active: false } : m));
     assert.match(binningBlock('RS02', 'RS02', disabled), /disabled/);
     assert.match(binningBlock('', 'RS15', MASTER), /no warehouse restriction/);
     assert.match(binningBlock('RS02', 'RS15', MASTER), /mismatch/i);
     assert.equal(binningBlock('RS15', 'RS15', MASTER), '');
     assert.equal(locationBlock('RS15', MASTER), '');
-    assert.match(locationBlock('', MASTER), /not set/);
+    assert.match(locationBlock('', MASTER), /Select at least one warehouse restriction/);
 });
 
 test('material restriction: Stock Control per warehouse overrides the material master default', () => {
@@ -43,13 +43,13 @@ test('material restriction: Stock Control per warehouse overrides the material m
 test('binning routes and cluster creation enforce the restriction master server-side', () => {
     const proc = fs.readFileSync('backend/procurement.ts', 'utf8');
     const wh = fs.readFileSync('backend/warehouse.ts', 'utf8');
-    assert.match(proc, /binningBlock\(classification,str\(bin\.restrictionCode\)/, 'bin link checks restrictions');
+    assert.match(proc, /binningBlock\(requiredCodes,restrictionCodesOf\(bin\.restrictionCodes/, 'bin link checks every cluster restriction');
     assert.match(proc, /inventory\.bin\.link\.blocked/, 'blocked attempts are audited');
-    assert.match(proc, /locationBlock\(binRestriction/, 'bin candidates check the location');
-    assert.match(proc, /Delink the bin before changing the warehouse restriction/);
-    assert.match(proc, /Choose an enabled warehouse restriction \(Stage 3\)/, 'material registration uses the restriction master');
-    assert.match(wh, /is not aligned to the warehouse restriction master/, 'clusters need an aligned location');
-    assert.match(wh, /Delink them before changing the restriction/, 'retagging a location with binned stock is blocked');
+    assert.match(proc, /locationBlock\(clusterRestrictions,restrictionMaster/, 'bin candidates check the cluster');
+    assert.match(proc, /Update the cluster selection or delink the material first/, 'a binned material cannot drift to another restriction');
+    assert.match(proc, /Choose enabled warehouse restrictions in Step 3/, 'material registration uses the restriction master');
+    assert.match(wh, /locationBlock\(restrictionCodes,restrictionMaster,'this cluster'\)/, 'new clusters need enabled master restrictions');
+    assert.match(wh, /'Linked material '\+str\(mat\.data\.materialNumber\|\|materialId\)\+': '\+mismatch/, 'retagging a cluster away from its binned stock is blocked');
 });
 
 test('automatic teams: reportees, peers under the same manager and extended team from reporting lines', () => {

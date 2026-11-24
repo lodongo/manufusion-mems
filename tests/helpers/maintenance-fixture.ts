@@ -72,6 +72,16 @@ const response = (data: unknown, status = 200) => ({
     json: async () => data,
     text: async () => JSON.stringify(data),
 });
+/**
+ * In-memory atomic counter. The real nextSequence calls the real Firestore REST client internally, so the
+ * re-export above would escape this fixture (and fail with MEMS_FIREBASE_PROJECT_ID is required).
+ */
+export async function nextSequence(field: string): Promise<number> {
+    const current = documents.get('system/counters')?.data ?? {};
+    const value = (Number((current as Record<string, unknown>)[field]) || 0) + 1;
+    seed('system/counters', { ...current, [field]: value });
+    return value;
+}
 export async function googleRequest(url: string, method: string, body: any) {
     if (url.endsWith(':commit')) {
         const changes: Array<[string, any]> = [],

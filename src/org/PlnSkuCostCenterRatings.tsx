@@ -103,7 +103,7 @@ export default function PlnSkuCostCenterRatings({skuId}:{skuId:string}){
    {!response.costCenters.length&&<p className='rounded-lg bg-page p-3 text-sm text-muted'>
     {intermediate?'No manufacturing cost-centre allocations found for this intermediate SKU.':
       'No commissioned speed mappings found for this finished SKU.'}
-    Configure the SKU from Production Planning &amp; MRP → Manufacturing Cost Centre &amp; SKUs.
+    Configure the SKU from Production Planning &amp; MRP → Manufacturing Resources → open the resource → Allocate SKU.
    </p>}
    <div className='grid gap-3'>
     {response.costCenters.map(row=>{

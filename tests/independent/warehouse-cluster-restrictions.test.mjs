@@ -37,7 +37,7 @@ test('warehouse restrictions and pallet stacking are configured exclusively on c
   const server=read('backend/warehouse.ts');
   assert.ok(ui.includes('5 · Warehouse restrictions *'));
   assert.ok(ui.includes('Select all applicable restrictions'));
-  assert.ok(ui.includes('const [restrictionCodes,setRestrictionCodes]=useState<string[]>([])'));
+  assert.ok(ui.includes('const [restrictionCodes,setRestrictionCodes]=useState<string[]>(prefill?.restrictionCodes||[])'));
   assert.ok(ui.includes("data.restrictions.map(r=><label"));
   assert.ok(ui.includes("'POST /api/org/warehouse/cluster/update'")===false); // path sent to API, not endpoint registered in the UI
   assert.ok(ui.includes("callBackend('/api/org/warehouse/cluster/update'"));
@@ -55,7 +55,7 @@ test('Stock Control and bin occupancy use the new multiple-restriction cluster i
   assert.ok(server.includes("str(x.data.binId).startsWith(code+'__')"));
   assert.ok(server.includes('Linked material '));
   assert.ok(server.includes('clusterRestrictionCodes:codes as unknown as Plain'));
-  assert.ok(inventory.includes('clusterRestrictions.includes(effectiveRestriction('));
+  assert.ok(inventory.includes('binningBlock(materialRequiredRestrictions('));
   assert.ok(inventory.includes('restrictionCodesOf(cluster.data.restrictionCodes'));
   assert.ok(inventory.includes('binningBlock(nextRestriction,codes'));
   assert.ok(inventory.includes('clusterRestrictionCodes:restrictionCodesOf(bin.restrictionCodes'));

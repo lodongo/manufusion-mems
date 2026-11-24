@@ -883,11 +883,13 @@ await assert.rejects(
     /own material/,
 );
 await route(procurementRoutes, '/api/org/procurement/materials/approve', 'manager', { id: candidate.materialDraftId, decision: 'approve' });
-await route(procurementRoutes, '/api/org/procurement/materials/lifecycle', 'manager', {
-    id: candidate.materialDraftId,
-    action: 'allocate',
-});
-await route(procurementRoutes, '/api/org/procurement/materials/lifecycle', 'manager', { id: candidate.materialDraftId, action: 'push' });
+// Since 07cd34f the creation approval allocates the material number and publishes it to its warehouse atomically.
+{
+    const approved = snapshot(r + '/materials/' + candidate.materialDraftId).data;
+    assert.equal(approved.status, 'approved');
+    assert.ok(approved.materialNumber, 'approval allocates the material number');
+    assert.ok(approved.pushedAt, 'approval publishes the material to its warehouse');
+}
 await op('planner', 'match_spare', {
     code: direct,
     taskId: 'coupling',
@@ -1261,7 +1263,16 @@ assert.equal((await route(maintenanceRoutes,'/api/org/mnt/wr/action','assessor',
 await assert.rejects(()=>route(maintenanceRoutes,'/api/org/mnt/wo/action','assessor',{code:confirmedWO.woCode,action:'assess_header',...plannedHeader,expectedStart:'2099-01-01'}),/End date cannot be before start date|next maintenance cycle/);
 await route(maintenanceRoutes,'/api/org/mnt/wo/action','assessor',{code:confirmedWO.woCode,action:'assess_header',...plannedHeader});
 assert.equal(snapshot(r+'/work_orders/'+confirmedWO.woCode).data.assessedBy,people.assessor[0]);
-const currentTask={...task('current_check','Inspect and repair conveyor condition',''),equipmentId:'CONVEYOR'};
+// Since 4331a9e every submitted task must reference a verified task in the equipment Safety register.
+// Seed a screened "No risk" (AC01) register task; equipmentTaskSafetySnapshot still validates it on submission.
+const conveyorUnit=String(snapshot(r+'/work_orders/'+confirmedWO.woCode).data.unitId);
+seed(r+'/equipment_task_register/'+conveyorUnit+'/tasks/TSK_000000001',{
+    name:'Inspect and repair conveyor condition',version:1,status:'review_required',
+    answers:{routine:'no',body:'no',door:'no',moving:'no',otherExposure:'no',inching:'no',nonEnergy:'no'},
+    classCodes:['AC01'],classBaseline:[{code:'AC01',version:0}],permitCodes:[],energyPlan:[],rows:[],
+    safetyDeviceIds:[],deviceVersion:0,devicesReviewed:true,
+    assessmentCompletedAt:'2026-11-01T08:00:00Z',assessmentVerifiedAt:'2026-11-01T09:00:00Z',verificationStatus:'verified',executionAuthorized:false});
+const currentTask={...task('current_check','Inspect and repair conveyor condition',''),equipmentId:'CONVEYOR',registryTaskId:'TSK_000000001',registryVersion:1};
 await route(maintenanceRoutes,'/api/org/mnt/wo/action','assessor',{code:confirmedWO.woCode,action:'save_assessment_draft',tasks:[{...currentTask,risk:[{hazard:'',impact:'',controls:''}]}]});
 const savedDraftOrder=snapshot(r+'/work_orders/'+confirmedWO.woCode).data;
 assert.equal(savedDraftOrder.workflowCode,'WO010');assert.equal(savedDraftOrder.assessmentDraft.tasks.length,1);assert.equal(savedDraftOrder.assessmentTasks.length,0);assert.ok(!savedDraftOrder.expectedDatesLockedAt);

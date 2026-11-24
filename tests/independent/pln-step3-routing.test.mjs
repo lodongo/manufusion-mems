@@ -86,7 +86,7 @@ test('Step 3 stage UI is compact, preserves governance and shows validated capac
  assert.ok(ui.includes("aria-label='Routing configuration sections'"));
  assert.ok(ui.includes("aria-expanded={expanded}"));
  assert.ok(ui.includes('Manufacturing cost centre'));
- assert.ok(ui.includes('Referenced stage BOM'));
+ assert.ok(ui.includes("Choice label='Common stage BOM (optional)'"));
  assert.ok(ui.includes('Commissioned physical-container speed'));
  assert.ok(ui.includes('Stage BOM components (read only)'));
  assert.ok(ui.includes('Required predecessor stages'));

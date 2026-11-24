@@ -74,7 +74,7 @@ test('PLN Documentation is navigable, scrollable, searchable and honestly labels
  assert.ok(guide.includes('Fictional example'));
  for(const key of ['Manufacturing Setup','Physical Containers','SKU Naming Sequence',
   'Materials & Products','Bills of Materials','Manufacturing Resources',
-  'Manufacturing Cost Centre & SKUs','Process Routings','Planning Configuration','Demand & S&OP']){
+  'Process Routings','Planning Configuration','Demand & S&OP']){
   assert.ok(guide.includes(key),key);
  }
  assert.ok(guide.includes('target capabilities')||guide.includes('target capabilities;'));

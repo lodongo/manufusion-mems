@@ -52,10 +52,10 @@ await update('inventory', { replenishmentStrategy: 'RP01' });
 console.log('stock control ok');
 
 // 2. Restriction of a material binned before restrictions existed: the bin's storage location decides.
-await rejects(update('inventory', { warehouseRestriction: 'RS15' }), /storage location has no warehouse restriction yet/, 'unaligned location');
+await rejects(update('inventory', { warehouseRestriction: 'RS15' }), /Select at least one warehouse restriction for cluster CL-0001/, 'unconfigured cluster');
 const w = snapshot(r + '/warehouses/WH').data;
 seed(r + '/warehouses/WH', { ...w, storageLocations: [{ ...w.storageLocations[0], restrictionCode: 'RS15' }] });
-await rejects(update('inventory', { warehouseRestriction: 'RS02' }), /under restriction RS15\. Delink the bin/, 'other restriction than the bin');
+await rejects(update('inventory', { warehouseRestriction: 'RS02' }), /Restriction mismatch.*RS15.*delink the material first/s, 'other restriction than the bin');
 assert.equal((await update('inventory', { warehouseRestriction: 'RS15' })).changed, 1);
 assert.equal(snapshot(r + '/warehouse_bin_occupancy/WH_' + BIN).data.restrictionCode, 'RS15', 'the older bin link now records its restriction');
 console.log('restriction ok');

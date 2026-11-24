@@ -1261,6 +1261,9 @@ async function makeMaterialDecision(ctx:OrgContext,kind:'creation'|'extension'):
         workflowRecoveryMode:'development_test_override',
         workflowRecoveredBy:ctx.uid,workflowRecoveredAt:nowIso(),
     }:previous;
+    // Say why: a creator, editor or submitter is refused for that reason, not as if someone else were assigned.
+    if(!(ctx.testMode===true&&ctx.role==='org_super_admin')&&materialMakerCheckerConflict(data,ctx.uid))
+        throw new HttpError(403,'You created, edited or submitted this request, so you cannot approve your own material request. Another authorized approver must decide.');
     if(!await materialApproverCanAct(ctx,data,workflow))
         throw new HttpError(403,'This workflow stage is assigned to a different authorized reviewer or approver.');
     if(missingSnapshot)bypass(ctx,'material.workflow.missing_snapshot_test_recovery');

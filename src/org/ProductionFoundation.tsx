@@ -1338,7 +1338,14 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
             </details>
             <div className='flex justify-end'><Button disabled={!canSkuConfig||busy} onClick={()=>void saveMaterialPolicy()}>Save manufacturing setup</Button></div>
         </Card>:active==='resources'?<ManufacturingResources defaultCategory={formDefaults.resourceCostCenterCategory}
-            defaultSubcategory={formDefaults.resourceCostCenterSubcategory} onChanged={()=>{void load();}}/>:active==='capacityOverview'?
+            defaultSubcategory={formDefaults.resourceCostCenterSubcategory} onChanged={()=>{void load();}}
+            onEditSku={skuId=>{
+                // Open the mapped SKU for correction in Materials & Products (restored after 209877a).
+                const found=rows.items.find(item=>item.id===skuId);
+                setActive('items');setDraft(null);setViewSkuId('');
+                if(found){void openDraft(found);}
+                else setError('The selected SKU was not found in your current Materials & Products list. Refresh the list and search for '+skuId+'.');
+            }}/>:active==='capacityOverview'?
         <PlnCapacityOverview sites={refs.sites} processClasses={skuSetup.parameters.filter(p=>p.kind==='processClasses')}
             items={rows.items} units={skuSetup.units}/>:active==='config'?<Card className='space-y-4'>
             <p className='text-sm text-muted'>Initial organization-level planning defaults. Further rule sets and site overrides use the same configuration model in subsequent phases.</p>

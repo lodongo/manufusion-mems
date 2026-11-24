@@ -44,7 +44,10 @@ test('Editing active BOM maintains original code with internal audit revisions a
     assert.ok(!frontend.includes("onClick={()=>str(row.status)==='active'?copyVersion(row):void openDraft(row)}"));
     assert.ok(backend.includes("kind==='boms'?'mfg.bom.overwrite'"));
     assert.ok(backend.includes("path:path+'/revisions/'"));
-    assert.ok(backend.includes("return {...item,status:'draft',revision"));
+    // Outside development test mode an edited BOM always returns to draft for reapproval.
+    assert.ok(backend.includes("return {...item,status:testBomOverride?'active':'draft',revision"));
+    assert.ok(backend.includes("const testBomOverride=kind==='boms'&&ctx.role==='org_super_admin'&&ctx.testMode===true;"));
+    assert.ok(backend.includes("if(testBomOverride)ctx.bypassed?.push('mfg.bom.immediate_save_and_approval');"));
 });
 test('Measurement-system subcategory choices are not shown',()=>{
     const frontend=read('src/org/ProductionFoundation.tsx');

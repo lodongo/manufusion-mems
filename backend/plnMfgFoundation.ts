@@ -232,7 +232,7 @@ export function normalizeMaster(kind:MasterKind, raw:unknown): Obj {
                 const utilityCode=processSupplyKind==='UTILITY'&&!supplyCostCenterId?
                     VALID_ID(c.utilityCode,'Historical registered utility'):'';
 
-                if(skuId===parentSkuId)throw new HttpError(400,'A SKU cannot consume itself.');
+                if(skuId&&skuId===parentSkuId)throw new HttpError(400,'A SKU cannot consume itself.');
                 // Shared SKU keys prevent double demand when the same material is
                 // added once as an intermediate and again as inline supply.
                 const key=processSupplyKind==='SKU'?'SKU:'+skuId:
@@ -248,7 +248,7 @@ export function normalizeMaster(kind:MasterKind, raw:unknown): Obj {
                     requiredFlowPerHour,bufferCapacity,bufferUsable};
             }
             const skuId=VALID_ID(c.skuId,'Component SKU');
-            if(skuId===parentSkuId)throw new HttpError(400,'A SKU cannot consume itself.');
+            if(skuId&&skuId===parentSkuId)throw new HttpError(400,'A SKU cannot consume itself.');
             const key='SKU:'+skuId;
             if(seen.has(key))throw new HttpError(400,'Duplicate component SKU '+skuId+'. Combine quantities in one line.');
             seen.add(key);

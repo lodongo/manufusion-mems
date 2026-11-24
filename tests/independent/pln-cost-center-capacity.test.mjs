@@ -186,7 +186,9 @@ test('one editor is shared by the Organization Design gear and Production Planni
  assert.ok(structure.includes("'/api/org/pln/cost-center/eligibility'"));
  assert.ok(structure.includes("setMode(result.manufacturing?{type:'planning'}:{type:'edit'})"));
  assert.ok(structure.includes('<PlnCostCenterSkuSetup costCenterId={node.id}'));
- assert.ok(pln.includes('<PlnCostCenterSetup onMappingsChanged={refreshCapacitySetup}')&&pln.includes('onEditSku={skuId=>'));
+ const resources=read('src/org/ManufacturingResources.tsx');
+ assert.ok(pln.includes("active==='resources'?<ManufacturingResources")&&pln.includes('onEditSku={skuId=>'));
+ assert.ok(resources.includes('onMappingsChanged={onSaved} onEditSku={onEditSku}/>'),'Production Planning opens the same SKU editor and can jump to edit the SKU');
  assert.ok(menu.includes('<PlnCostCenterSkuSetup key={cc} costCenterId={cc} onMappingsChanged={onMappingsChanged} onEditSku={onEditSku}/>'));
  assert.ok(ui.includes('Physical container category'));
  assert.ok(ui.includes('Physical container subcategory / type'));
@@ -257,7 +259,8 @@ test('main manufactured SKU detail returns only scoped, configured manufacturing
 });
 test('production tabs follow configuration precedence and retain scoped availability',()=>{
  const page=read('src/org/ProductionFoundation.tsx');
- const expected=['materialPolicy','skuSetup','items','boms','resources','costCenterSku','routings','config','demand'];
+ // 209877a folded the cost-centre SKU step into Manufacturing Resources.
+ const expected=['materialPolicy','skuSetup','items','boms','resources','routings','config','demand'];
  const start=page.indexOf('const tabs:');
  const end=page.indexOf('const emptyRows:',start);
  const table=page.slice(start,end);
@@ -268,17 +271,15 @@ test('production tabs follow configuration precedence and retain scoped availabi
  assert.ok(page.includes('const visibleTabs=tabs.filter('));
  assert.ok(page.includes('canViewMasters);'));
  assert.ok(!page.includes("module==='PLN'&&t.key==='resources'?false"));
- assert.ok(page.includes('changeTab(visibleTabs[activeIndex+1].key)'));
+ assert.ok(page.includes("if(visibleTabs.length&&!visibleTabs.some(tab=>tab.key===active)){"),'an unavailable stage falls back to the first permitted one');
 });
 test('mobile has a single accessible stage selector and desktop has grouped tabs',()=>{
  const page=read('src/org/ProductionFoundation.tsx');
- assert.ok(page.includes("aria-label='Production configuration sequence' className='sm:hidden"));
- assert.ok(page.includes("htmlFor='manufacturing-step-select'"));
- assert.ok(page.includes("id='manufacturing-step-select' label='Configuration sequence' hideLabel value={active}"));
+ // One labelled, grouped selector serves phone and desktop (209877a).
+ assert.ok(page.includes("<nav aria-label='Production configuration menu'"));
+ assert.ok(page.includes("<SelectField id='manufacturing-step-select' label='Configuration' value={active}"));
  assert.ok(page.includes('<optgroup'));
- assert.ok(page.includes('Previous</Button>'));
- assert.ok(page.includes('Next step</Button>'));
- assert.ok(page.includes("aria-label='Production configuration stages'"));
+ assert.ok(page.includes('onChange={event=>changeTab(event.target.value as Tab)}'));
  assert.ok(!page.includes("className='flex gap-2 overflow-x-auto pb-1'"));
  assert.ok(page.includes("<details className='rounded-xl border border-line p-3'>"));
 });
@@ -296,7 +297,7 @@ test('SKU configuration menus and cost-centre scope are compact without losing e
 });
 test('SKU naming sequence is a standalone configuration section, not product identity',()=>{
  const ui=read('src/org/MfgSkuSetup.tsx');
- assert.ok(ui.includes("keys:['productNames','productionForms']"));
+ assert.ok(ui.includes("keys:['productNames','processClasses','productionForms']"));
  assert.ok(!ui.includes("keys:['productNames','productionForms','namingSequence']"));
  assert.ok(ui.includes("<section aria-label='SKU Naming Sequence'"));
  assert.ok(ui.includes("onClick={()=>open('namingSequence')}"));

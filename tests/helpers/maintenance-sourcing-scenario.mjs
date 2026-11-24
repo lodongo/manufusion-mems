@@ -521,8 +521,8 @@ assert.equal(pushed.status, 'unverified');
 assert.equal(pushed.source, 'maintenance');
 assert.equal(pushed.lines[0].materialId, draft.materialDraftId);
 assert.equal(snapshot(r + '/work_orders/' + wo).data.taskPlanning.drive.bracket.materialId, draft.materialDraftId, 'Task spare linked to the approved code');
-await route(procurementRoutes, '/api/org/procurement/materials/lifecycle', 'manager', { id: draft.materialDraftId, action: 'allocate' });
-await route(procurementRoutes, '/api/org/procurement/materials/lifecycle', 'manager', { id: draft.materialDraftId, action: 'push' });
+// Approval now allocates the number and publishes to the warehouse atomically (07cd34f).
+assert.ok(snapshot('organizations/' + org + '/materials/' + draft.materialDraftId).data.pushedAt, 'approval publishes the material');
 const verified = await op('planner', 'secure_spare', { code: wo, taskId: 'drive', resourceId: 'bracket', glCode: '610000', dateRequired: date });
 assert.equal(verified.requirementId, linked.requirementId, 'Planner verifies the pushed requirement instead of raising another');
 assert.equal(snapshot(r + '/procurement_requirements/' + linked.requirementId).data.status, 'pending_approval');

@@ -30,7 +30,7 @@ test('all Production Planning and MRP selectors use the reusable confirmation te
   assert.doesNotMatch(ui,/<select\b/,path+' must not use native select');
  }
  const navigation=read(paths[0]);
- assert.ok(navigation.includes("id='manufacturing-step-select' label='Configuration sequence' hideLabel value={active}"));
+ assert.ok(navigation.includes("<SelectField id='manufacturing-step-select' label='Configuration' value={active}"));
  assert.ok(navigation.includes('<optgroup'));
  const product=read(paths[1]);
  const rating=read(paths[2]);
