@@ -1,5 +1,5 @@
 import {useEffect,useId,useMemo,useState, type ReactNode} from 'react';
-import {Alert,Field as MemsField,SelectField} from '../components/ui';
+import { Alert, Field as MemsField, SelectField, TextArea } from '../components/ui';
 import {callBackend} from '../lib/backend';
 import {hasPerm} from '../types';
 import {formDefaultsFor,preferredSiteId,localRequiredDate,type FormDefaults} from './plnFormDefaults';
@@ -19,7 +19,6 @@ type DemandSummary={skuId:string;siteId:string;market:string;period:string;uom:s
  totalDemand:number;sourceIds:string[]};
 const initial=():Demand=>({skuId:'',siteId:'',needDate:'',type:'FORECAST',quantity:1,
  uom:'EA',source:'MANUAL',externalId:'',market:'',customerReference:'',notes:''});
-const inputClass='w-full min-h-11 rounded-xl border border-line bg-panel px-3 py-2 text-sm text-ink';
 const fmt=(v:number)=>new Intl.NumberFormat(undefined,{maximumFractionDigits:3}).format(v);
 const statusLabel=(v:string)=>v==='pending_approval'?'Awaiting approval':v==='approved'?'Approved':
  v==='rejected'?'Returned':'Draft';
@@ -153,10 +152,7 @@ export default function PlnDemand({permissions,formDefaults}:{permissions:string
      <Input title={draft.type==='FIRM_ORDER'?'Customer / order reference (required)':'Customer / order reference (optional)'}
       value={draft.customerReference} onChange={v=>setDraft(x=>x?{...x,customerReference:v}:x)}/>
     </div>
-    <label className='block text-xs font-medium text-soft'>Notes
-     <textarea value={draft.notes} onChange={e=>setDraft(x=>x?{...x,notes:e.target.value}:x)}
-      rows={2} className={inputClass+' mt-1'}/>
-    </label>
+    <TextArea label='Notes' value={draft.notes} onChange={e=>setDraft(x=>x?{...x,notes:e.target.value}:x)} rows={2}/>
     <p className='text-xs text-muted'>Source: manually entered. Nothing is posted to stock, procurement or customers.</p>
     <div className='flex justify-end'><Btn disabled={busy} onClick={()=>void save()}>Save draft</Btn></div>
    </div>}

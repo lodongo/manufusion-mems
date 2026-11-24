@@ -258,7 +258,7 @@ export function RequirementTrace({ id, view }: { id: string; view: 'trace' | 'da
                 right={
                     <div role='tablist' aria-label='Split by' className='flex gap-1 rounded-xl border border-line p-1 text-xs'>
                         {(['group', 'step', 'party'] as const).map((k) => (
-                            <button key={k} type='button' role='tab' aria-selected={by === k} onClick={() => setBy(k)} className={`min-h-9 rounded-lg px-2 ${by === k ? 'bg-brand text-white' : 'text-muted'}`}>
+                            <button key={k} type='button' role='tab' aria-selected={by === k} onClick={() => setBy(k)} className={`min-h-9 rounded-lg px-2 ${by === k ? 'bg-brand text-onbrand' : 'text-muted'}`}>
                                 {k === 'group' ? 'Internal / external' : k === 'step' ? 'Step' : 'Who'}
                             </button>
                         ))}

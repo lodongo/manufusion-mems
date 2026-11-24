@@ -2,7 +2,7 @@ import MntSelect from './MntSelect';
 import { useEffect, useState, type FocusEvent } from 'react';
 import { ArrowLeft, Check, CheckCircle2, ChevronRight, Cog, Home, Layers, Search, Wrench, X } from 'lucide-react';
 import { callBackend } from '../lib/backend';
-import { Alert } from '../components/ui';
+import { Alert, Field, SearchField } from '../components/ui';
 import { Card, Spinner, useLoad } from '../admin/kit';
 
 // Maintenance (MNT) building blocks shared by work requests and work orders.
@@ -188,9 +188,7 @@ export function ChoicePicker({ title, groups, selected, onToggle, multi = false,
                     ))}
                 </ul>
             )}
-            <div className='block text-xs text-soft'>
-                Category
-                <MntSelect label={'Category'} hideLabel value={group} onChange={(e) => setGroup(e.target.value)} className='mt-1 block h-12 w-full rounded-xl border border-line bg-page px-3 text-base text-ink'>
+            <MntSelect label='Category' value={group} onChange={(e) => setGroup(e.target.value)}>
                     <option value=''>Choose a category…</option>
                     {groups.map((g) => {
                         const count = g.items.filter((i) => selected.includes(i.code)).length;
@@ -202,7 +200,6 @@ export function ChoicePicker({ title, groups, selected, onToggle, multi = false,
                         );
                     })}
                 </MntSelect>
-            </div>
             {current && (
                 <div className='grid grid-cols-1 gap-2 sm:grid-cols-2' role={multi ? 'group' : 'radiogroup'} aria-label={current.label}>
                     {current.items.map((i) => {
@@ -317,10 +314,7 @@ export function GroupPicker({ title, groups, selected, onToggle, multi = false, 
                     ))}
                 </div>
             )}
-            <div className='relative'>
-                <Search className='pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500' />
-                <input value={q} onChange={(e) => setQ(e.target.value)} placeholder='Search…' className='h-11 w-full rounded-xl border border-slate-700 bg-slate-950 pl-9 pr-3 text-sm text-white' />
-            </div>
+            <SearchField label={'Search '+title} placeholder='Search…' value={q} onChange={(e) => setQ(e.target.value)}/>
             {term ? (
                 <div className='grid gap-2 sm:grid-cols-2'>{matches.length ? matches.map(itemButton) : <p className='text-xs text-slate-500'>Nothing matches.</p>}</div>
             ) : (
@@ -420,7 +414,7 @@ export function AssemblyPicker({ selected, onPick, purpose = 'wr', allowEquipmen
             <p className='text-sm text-slate-400'>{allowEquipment ? 'Choose equipment or an assembly. An assembly is optional. Browse your sites or search.' : 'Open the assembly. Go through your sites and equipment units, or search.'}</p>
             <div className='relative'>
                 <Search className='pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500' />
-                <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={allowEquipment ? `Search ${equipment.length} equipment and ${assemblies.length} assemblies…` : `Search ${assemblies.length} assemblies…`} className='h-12 w-full rounded-xl border border-slate-700 bg-slate-950 pl-9 pr-3 text-sm text-white' />
+                <Field label={allowEquipment ? `Search ${equipment.length} equipment and ${assemblies.length} assemblies…` : `Search ${assemblies.length} assemblies…`} hideLabel value={q} onChange={(e) => setQ(e.target.value)} placeholder={allowEquipment ? `Search ${equipment.length} equipment and ${assemblies.length} assemblies…` : `Search ${assemblies.length} assemblies…`}/>
             </div>
             {term ? (
                 <ul className='space-y-2'>

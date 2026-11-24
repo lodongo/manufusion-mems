@@ -1,10 +1,10 @@
-import { Children, Fragment, isValidElement, useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactNode, type SelectHTMLAttributes } from 'react';
+import { Children, Fragment, isValidElement, useEffect, useId, useMemo, useRef, useState, type ChangeEvent, type ReactNode, type SelectHTMLAttributes } from 'react';
 import { createPortal } from 'react-dom';
 import { Check, ChevronDown, Search, X } from 'lucide-react';
 
 type Props = SelectHTMLAttributes<HTMLSelectElement> & {
     label: string;
-    id: string;
+    id?: string;
     hint?: string;
     error?: string;
     children: ReactNode;
@@ -37,7 +37,9 @@ function extractOptions(children: ReactNode, group = ''): Option[] {
 }
 
 /** MEMS dropdown template: searchable staged choice, explicit confirmation and visible mobile actions. */
-export default function SearchableSelect({ label, id, hint, error, children, value, defaultValue, name, onChange, disabled, required, hideLabel, ...rest }: Props) {
+export default function SearchableSelect({ label, id: providedId, hint, error, children, value, defaultValue, name, onChange, disabled, required, hideLabel, className = '', ...rest }: Props) {
+    const generatedId = useId();
+    const id = providedId || generatedId;
     const options = useMemo(() => extractOptions(children), [children]);
     const [open, setOpen] = useState(false);
     const [query, setQuery] = useState('');
@@ -76,7 +78,7 @@ export default function SearchableSelect({ label, id, hint, error, children, val
     };
 
     return (
-        <div className='block min-w-0'>
+        <div className={`block min-w-0 ${className}`}>
             <label htmlFor={id} className={hideLabel ? 'sr-only' : 'mb-1 block text-sm text-soft'}>{label}{required ? ' *' : ''}</label>
             <input type='hidden' name={name} value={selectedValue} />
             <button ref={buttonRef} type='button' id={id} disabled={disabled} aria-required={required} aria-invalid={!!error}

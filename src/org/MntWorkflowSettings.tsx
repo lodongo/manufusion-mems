@@ -1,7 +1,7 @@
 import MntSelect from './MntSelect';
 import {useEffect,useMemo,useState} from 'react';
 import {callBackend} from '../lib/backend';
-import {Alert} from '../components/ui';
+import { Alert, TextArea } from '../components/ui';
 import {Button,Card,PageTitle,Spinner,useLoad} from '../admin/kit';
 import {workspaceNavigate as navigate} from '../lib/route';
 import {suggestGateRoles} from './mntGateSuggest';
@@ -73,8 +73,7 @@ export default function MntWorkflowSettings(){
           <span className={g.status==='existing'?'text-xs text-emerald-400':'text-xs text-amber-400'}>{g.status==='existing'?'Operational handler':'Pending implementation'}</span>
         </div>
         {g.roleRequired&&<div className='mt-2 block text-sm text-soft'>Assigned organizational job role
-          <MntSelect label={'Assigned organizational job role'} hideLabel value={current[g.code]||''} onChange={e=>setRoles({...current,[g.code]:e.target.value})}
-            className='mt-1 w-full rounded-lg border border-slate-600 bg-slate-900 p-3 text-base text-white'>
+          <MntSelect label={'Assigned organizational job role'} hideLabel value={current[g.code]||''} onChange={e=>setRoles({...current,[g.code]:e.target.value})}>
             <option value=''>Not configured</option>
             {data.jobRoles.map(r=><option key={r.id} value={r.id}>{r.label}</option>)}
           </MntSelect>
@@ -86,11 +85,7 @@ export default function MntWorkflowSettings(){
    })}
    <Card>
     <p className='text-sm text-slate-300'>Revision {data.revision}. {changed?'Unsaved configuration changes':'No pending changes'}.</p>
-    <label className='mt-2 block text-sm text-slate-300'>Reason for changes
-      <textarea value={reason} onChange={e=>setReason(e.target.value)} rows={3}
-        className='mt-1 w-full rounded-lg border border-slate-600 bg-slate-900 p-3 text-base text-white'
-        placeholder='Why are these approval role assignments appropriate?'/>
-    </label>
+    <TextArea label='Reason for changes' className='mt-2' value={reason} onChange={e=>setReason(e.target.value)} rows={3} placeholder='Why are these approval role assignments appropriate?'/>
     <div className='mt-3'><Button disabled={busy||!changed||reason.trim().length<10} onClick={save}>{busy?'Saving…':'Save workflow configuration'}</Button></div>
     <div className='mt-3 border-t border-line pt-3'><p className='text-sm font-semibold'>Remove obsolete workflow configuration</p><p className='text-xs text-soft'>Remove retired handover, technical closure, reopening and duplicate confirmation mappings from saved workflow settings, Work Groups and explicit security roles. Active role assignments and historical audit records are retained. Organization Super Admin only.</p><Button variant='secondary' disabled={busy||reason.trim().length<10} onClick={cleanup}>Clean obsolete settings and permissions</Button>{cleaned!==null&&<p className='text-xs text-soft'>{cleaned} documents changed</p>}</div>
     {message&&<p className='mt-2 text-sm text-slate-200'>{message}</p>}

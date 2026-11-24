@@ -2,11 +2,11 @@ import MntSelect from './MntSelect';
 import {MaintenanceResponsibility,workGroupText,responsibleText} from './mntShared';
 import { useEffect, useRef, useState } from 'react';
 import { CalendarClock, Printer, ShieldCheck, Plus, ArrowLeft, RefreshCw } from 'lucide-react';
-import { Alert } from '../components/ui';
+import { Alert, Field } from '../components/ui';
 import RichTable, { type Column } from '../components/RichTable';
 import { Button, Card, Spinner, useLoad } from '../admin/kit';
 import { workspaceNavigate as navigate } from '../lib/route';
-import { MntDialog, MntField, MntRiskTable, mntApi, mntInput, type MntData } from './MntWorkOrder';
+import { MntDialog, MntField, MntRiskTable, mntApi, type MntData } from './MntWorkOrder';
 import MntGateHint from './MntGateHint';
 
 const statusLabel = (w: MntData) => w.finalClosure?.at?'closed':(w.model === 'equipment_v2' ? '' : 'older line window · ') + String(w.status || '').replaceAll('_', ' ');
@@ -189,7 +189,7 @@ function Gantt({ schedule, start, onMove }: { schedule: MntData; start: string; 
                                         <p className="break-words text-sm font-medium">{t.description}</p>
                                         <p className="text-xs text-muted">
                                             {t.start.toFixed(1)}–{t.finish.toFixed(1)} h · Float {t.float.toFixed(1)} h
-                                        </p>{onMove&&<label className="block text-xs text-soft mt-1">Earliest start (h from window)<input key={t.id+':'+t.offset} type="number" min="0" step="0.25" defaultValue={t.offset} onBlur={e=>{const v=Number(e.target.value);if(Number.isFinite(v)&&v>=0&&v!==t.offset)onMove(t.id,v);}} className="w-24 max-w-full rounded border border-line bg-panel px-2 py-1"/></label>}
+                                        </p>{onMove&&<Field label='Earliest start (h from window)' className='mt-1 w-24 max-w-full' key={t.id+':'+t.offset} type="number" min="0" step="0.25" defaultValue={t.offset} onBlur={e=>{const v=Number(e.target.value);if(Number.isFinite(v)&&v>=0&&v!==t.offset)onMove(t.id,v);}}/>}
                                     </div>
                                     <div
                                         className="relative h-9 rounded bg-panel"
@@ -368,13 +368,13 @@ export default function MntWindows() {
             {draft ? (
                 <Card className="space-y-4">
                     <h2 className="font-semibold">{draft.windowId ? 'Change maintenance window' : 'New maintenance window'}</h2>
-                    <div className="block text-sm text-soft"><MntSelect label="Equipment" className={mntInput} value={draft.equipmentId} disabled={!!draft.windowId} onChange={(e) => patch({ equipmentId: e.target.value, workOrderIds: [] })}>
+                    <div className="block text-sm text-soft"><MntSelect label="Equipment" value={draft.equipmentId} disabled={!!draft.windowId} onChange={(e) => patch({ equipmentId: e.target.value, workOrderIds: [] })}>
                             <option value="">Choose the equipment…</option>
                             {equipmentOptions(draft).map(([id, label]) => <option key={id} value={id}>{label}</option>)}
                             {draft.windowId && !equipmentOptions(draft).some(([id]) => id === draft.equipmentId) && <option value={draft.equipmentId}>{draft.equipmentId}</option>}
                         </MntSelect></div>
                     {!equipmentOptions(draft).length && <Alert tone="info">No work order is ready yet. Confirm readiness on a work order (Plan: spares, services, people, dates, risk review and cost approval) first.</Alert>}
-                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 lg:grid-cols-3">
                         <MntField label="Date *" type="date" value={draft.date} onChange={(v) => patch({ date: v })} />
                         <MntField label="Start time *" type="time" value={draft.startTime} onChange={(v) => patch({ startTime: v })} />
                         <MntField label="Duration (hours) *" type="number" value={draft.durationHours} onChange={(v) => patch({ durationHours: Number(v) })} />
@@ -522,7 +522,7 @@ export default function MntWindows() {
             )}
             {dialog.startsWith('window_close_')&&<MntDialog title="Window safety sign-off & closure" onClose={()=>setDialog('')}>
                 <div className="space-y-3">
-                    {dialog==='window_close_safety'&&<><div className="block text-sm"><MntSelect label="Incident / near-miss declaration" className={mntInput} value={closureForm.declaration||''} onChange={e=>setClosureForm({...closureForm,declaration:e.target.value,noIncidentsConfirmed:false,clearanceConfirmed:false})}><option value="">Choose explicitly</option><option value="none">No incidents or near misses</option><option value="reported">All incidents / near misses reported and cleared</option></MntSelect></div>
+                    {dialog==='window_close_safety'&&<><div className="block text-sm"><MntSelect label="Incident / near-miss declaration" value={closureForm.declaration||''} onChange={e=>setClosureForm({...closureForm,declaration:e.target.value,noIncidentsConfirmed:false,clearanceConfirmed:false})}><option value="">Choose explicitly</option><option value="none">No incidents or near misses</option><option value="reported">All incidents / near misses reported and cleared</option></MntSelect></div>
                     {closureForm.declaration&&<label className="flex items-start gap-2 text-sm"><input type="checkbox" checked={closureForm.declaration==='none'?!!closureForm.noIncidentsConfirmed:!!closureForm.clearanceConfirmed} onChange={e=>setClosureForm({...closureForm,[closureForm.declaration==='none'?'noIncidentsConfirmed':'clearanceConfirmed']:e.target.checked})}/>I confirm the window incident declaration.</label>}</>}
                     <MntField label="Safety notes (optional)" value={closureForm.note} multiline onChange={v=>setClosureForm({...closureForm,note:v})}/>
                     <Button testOverride={!!data?.testModeOverride} busy={busy} onClick={()=>action(dialog,closureForm)}>Confirm</Button>

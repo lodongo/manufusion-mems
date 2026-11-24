@@ -13,9 +13,10 @@ import type { AttrDef, CatalogueGuidance } from '../components/AssetDictionaryBr
 import { useEffect, useMemo, useState, type ChangeEvent, type ReactNode } from 'react';
 import { CheckCircle2, ClipboardList, FileText, Paperclip, Search, ShieldCheck, Truck, X } from 'lucide-react';
 import { callBackend } from '../lib/backend';
-import { Alert } from '../components/ui';
+import { Alert, Field, SearchField, TextArea } from '../components/ui';
 import { Badge, Button } from '../admin/kit';
 import { compressPhoto } from './mntShared';
+import StepNav from '../components/StepNav';
 
 // Maintenance sourcing UI (addendum): adding spares from the selected warehouse, the material catalogue (with a
 // check for registered materials of the same specification) or free text (after a search), the external-service editor with supplier category and qualified vendors, and the procurement
@@ -55,19 +56,13 @@ interface Similar { materialId: string; materialNumber: string; name: string; uo
 
 function Qty({ qty, uom, onQty, onUom, lockUom }: { qty: string; uom: string; onQty: (v: string) => void; onUom: (v: string) => void; lockUom?: boolean }) {
     return (
-        <div className='grid grid-cols-2 gap-2'>
-            <label className={fieldLabel}>
-                Quantity *
-                <input type='number' inputMode='decimal' min='0.001' step='any' className={field} value={qty} onChange={(e) => onQty(e.target.value)} />
-            </label>
-            <div className={fieldLabel}>
-                Unit of measure
-                {lockUom?<input className={field} value={unitLabel(uom)} readOnly/>:<UnitOfMeasureSelect value={uom} onChange={onUom}/>}
-            </div>
+        <div className='grid grid-cols-1 gap-3 sm:grid-cols-2'>
+            <Field label='Quantity *' type='number' inputMode='decimal' min='0.001' step='any' value={qty} onChange={(e) => onQty(e.target.value)}/>
+            {lockUom?<Field label='Unit of measure' value={unitLabel(uom)} readOnly/>:<UnitOfMeasureSelect value={uom} onChange={onUom}/>}
         </div>
     );
 }
-export function UnitOfMeasureSelect({value,onChange}:{value:string;onChange:(v:string)=>void}){const unit=PROCUREMENT_UNITS.find(u=>u.code===value||u.symbol===value);return <MntSelect label='Unit of measure' hideLabel className={field} value={unit?.code||value} onChange={e=>onChange(e.target.value)}><option value=''>Choose unit</option>{value&&!unit&&<option value={value}>{unitLabel(value)}</option>}{PROCUREMENT_UNITS.filter(u=>u.active&&u.selectable).map(u=><option key={u.code} value={u.code}>{unitLabel(u.code)}</option>)}</MntSelect>;}
+export function UnitOfMeasureSelect({value,onChange}:{value:string;onChange:(v:string)=>void}){const unit=PROCUREMENT_UNITS.find(u=>u.code===value||u.symbol===value);return <MntSelect label='Unit of measure' value={unit?.code||value} onChange={e=>onChange(e.target.value)}><option value=''>Choose unit</option>{value&&!unit&&<option value={value}>{unitLabel(value)}</option>}{PROCUREMENT_UNITS.filter(u=>u.active&&u.selectable).map(u=><option key={u.code} value={u.code}>{unitLabel(u.code)}</option>)}</MntSelect>;}
 const qtyOk = (q: string) => Number(q) > 0 && Number(q) <= 1_000_000;
 
 /**
@@ -88,7 +83,7 @@ export function AddSpare({ code, warehouseId, warehouseName, onAdd, onClose }: {
                     <X className='h-4 w-4' />
                 </button>
             </div>
-            <div className='grid grid-cols-3 gap-1' role='radiogroup' aria-label='Spare source'>
+            <div className='grid grid-cols-1 gap-2 sm:grid-cols-3' role='radiogroup' aria-label='Spare source'>
                 {SOURCES.map(([k, label, hint]) => (
                     <button
                         key={k}
@@ -166,7 +161,7 @@ function FromWarehouse({ warehouseId, onAdd }: { warehouseId: string; onAdd: (sp
                 Search this warehouse
                 <span className='relative block'>
                     <Search className='pointer-events-none absolute left-3 top-1/2 mt-0.5 h-4 w-4 -translate-y-1/2 text-muted' />
-                    <input type='search' autoFocus className={field + ' pl-9'} value={q} onChange={(e) => setQ(e.target.value)} placeholder='Material number or name' />
+                    <SearchField label='Material number or name' autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder='Material number or name'/>
                 </span>
             </label>
             {busy && <p className='text-xs text-muted'>Checking stock…</p>}
@@ -241,7 +236,7 @@ function FromCatalogue({ code, warehouseId, onAdd }: { code: string; warehouseId
     const select = (label: string, value: string, set: (v: string) => void, list: Array<{ code: string; name: string }>, disabled = false) => (
         <div className={fieldLabel}>
             {label}
-            <MntSelect label={label} hideLabel className={field} value={value} disabled={disabled} onChange={(e) => set(e.target.value)}>
+            <MntSelect label={label} hideLabel value={value} disabled={disabled} onChange={(e) => set(e.target.value)}>
                 <option value=''>Choose</option>
                 {list.map((o) => (
                     <option key={o.code} value={o.code}>{o.name}</option>
@@ -290,7 +285,7 @@ function FromCatalogue({ code, warehouseId, onAdd }: { code: string; warehouseId
                                             <Badge tone={m.exact ? 'brand' : m.score >= 60 ? 'warn' : 'muted'}>{m.exact ? 'Match' : `${m.score}%`}</Badge>
                                         </div>
                                         {!m.exact && m.differences.length > 0 && (
-                                            <p className='break-words text-[11px] text-muted'>{m.differences.map((d) => `${d.name}: ${d.theirs} (yours ${d.yours})`).join(' · ')}</p>
+                                            <p className='break-words text-xs text-muted'>{m.differences.map((d) => `${d.name}: ${d.theirs} (yours ${d.yours})`).join(' · ')}</p>
                                         )}
                                         <Button
                                             variant={m.exact ? 'primary' : 'secondary'}
@@ -360,23 +355,11 @@ function FreeText({ code, warehouseId, onAdd, onCatalogue }: { code: string; war
     const ready = !!result && !stale && confirm && (found === 0 || reason.trim().length >= 10) && !problems.length;
     return (
         <div className='space-y-3'>
-            <label className={fieldLabel}>
-                Material name and technical description *
-                <input className={field} value={s.description} onChange={(e) => set({ description: e.target.value })} />
-            </label>
-            <label className={fieldLabel}>
-                Intended function *
-                <input className={field} value={s.function} onChange={(e) => set({ function: e.target.value })} placeholder='What the part does on this equipment' />
-            </label>
-            <label className={fieldLabel}>
-                Detailed specifications and attributes *
-                <textarea className={field} rows={3} value={s.specifications} onChange={(e) => set({ specifications: e.target.value })} placeholder='Dimensions, material, rating, part or drawing number…' />
-            </label>
+            <Field label='Material name and technical description *' value={s.description} onChange={(e) => set({ description: e.target.value })}/>
+            <Field label='Intended function *' value={s.function} onChange={(e) => set({ function: e.target.value })} placeholder='What the part does on this equipment'/>
+            <TextArea label='Detailed specifications and attributes *' rows={3} value={s.specifications} onChange={(e) => set({ specifications: e.target.value })} placeholder='Dimensions, material, rating, part or drawing number…'/>
             <Qty qty={s.qty} uom={s.uom} onQty={(v) => set({ qty: v })} onUom={(v) => set({ uom: v })} />
-            {!/^WO/.test(code)&&<><label className={fieldLabel}>
-                Required by *
-                <input type='date' min={todayIso()} className={field} value={s.requiredDate} onChange={(e) => set({ requiredDate: e.target.value })} />
-            </label>
+            {!/^WO/.test(code)&&<><Field label='Required by *' type='date' min={todayIso()} value={s.requiredDate} onChange={(e) => set({ requiredDate: e.target.value })}/>
             <Attachments code={code} files={s.attachments} urls={urls} onChange={(files, u) => (set({ attachments: files }), setUrls(u))} /></>}
             {problems.length > 0 && <p className='text-xs text-amber-500'>Still needed: {problems.join(', ')}.</p>}
             {(!result || stale) && (
@@ -427,10 +410,7 @@ function FreeText({ code, warehouseId, onAdd, onCatalogue }: { code: string; war
                         <input type='checkbox' className='mt-1' checked={confirm} onChange={(e) => setConfirm(e.target.checked)} />I confirm no suitable warehouse or catalogue item exists.
                     </label>
                     {found > 0 && confirm && (
-                        <label className={fieldLabel}>
-                            Why are the {found} result(s) unsuitable? *
-                            <textarea className={field} rows={2} value={reason} onChange={(e) => setReason(e.target.value)} />
-                        </label>
+                        <TextArea label={'Why are the'+(found)+'result(s) unsuitable? *'} rows={2} value={reason} onChange={(e) => setReason(e.target.value)}/>
                     )}
                     <Button
                         disabled={!ready}
@@ -577,43 +557,28 @@ export function ServiceEditor({ code, value, hierarchy, urls, onChange, onUrls,s
     const certifications=itemList(value.certificationItems,value.certifications);
     const subs = useMemo(() => hierarchy?.subcategories.filter((s) => s.categoryCode === value.categoryCode) ?? [], [hierarchy, value.categoryCode]);
     const fams = useMemo(() => hierarchy?.families.filter((f) => f.subcategoryCode === value.subcategoryCode) ?? [], [hierarchy, value.subcategoryCode]);
-    const text = (key: string, label: string, rows = 0, hint = '') => (
-        <label className={fieldLabel} key={key}>
-            {label}
-            {rows ? <textarea className={field} rows={rows} value={value[key] ?? ''} placeholder={hint} onChange={(e) => set({ [key]: e.target.value })} /> : <input className={field} value={value[key] ?? ''} placeholder={hint} onChange={(e) => set({ [key]: e.target.value })} />}
-        </label>
-    );
+    const text = (key: string, label: string, rows = 0, hint = '') => (rows
+        ? <TextArea key={key} label={label} hint={hint || undefined} rows={rows} value={value[key] ?? ''} onChange={(e) => set({ [key]: e.target.value })}/>
+        : <Field key={key} label={label} hint={hint || undefined} value={value[key] ?? ''} onChange={(e) => set({ [key]: e.target.value })}/>);
     const num = (key: string, label: string, step = 1) => (
-        <label className={fieldLabel} key={key}>
-            {label}
-            <input type='number' inputMode='decimal' min={0} step={step} className={field} value={value[key] ?? ''} onChange={(e) => set({ [key]: e.target.value === '' ? null : Number(e.target.value) })} />
-        </label>
+        <Field label={label} type='number' inputMode='decimal' min={0} step={step} value={value[key] ?? ''} onChange={(e) => set({ [key]: e.target.value === '' ? null : Number(e.target.value) })}/>
     );
     return (
         <div className='space-y-3 min-w-0'>
-            <div className='grid grid-cols-1 gap-1 sm:grid-cols-2' aria-label='Service assessment sections'>{sections.map((label,i)=><button type='button' key={label} aria-pressed={section===i} onClick={()=>setSection(i)} className={'flex w-full items-center justify-between rounded-lg border border-line px-3 py-2 text-left text-sm '+(section===i?'bg-brand text-white font-medium':'bg-panel')}><span>{i+1}. {label}</span><span className='shrink-0 text-xs'>{outstanding.some(x=>issues[i].includes(x))?'Pending':'✓'} {section===i?'−':'›'}</span></button>)}</div>
+            <StepNav label='Service assessment sections' current={String(section)} onChange={(k)=>setSection(Number(k))} steps={sections.map((label,i)=>({key:String(i),label,state:outstanding.some(x=>issues[i].includes(x))?'open':'done'}))}/>
             {section===0&&<div className='space-y-3'><div className='grid grid-cols-1 gap-2 sm:grid-cols-3'>
-                <div className={fieldLabel}>
-                    Service category
-                    <MntSelect label={'Service category'} hideLabel className={field} value={value.categoryCode} onChange={(e) => set({ categoryCode: e.target.value, subcategoryCode: '', classCode: '' })}>
+                <MntSelect label='Service category' value={value.categoryCode} onChange={(e) => set({ categoryCode: e.target.value, subcategoryCode: '', classCode: '' })}>
                         <option value=''>Choose</option>
                         {hierarchy?.categories.map((c) => <option key={c.code} value={c.code}>{c.name}</option>)}
                     </MntSelect>
-                </div>
-                <div className={fieldLabel}>
-                    Subcategory
-                    <MntSelect label={'Subcategory'} hideLabel className={field} value={value.subcategoryCode} disabled={!value.categoryCode} onChange={(e) => set({ subcategoryCode: e.target.value, classCode: '' })}>
+                <MntSelect label='Subcategory' value={value.subcategoryCode} disabled={!value.categoryCode} onChange={(e) => set({ subcategoryCode: e.target.value, classCode: '' })}>
                         <option value=''>Choose</option>
                         {subs.map((c) => <option key={c.code} value={c.code}>{c.name}</option>)}
                     </MntSelect>
-                </div>
-                <div className={fieldLabel}>
-                    Class
-                    <MntSelect label={'Class'} hideLabel className={field} value={value.classCode} disabled={!value.subcategoryCode} onChange={(e) => set({ classCode: e.target.value })}>
+                <MntSelect label='Class' value={value.classCode} disabled={!value.subcategoryCode} onChange={(e) => set({ classCode: e.target.value })}>
                         <option value=''>Choose</option>
                         {fams.map((c) => <option key={c.code} value={c.code}>{c.name}</option>)}
                     </MntSelect>
-                </div>
             </div>
             {text('description', 'Service name', 0, 'e.g. Rewind 37 kW 4-pole motor')}</div>}
             {section===1&&<div className='space-y-3'>
@@ -622,7 +587,7 @@ export function ServiceEditor({ code, value, hierarchy, urls, onChange, onUrls,s
             </div>}
             {section===2&&<div className='space-y-3'><MntExternalSkills skills={skills} selected={(value.skillRequirements||[]) as ResourceSkill[]} onChange={skillRequirements=>set({skillRequirements,qualifications:skillRequirements.map(r=>(r.skillLabel||r.skillCode)+' · '+r.level).join('; '),missingSkillCodes:(value.missingSkillCodes||[]).filter((code:string)=>skillRequirements.some(r=>r.skillCode===code))})}/>
             {!!value.qualifications&&!value.skillRequirements?.length&&<p className='text-xs text-soft'>Previous competency text: {value.qualifications}. Select matching catalogue skills above.</p>}
-            <div className='grid grid-cols-3 gap-2'>
+            <div className='grid grid-cols-1 gap-3 sm:grid-cols-3'>
                 {num('personnel', 'People')}
                 {num('durationHours', 'Hours', 0.25)}
                 {num('quantity', 'Quantity')}
@@ -636,7 +601,7 @@ export function ServiceEditor({ code, value, hierarchy, urls, onChange, onUrls,s
             {section===5&&<div className='space-y-3'>{text('acceptanceCriteria', 'Acceptance criteria', 2, 'How you will check the work, e.g. no-load current within 5% of nameplate, IR above 100 MΩ')}
             <p className='rounded-lg bg-page p-2 text-xs text-soft'>Supplier sourcing, execution dates and commercial estimates are handled during planning.{value.expectedCost!=null?' Previously recorded indicative cost: '+Number(value.expectedCost).toLocaleString():''}</p>
             <Attachments code={code} files={value.attachments || []} urls={urls} onChange={(files, u) => { set({ attachments: files }); onUrls(u); }} /></div>}
-            <div className='flex flex-wrap justify-between gap-2'><Button variant='secondary' disabled={section===0} onClick={()=>setSection(i=>i-1)}>Previous</Button>{section<sections.length-1&&<Button variant='secondary' onClick={()=>setSection(i=>i+1)}>Next · {sections[section+1]}</Button>}</div>
+            <div className='flex flex-wrap justify-between gap-2'><Button variant='secondary' disabled={section===0} onClick={()=>setSection(i=>i-1)}>Previous</Button>{section<sections.length-1&&<Button onClick={()=>setSection(i=>i+1)}>Next · {sections[section+1]}</Button>}</div>
         </div>
     );
 }
@@ -689,7 +654,7 @@ export function FulfilmentTrack({ procurement, onOpen }: { procurement: Any | nu
                 </button>
                 <span className={`text-xs ${closed ? 'text-red-500' : 'text-soft'}`}>{procurement.stageLabel}</span>
             </div>
-            <ol className='grid grid-cols-5 gap-1' aria-label='Procurement progress'>
+            <ol className='grid grid-cols-1 gap-1 sm:grid-cols-5' aria-label='Procurement progress'>
                 {TRACK.map(([key, label, stages]) => {
                     const done = !closed && stages.includes(procurement.stage);
                     return (
@@ -697,7 +662,7 @@ export function FulfilmentTrack({ procurement, onOpen }: { procurement: Any | nu
                             <span className={`flex h-6 w-6 items-center justify-center rounded-full ${done ? 'bg-brand text-onbrand' : 'border border-line text-muted'}`}>
                                 {done ? <CheckCircle2 className='h-3.5 w-3.5' /> : key === 'ordered' ? <Truck className='h-3.5 w-3.5' /> : <span className='h-1.5 w-1.5 rounded-full bg-line' />}
                             </span>
-                            <span className='truncate text-[10px] text-muted sm:text-[11px]'>{key === 'received' && procurement.service ? 'Accepted' : label}</span>
+                            <span className='truncate text-xs text-muted sm:text-xs'>{key === 'received' && procurement.service ? 'Accepted' : label}</span>
                         </li>
                     );
                 })}

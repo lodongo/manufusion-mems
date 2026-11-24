@@ -1,5 +1,5 @@
-import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode } from 'react';
-import { Loader2 } from 'lucide-react';
+import { useId, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type TextareaHTMLAttributes } from 'react';
+import { Loader2, Search } from 'lucide-react';
 
 export function PrimaryButton({
     busy,
@@ -24,7 +24,7 @@ export function PrimaryButton({
 function FieldNote({ id, error, hint }: { id: string; error?: string; hint?: string }) {
     if (error) {
         return (
-            <span id={`${id}-note`} role='alert' className='mt-1 block text-xs text-red-300'>
+            <span id={`${id}-note`} role='alert' className='mt-1 block text-xs text-red-500'>
                 {error}
             </span>
         );
@@ -39,18 +39,70 @@ function FieldNote({ id, error, hint }: { id: string; error?: string; hint?: str
     return null;
 }
 
-export function Field({ label, id, hint, error, ...rest }: InputHTMLAttributes<HTMLInputElement> & { label: string; id: string; hint?: string; error?: string }) {
+/*
+ * MEMS standard form templates. Every form control in the app uses one of these:
+ *   Field (single-line input of any type), TextArea (multi-line), SearchField (list filters)
+ *   and SelectField (searchable dropdown, opens as a bottom sheet on phones).
+ * Shared rules: a label is always present (visually hidden only where the context names it),
+ * 48px touch height, theme tokens for light/dark/brand, hint or error under the control,
+ * `className` positions the whole field in a layout and never restyles the control.
+ */
+type FieldExtras = { label: string; id?: string; hint?: string; error?: string; hideLabel?: boolean };
+const labelClass = (hidden?: boolean) => (hidden ? 'sr-only' : 'mb-1 block text-sm text-soft');
+const controlState = (error?: string) => (error ? 'border-red-500/70 focus:border-red-400' : 'border-line focus:border-brand');
+
+export function Field({ label, id, hint, error, hideLabel, className = '', ...rest }: InputHTMLAttributes<HTMLInputElement> & FieldExtras) {
+    const generated = useId();
+    const fieldId = id || generated;
     return (
-        <label htmlFor={id} className='block'>
-            <span className='mb-1 block text-sm text-soft'>{label}</span>
+        <label htmlFor={fieldId} className={`block min-w-0 ${className}`}>
+            <span className={labelClass(hideLabel)}>{label}</span>
             <input
-                id={id}
+                id={fieldId}
                 aria-invalid={error ? true : undefined}
-                aria-describedby={error || hint ? `${id}-note` : undefined}
+                aria-describedby={error || hint ? `${fieldId}-note` : undefined}
                 {...rest}
-                className={`h-12 w-full rounded-xl border bg-panel px-3 text-base text-ink placeholder:text-muted focus:outline-none disabled:opacity-60 ${error ? 'border-red-500/70 focus:border-red-400' : 'border-line focus:border-brand'}`}
+                className={`h-12 w-full rounded-xl border bg-panel px-3 text-base text-ink placeholder:text-muted focus:outline-none disabled:opacity-60 ${controlState(error)}`}
             />
-            <FieldNote id={id} error={error} hint={hint} />
+            <FieldNote id={fieldId} error={error} hint={hint} />
+        </label>
+    );
+}
+
+export function TextArea({ label, id, hint, error, hideLabel, className = '', rows = 3, ...rest }: TextareaHTMLAttributes<HTMLTextAreaElement> & FieldExtras) {
+    const generated = useId();
+    const fieldId = id || generated;
+    return (
+        <label htmlFor={fieldId} className={`block min-w-0 ${className}`}>
+            <span className={labelClass(hideLabel)}>{label}</span>
+            <textarea
+                id={fieldId}
+                rows={rows}
+                aria-invalid={error ? true : undefined}
+                aria-describedby={error || hint ? `${fieldId}-note` : undefined}
+                {...rest}
+                className={`min-h-[6rem] w-full rounded-xl border bg-panel p-3 text-base text-ink placeholder:text-muted focus:outline-none disabled:opacity-60 ${controlState(error)}`}
+            />
+            <FieldNote id={fieldId} error={error} hint={hint} />
+        </label>
+    );
+}
+
+/** List or table filter: an accessible search box with an icon; the placeholder carries the visible text. */
+export function SearchField({ label, id, className = '', placeholder, ...rest }: Omit<InputHTMLAttributes<HTMLInputElement>, 'type'> & { label: string; id?: string }) {
+    const generated = useId();
+    const fieldId = id || generated;
+    return (
+        <label htmlFor={fieldId} className={`relative block min-w-0 ${className}`}>
+            <span className='sr-only'>{label}</span>
+            <Search aria-hidden className='pointer-events-none absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-muted' />
+            <input
+                id={fieldId}
+                type='search'
+                placeholder={placeholder ?? label}
+                {...rest}
+                className='h-12 w-full rounded-xl border border-line bg-panel pl-10 pr-3 text-base text-ink placeholder:text-muted focus:border-brand focus:outline-none'
+            />
         </label>
     );
 }
