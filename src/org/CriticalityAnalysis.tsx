@@ -134,20 +134,20 @@ export function CriticalityGrid({ cutoff, marks = {}, counts, onPick, compact = 
                                 } ${cell === cutoff ? 'font-bold outline outline-1 outline-amber-400' : ''}`}
                             >
                                 <span className='font-mono'>{cell}</span>
-                                {n !== undefined && <span className='text-[11px] font-semibold text-ink'>{n}</span>}
+                                {n !== undefined && <span className='text-xs font-semibold text-ink'>{n}</span>}
                             </Tag>
                         );
                     })}
                 </div>
             ))}
-            <div className='grid grid-cols-[1.75rem_repeat(4,minmax(0,1fr))] gap-1 text-center text-[11px] text-muted'>
+            <div className='grid grid-cols-[1.75rem_repeat(4,minmax(0,1fr))] gap-1 text-center text-xs text-muted'>
                 <span />
                 <span>1 very slow</span>
                 <span>2 slow</span>
                 <span>3 fast</span>
                 <span>4 very fast</span>
             </div>
-            <p className='text-[11px] text-muted'>Shaded cells are at or below the cutoff {cutoff} (lower class and slower movement): bought on demand when the strategy follows the analysis.</p>
+            <p className='text-xs text-muted'>Shaded cells are at or below the cutoff {cutoff} (lower class and slower movement): bought on demand when the strategy follows the analysis.</p>
         </div>
     );
 }
@@ -348,7 +348,7 @@ export function MaterialCriticality({ materialId, warehouseId, onChanged }: { ma
                     {months.map((m) => (
                         <div key={m.month} className='flex flex-1 flex-col items-center gap-0.5'>
                             <div className={`w-full rounded-t ${m.quantity > 0 ? 'bg-brand' : 'bg-line'}`} style={{ height: `${Math.max(4, (m.quantity / peak) * 64)}px` }} title={`${m.month}: ${m.quantity}`} />
-                            <span className='text-[9px] text-muted'>{m.month.slice(5)}</span>
+                            <span className='text-xs text-muted'>{m.month.slice(5)}</span>
                         </div>
                     ))}
                 </div>
@@ -409,7 +409,7 @@ function Result({ label, value, note }: { label: string; value: ReactNode; note?
         <div className='min-w-0 rounded-xl border border-line bg-panel p-2.5'>
             <p className='truncate text-xs text-muted'>{label}</p>
             <p className='truncate text-base font-semibold text-ink'>{value}</p>
-            {note && <p className='text-[11px] leading-snug text-soft'>{note}</p>}
+            {note && <p className='text-xs leading-snug text-soft'>{note}</p>}
         </div>
     );
 }
@@ -480,7 +480,7 @@ export function CriticalitySummary({ materialId, warehouseId, onOpen }: { materi
                         Factor ratings{a?.score !== undefined && a?.max ? ` · score ${a.score} of ${a.max}` : ''}
                     </p>
                     {rated.map((f) => (
-                        <div key={f.code} className='flex items-center gap-2 text-[11px]'>
+                        <div key={f.code} className='flex items-center gap-2 text-xs'>
                             <span className='w-28 shrink-0 truncate text-soft'>{f.name}</span>
                             <span className='h-2 flex-1 rounded bg-slate-800'>
                                 <span className={`block h-2 rounded ${a!.ratings[f.code] === 3 ? 'bg-red-400' : a!.ratings[f.code] === 2 ? 'bg-amber-400' : 'bg-emerald-400'}`} style={{ width: `${(a!.ratings[f.code] / 3) * 100}%` }} />
@@ -649,9 +649,9 @@ function CriticalitySetupForm() {
                                         <div className='min-w-0 flex-1'>
                                             <p className='truncate text-sm text-ink'>
                                                 {f.name}
-                                                {f.hse && <span className='ml-1 text-[11px] text-amber-300'>HSE</span>}
+                                                {f.hse && <span className='ml-1 text-xs text-amber-300'>HSE</span>}
                                             </p>
-                                            <p className='text-[11px] leading-snug text-muted'>{f.question}</p>
+                                            <p className='text-xs leading-snug text-muted'>{f.question}</p>
                                         </div>
                                         <div className='flex shrink-0 gap-1' aria-label={`Weight of ${f.name}`}>
                                             {([1, 2, 3] as const).map((w) => (
@@ -670,12 +670,12 @@ function CriticalitySetupForm() {
             <Card className='space-y-3'>
                 <p className='text-sm font-semibold text-ink'>Movement</p>
                 <p className='text-xs text-muted'>Months with issues in a year decide the movement, so regular use counts, not one-off buying.</p>
-                <div className='grid grid-cols-3 gap-2'>
+                <div className='grid grid-cols-1 gap-2 sm:grid-cols-3'>
                     <Field id='crit-m4' label='4 very fast ≥' inputMode='numeric' maxLength={2} disabled={!edit} value={Number.isNaN(t.m4) ? '' : String(t.m4)} onChange={(e) => set({ thresholds: { ...t, m4: num(e.target.value) } })} />
                     <Field id='crit-m3' label='3 fast ≥' inputMode='numeric' maxLength={2} disabled={!edit} value={Number.isNaN(t.m3) ? '' : String(t.m3)} onChange={(e) => set({ thresholds: { ...t, m3: num(e.target.value) } })} />
                     <Field id='crit-m2' label='2 slow ≥' inputMode='numeric' maxLength={2} disabled={!edit} value={Number.isNaN(t.m2) ? '' : String(t.m2)} onChange={(e) => set({ thresholds: { ...t, m2: num(e.target.value) } })} />
                 </div>
-                <div className='grid grid-cols-2 gap-2'>
+                <div className='grid grid-cols-1 gap-3 sm:grid-cols-2'>
                     <Field id='crit-history' label='Minimum issue history (months)' inputMode='numeric' maxLength={2} disabled={!edit} value={Number.isNaN(form.minHistoryMonths) ? '' : String(form.minHistoryMonths)} onChange={(e) => set({ minHistoryMonths: num(e.target.value) })} hint='Less history: chosen by hand' />
                     <Field id='crit-review' label='Review every (months)' inputMode='numeric' maxLength={2} disabled={!edit} value={Number.isNaN(form.reviewMonths) ? '' : String(form.reviewMonths)} onChange={(e) => set({ reviewMonths: num(e.target.value) })} hint='Assessments become due again' />
                 </div>

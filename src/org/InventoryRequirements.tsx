@@ -118,7 +118,7 @@ const COLS: Array<Column<Row>> = [
 function Tile({ k, v, tone = 'text-ink' }: { k: string; v: string | number; tone?: string }) {
     return (
         <div className='rounded-xl border border-line p-2'>
-            <p className='text-[11px] text-muted'>{k}</p>
+            <p className='text-xs text-muted'>{k}</p>
             <p className={`text-base font-semibold ${tone}`}>{v}</p>
         </div>
     );
@@ -154,7 +154,7 @@ function PositionCard({ p }: { p: Position }) {
                 <Tile k='In the pipeline' v={p.pipeline.qty} />
                 <Tile k='Projected' v={p.projected} tone={p.projected <= (p.levels.minimum ?? 0) ? 'text-amber-300' : 'text-emerald-400'} />
             </div>
-            <p className='text-[11px] text-muted'>
+            <p className='text-xs text-muted'>
                 Projected = available − short on work orders + pipeline. Pipeline by stage:{' '}
                 {Object.entries(p.byStage).map(([s, q]) => `${s} ${q}`).join(', ') || 'nothing'}.
             </p>
@@ -200,7 +200,7 @@ function PositionCard({ p }: { p: Position }) {
                                         <td className='p-2'>{e.stageLabel}</td>
                                         <td className='p-2'>
                                             {e.ref}
-                                            <span className='block text-[10px] text-muted'>
+                                            <span className='block text-xs text-muted'>
                                                 {e.status}
                                                 {e.note ? ` · ${e.note}` : ''}
                                             </span>
@@ -234,7 +234,7 @@ function PositionCard({ p }: { p: Position }) {
                                     <tr key={i} className='border-t border-line text-ink'>
                                         <td className='p-2'>
                                             {r.workOrderId}
-                                            <span className='block text-[10px] text-muted'>{r.title || r.taskId}</span>
+                                            <span className='block text-xs text-muted'>{r.title || r.taskId}</span>
                                         </td>
                                         <td className='p-2 text-right'>
                                             {r.reserved}/{r.required}

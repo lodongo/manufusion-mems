@@ -82,15 +82,15 @@ interface Reminder {
 function Tile({ k, v, tone = 'text-ink', onClick, hint }: { k: string; v: ReactNode; tone?: string; onClick?: () => void; hint?: string }) {
     const body = (
         <>
-            <p className='text-[11px] text-muted'>{k}</p>
+            <p className='text-xs text-muted'>{k}</p>
             <p className={`text-lg font-semibold ${tone}`}>{v}</p>
-            {hint && <p className='text-[10px] text-muted'>{hint}</p>}
+            {hint && <p className='text-xs text-muted'>{hint}</p>}
         </>
     );
     return onClick ? (
         <button type='button' onClick={onClick} className='flex min-h-16 flex-col items-start rounded-xl border border-line p-2 text-left active:bg-page'>
             {body}
-            <span className='mt-auto flex items-center text-[10px] text-brand'>
+            <span className='mt-auto flex items-center text-xs text-brand'>
                 Details <ChevronRight className='h-3 w-3' />
             </span>
         </button>
@@ -194,7 +194,7 @@ function Reminders({ requirementId, reminders, onChange }: { requirementId: stri
                     </button>
                 </div>
             ))}
-            <div className='grid grid-cols-2 gap-2'>
+            <div className='grid grid-cols-1 gap-3 sm:grid-cols-2'>
                 <Field id='rm-date' label='Remind me on' type='date' min={today} value={date} onChange={(e) => setDate(e.target.value)} />
                 <Field id='rm-note' label='What to follow up' value={note} maxLength={200} onChange={(e) => setNote(e.target.value)} />
             </div>
@@ -237,7 +237,7 @@ export function RequirementTrace({ id, view }: { id: string; view: 'trace' | 'da
                 </div>
                 <Card title='Quantities'>
                     <Bars rows={[{ label: 'Requested', value: t.requested }, { label: 'Ordered', value: t.ordered }, { label: 'Received', value: t.received }, { label: 'Outstanding', value: t.outstanding }]} color='bg-emerald-500' />
-                    <p className='text-[11px] text-muted'>
+                    <p className='text-xs text-muted'>
                         {t.unit} · supplier {t.vendor || '-'} · orders {t.orders.join(', ') || '-'} · lead time {t.supplierLead || '-'} d
                     </p>
                 </Card>
@@ -499,7 +499,7 @@ export function RequirementsDashboard() {
                                     <div className='w-3 rounded-t bg-sky-500' style={{ height: `${(t.internal / trendMax) * 100}%` }} title={`Internal ${t.internal}`} />
                                     <div className='w-3 rounded-t bg-amber-500' style={{ height: `${(t.external / trendMax) * 100}%` }} title={`External ${t.external}`} />
                                 </div>
-                                <span className='text-[10px] text-muted'>{t.month.slice(2)}</span>
+                                <span className='text-xs text-muted'>{t.month.slice(2)}</span>
                             </div>
                         ))}
                     </div>
@@ -549,7 +549,7 @@ export function RequirementsDashboard() {
                     )}
                 </DetailSheet>
             )}
-            <p className='text-[11px] text-muted'>
+            <p className='text-xs text-muted'>
                 Internal: from the requirement being raised until the order goes to the supplier. External: from the order going out until delivered in full. Delays: internal against need date − supplier lead time; external against the expected delivery. <Badge tone='brand'>Tap any tile for details</Badge>
             </p>
         </div>

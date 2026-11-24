@@ -4,7 +4,8 @@ import { callBackend } from '../lib/backend';
 import { Alert, Field, SelectField } from '../components/ui';
 import { Badge, Button, Spinner, useLoad } from '../admin/kit';
 import { fmtDate } from '../admin/format';
-import { Segmented, messageOf, useConfirm } from '../components/screen';
+import { messageOf, useConfirm } from '../components/screen';
+import StepNav from '../components/StepNav';
 
 // Buying rules and the chart of authority tiers, shown as tabs of Procurement setup.
 // Buying rules: may materials be bought for any cost center, or only for warehouses that hold that material type?
@@ -14,13 +15,16 @@ import { Segmented, messageOf, useConfirm } from '../components/screen';
 // ----- Buying rules -----
 
 interface PolicyOut {
-    policy: { directToCostCenters: boolean; version: number; updatedAt: string };
+    policy: { directToCostCenters: boolean; requirementApproval: { mode: 'approve' | 'review_below'; threshold: number }; version: number; updatedAt: string };
     canManage: boolean;
+    canManageApproval: boolean;
 }
 
 export function BuyingRules() {
     const { data, error, loading, reload } = useLoad(() => callBackend<PolicyOut>('/api/org/procurement/policy/get'));
     const [choice, setChoice] = useState<boolean | null>(null);
+    const [mode, setMode] = useState<'approve' | 'review_below' | null>(null);
+    const [limit, setLimit] = useState<string | null>(null);
     const [notice, setNotice] = useState('');
     const confirm = useConfirm();
 
@@ -28,6 +32,17 @@ export function BuyingRules() {
     if (error || !data) return <Alert tone='error'>{error || 'Could not load the buying rules.'}</Alert>;
     const current = data.policy.directToCostCenters;
     const value = choice ?? current;
+    const rule = data.policy.requirementApproval;
+    const modeValue = mode ?? rule.mode;
+    const limitText = limit ?? (rule.threshold ? String(rule.threshold) : '');
+    const limitNum = Number(limitText);
+    const limitError = modeValue === 'review_below' && (!limitText.trim() || !Number.isFinite(limitNum) || limitNum <= 0) ? 'Enter an amount greater than zero.' : '';
+    const ruleChanged = modeValue !== rule.mode || (modeValue === 'review_below' && limitNum !== rule.threshold);
+    const changed = value !== current || ruleChanged;
+    const approvalOptions = [
+        { v: 'approve' as const, title: 'Manager approves every requirement', text: 'Each purchase requirement waits for the requester\'s immediate manager before procurement sees it. This is the strictest setting and the default.' },
+        { v: 'review_below' as const, title: 'Manager reviews small budgeted requirements', text: 'A requirement whose items all have a budget, totalling no more than the limit, goes straight to procurement. The manager still sees it and can return it until a buyer acknowledges it. Larger or unbudgeted requirements still need approval. Purchase orders are always approved under the chart of authority.' },
+    ];
     const options = [
         { v: false, title: 'Only for warehouses', text: 'Materials can only be bought for a warehouse (a cost center of type Inventory or Warehousing) that holds that material type. People see only the warehouses whose material categories match the item they are buying.' },
         { v: true, title: 'For any cost center', text: 'Materials can be bought directly for any cost center the person has access to, as well as for warehouses. Use this where departments consume what they buy.' },
@@ -37,14 +52,21 @@ export function BuyingRules() {
         confirm.ask(
             {
                 title: 'Change the buying rules',
-                message: `From now on, materials can be bought ${value ? 'for any cost center' : 'only for warehouses that hold the material type'}. Items already saved are not changed, but they are checked again when edited. This creates version ${data.policy.version + 1}.`,
+                message: `From now on, materials can be bought ${value ? 'for any cost center' : 'only for warehouses that hold the material type'}, and ${modeValue === 'approve' ? 'every purchase requirement needs the immediate manager\'s approval' : `budgeted requirements up to ${limitNum.toLocaleString()} go to procurement under manager review`}. Items already saved are not changed, but they are checked again when edited. This creates version ${data.policy.version + 1}.`,
                 confirmLabel: 'Save',
                 reason: { label: 'Reason for this change', minLength: 10, placeholder: 'For example: departments now buy consumables directly' },
             },
             async (reason) => {
-                await callBackend('/api/org/procurement/policy/save', { directToCostCenters: value, expectedVersion: data.policy.version, reason });
+                await callBackend('/api/org/procurement/policy/save', {
+                    directToCostCenters: value,
+                    ...(ruleChanged ? { requirementApproval: { mode: modeValue, threshold: modeValue === 'review_below' ? limitNum : 0 } } : {}),
+                    expectedVersion: data.policy.version,
+                    reason,
+                });
                 setNotice('Saved. The change is recorded in the audit trail.');
                 setChoice(null);
+                setMode(null);
+                setLimit(null);
                 reload();
             }
         );
@@ -68,6 +90,30 @@ export function BuyingRules() {
                 ))}
                 {data.policy.updatedAt && <p className='text-xs text-muted'>Last changed {fmtDate(data.policy.updatedAt)}.</p>}
             </section>
+            <section className='space-y-3 rounded-2xl border border-line bg-panel p-3'>
+                <h2 className='text-sm font-semibold text-ink'>Manager step for purchase requirements</h2>
+                {approvalOptions.map((o) => (
+                    <label key={o.v} className={`flex min-h-12 items-start gap-3 rounded-xl border p-3 ${modeValue === o.v ? 'border-brand bg-page' : 'border-line'}`}>
+                        <input type='radio' name='requirement-approval' disabled={!data.canManageApproval} checked={modeValue === o.v} onChange={() => setMode(o.v)} className='mt-1 h-5 w-5 shrink-0 accent-emerald-500' />
+                        <span>
+                            <span className='block text-sm font-medium text-ink'>{o.title}</span>
+                            <span className='block text-xs text-muted'>{o.text}</span>
+                        </span>
+                    </label>
+                ))}
+                {modeValue === 'review_below' && (
+                    <Field
+                        label='Review limit (total budget of the requirement)'
+                        inputMode='decimal'
+                        disabled={!data.canManageApproval}
+                        value={limitText}
+                        onChange={(e) => setLimit(e.target.value.replace(/[^0-9.]/g, ''))}
+                        error={limitError || undefined}
+                        hint="Requirements above this, or with any item without a budget, still need the manager's approval."
+                    />
+                )}
+                {!data.canManageApproval && <p className='text-xs text-muted'>Changing this needs both the Procurement Setup Administrator and the chart of authority roles.</p>}
+            </section>
             <section className='space-y-1 rounded-2xl border border-line bg-panel p-3'>
                 <h2 className='text-sm font-semibold text-ink'>How an item can be specified</h2>
                 <ul className='list-disc space-y-1 pl-5 text-xs text-muted'>
@@ -77,7 +123,7 @@ export function BuyingRules() {
                 </ul>
             </section>
             {data.canManage ? (
-                <Button onClick={save} disabled={value === current} className='w-full sm:w-auto'>
+                <Button onClick={save} disabled={!changed || Boolean(limitError) || (ruleChanged && !data.canManageApproval)} className='w-full sm:w-auto'>
                     <Save className='mr-2 h-4 w-4' /> Save changes
                 </Button>
             ) : (
@@ -254,7 +300,7 @@ export function AuthorityTiers() {
         <div className='space-y-3'>
             {notice && <Alert tone='success'>{notice}</Alert>}
             <Alert tone='info'>Amounts are in {cur || 'the organization currency'}. These limits are the organization&apos;s chart of authority. They are applied by quotations, purchase requisitions and purchase orders as those are released.{data.authority.version === 0 ? ' Nothing has been saved yet, so the suggested defaults are shown. Review them and save your own.' : ''}</Alert>
-            <Segmented label='Authority sections' value={section} options={SECTIONS} onChange={setSection} />
+            <StepNav label='Authority sections' noun='Section' steps={SECTIONS.map((x) => ({ key: x.value, label: x.label }))} current={section} onChange={(k) => setSection(k as Section)} />
 
             {section === 'sourcing' && (
                 <>
@@ -274,7 +320,7 @@ export function AuthorityTiers() {
                                     <option key={m.code} value={m.code}>{m.label}</option>
                                 ))}
                             </SelectField>
-                            <div className='grid grid-cols-2 gap-3'>
+                            <div className='grid grid-cols-1 gap-3 sm:grid-cols-2'>
                                 <Field id={`s-q-${i}`} label='Quotes or bids needed' type='number' inputMode='numeric' min='1' max='20' disabled={!canManage} value={String(b.minQuotes)} onChange={(e) => patchSourcing(i, { minQuotes: num(e.target.value) })} />
                                 <Field id={`s-e-${i}`} label='People who evaluate' type='number' inputMode='numeric' min='1' max='20' disabled={!canManage} value={String(b.minEvaluators)} onChange={(e) => patchSourcing(i, { minEvaluators: num(e.target.value) })} />
                             </div>

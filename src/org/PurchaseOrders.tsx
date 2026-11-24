@@ -534,7 +534,7 @@ function ReviseForm({ r, onDone }: { r: RqFull; onDone: (m: string) => void }) {
             {r.lines.map((l) => (
                 <div key={l.no} className='space-y-1 rounded-xl border border-line p-2'>
                     <p className='text-sm text-ink'>{l.no} · {l.itemName || l.requirement}</p>
-                    <div className='grid grid-cols-2 gap-2 sm:grid-cols-4'>
+                    <div className='grid grid-cols-1 sm:grid-cols-4 gap-3 sm:grid-cols-2'>
                         <Field id={`rv-p-${l.no}`} label='Unit price' inputMode='decimal' value={price[l.no] ?? String(l.unitPrice)} onChange={(e) => setPrice({ ...price, [l.no]: e.target.value.replace(/[^\d.]/g, '') })} />
                         <Field id={`rv-d-${l.no}`} label='Discount %' inputMode='decimal' value={disc[l.no] ?? String(l.discountPct)} onChange={(e) => setDisc({ ...disc, [l.no]: e.target.value.replace(/[^\d.]/g, '') })} />
                         <Field id={`rv-q-${l.no}`} label={`Quantity (max ${l.reqQuantity ?? l.quantity})`} inputMode='decimal' value={qty[l.no] ?? String(l.quantity)} onChange={(e) => setQty({ ...qty, [l.no]: e.target.value.replace(/[^\d.]/g, '') })} />

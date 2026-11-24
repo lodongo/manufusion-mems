@@ -8,7 +8,7 @@ import { catalogItemSpec, catalogSummary, catalogTree, searchCatalog, type ItemS
 import { assetClassSpec, assetClassTree } from './assets';
 import { col as structureCol, signedUrl } from './structure';
 import { PROCUREMENT_UNITS } from './procurementUnits';
-import { buyingPolicy } from './procurementPolicy';
+import { buyingPolicy, requirementNeedsApproval } from './procurementPolicy';
 import { covers, deskScope } from './buyerGroups';
 import { checkChosenGl, choosableAccounts } from './finCore';
 import { requireAt } from './scopeGuard';
@@ -133,6 +133,8 @@ const isManagerStrict = (ctx: OrgContext, d: Obj) => str(d.requesterUid) !== ctx
 const isManager = (ctx: OrgContext, d: Obj) => isManagerStrict(ctx, d) || ctx.testMode === true;
 const history = (d: Obj) => objs(d.history);
 const approvedByMe = (ctx: OrgContext, d: Obj) => history(d).some((h) => str(h.by) === ctx.uid && str(h.action) === 'approved');
+/** Sent straight to procurement under the buying rules' review limit; the immediate manager reviews instead of approving. */
+const underReview = (d: Obj) => str(d.status) === 'approved' && str(d.approvalMode) === 'review';
 
 function visible(ctx: OrgContext, d: Obj): boolean {
     const status = str(d.status);
@@ -142,6 +144,7 @@ function visible(ctx: OrgContext, d: Obj): boolean {
     if (status === 'draft') return false; // a draft belongs to its requester alone
     if (can(ctx, 'PRC.req.viewall')) return true;
     if (status === 'pending_approval' && isManager(ctx, d)) return true;
+    if (underReview(d) && isManager(ctx, d)) return true;
     if (approvedByMe(ctx, d) && status !== 'converted') return true;
     if (can(ctx, 'PRC.req.acknowledge') && ['approved', 'acknowledged'].includes(status)) return true;
     return false;
@@ -158,8 +161,8 @@ function flags(ctx: OrgContext, d: Obj) {
         cancel: mine && ['pending_approval', 'returned_user'].includes(status),
         approve: status === 'pending_approval' && isManager(ctx, d),
         reject: status === 'pending_approval' && isManager(ctx, d),
-        returnManager: status === 'pending_approval' && isManager(ctx, d),
-        acknowledge: status === 'approved' && desk && !storesGate(d),
+        returnManager: (status === 'pending_approval' || underReview(d)) && isManager(ctx, d),
+        acknowledge: status === 'approved' && desk && !storesGate(d) && !(underReview(d) && isManagerStrict(ctx, d)),
         returnDesk: ['approved', 'acknowledged'].includes(status) && desk,
     };
 }
@@ -194,7 +197,8 @@ function row(d: Obj, id: string) {
         id,
         title: str(d.title),
         status: str(d.status),
-        statusLabel: STATUS_LABEL[str(d.status)] ?? str(d.status),
+        statusLabel: underReview(d) ? 'With procurement, manager review' : STATUS_LABEL[str(d.status)] ?? str(d.status),
+        approvalMode: str(d.approvalMode) || 'approve',
         requester: str(d.requesterName),
         requesterEmail: str(d.requesterEmail),
         submittedAt: str(d.submittedAt),
@@ -526,7 +530,7 @@ async function load(ctx: OrgContext, body: Obj): Promise<{ id: string; doc: Doc 
     if (!doc || !visible(ctx, doc.data)) throw new HttpError(404, 'Purchase requirement not found.');
     // Someone who reaches a requirement only through procurement authority sees those of their buyer groups.
     const d = doc.data;
-    const entitled = str(d.requesterUid) === ctx.uid || can(ctx, 'PRC.req.viewall') || approvedByMe(ctx, d) || (str(d.status) === 'pending_approval' && isManager(ctx, d));
+    const entitled = str(d.requesterUid) === ctx.uid || can(ctx, 'PRC.req.viewall') || approvedByMe(ctx, d) || ((str(d.status) === 'pending_approval' || underReview(d)) && isManager(ctx, d));
     if (!entitled && !covers(await deskScope(ctx), objs(d.lines))) throw new HttpError(404, 'Purchase requirement not found.');
     return { id, doc };
 }
@@ -1124,6 +1128,7 @@ export const purchaseRequirementRoutes = {
             if (ctx.body.acknowledgeNoQuotes !== true) throw new HttpError(400, 'Confirm that no quotations are included.');
             const approver = await approverFor(ctx, ctx.me);
             if (approver.problem) throw new HttpError(409, approver.problem);
+            const policy = await buyingPolicy(ctx.orgId);
             return mutate(ctx, ctx.body, 'submit', EDITABLE, async (d) => {
                 const lines = objs(d.lines);
                 if (!lines.length) throw new HttpError(400, 'Add at least one item before submitting.');
@@ -1131,15 +1136,20 @@ export const purchaseRequirementRoutes = {
                 if (gaps.length)
                     throw new HttpError(400, `Complete these items first: ${gaps.slice(0, 5).map((x) => `item ${x.no} needs ${x.missing.join(', ')}`).join('; ')}${gaps.length > 5 ? ` and ${gaps.length - 5} more` : ''}.`);
                 const at = nowIso();
+                const routing = { requesterPosition: approver.position, approverPosition: approver.managerPosition, approverTitle: approver.managerTitle, submittedAt: at, policyVersion: policy.version };
+                const event = str(d.status) === 'draft' ? 'submitted' : 'resubmitted';
+                if (!requirementNeedsApproval(policy.requirementApproval, lines.map((l) => numOf(l.budget)))) {
+                    // Within the review limit of the buying rules: straight to procurement, the manager reviews and may return it.
+                    return {
+                        patch: { ...routing, status: 'approved', approvalMode: 'review', approvedBy: '', approvedAt: at },
+                        event,
+                        note: `Budgeted within the review limit of ${policy.requirementApproval.threshold} (buying rules version ${policy.version}); ${approver.managerTitle} reviews it`,
+                        label: `Submitted with ${lines.length} item(s) to procurement under manager review. Reviewer: ${approver.managerTitle}`,
+                    };
+                }
                 return {
-                    patch: {
-                        status: 'pending_approval',
-                        requesterPosition: approver.position,
-                        approverPosition: approver.managerPosition,
-                        approverTitle: approver.managerTitle,
-                        submittedAt: at,
-                    },
-                    event: str(d.status) === 'draft' ? 'submitted' : 'resubmitted',
+                    patch: { ...routing, status: 'pending_approval', approvalMode: 'approve' },
+                    event,
                     label: `Submitted with ${lines.length} item(s). Approver: ${approver.managerTitle}`,
                 };
             });
@@ -1166,7 +1176,7 @@ export const purchaseRequirementRoutes = {
             const views: Record<string, Doc[]> = {
                 mine: mine.filter((r) => OPEN_STATUSES.includes(str(r.data.status))),
                 all: mine,
-                approvals: others.filter((r) => str(r.data.status) === 'pending_approval' && isManager(ctx, r.data)),
+                approvals: others.filter((r) => (str(r.data.status) === 'pending_approval' || underReview(r.data)) && isManager(ctx, r.data)),
                 approved: others.filter((r) => approvedByMe(ctx, r.data) && str(r.data.status) !== 'converted' && str(r.data.requesterUid) !== ctx.uid),
                 desk: can(ctx, 'PRC.req.acknowledge') ? others.filter((r) => ['approved', 'acknowledged'].includes(str(r.data.status)) && str(r.data.requesterUid) !== ctx.uid && covers(scope, objs(r.data.lines))) : [],
                 org: can(ctx, 'PRC.req.viewall') ? others : [],
@@ -1226,7 +1236,7 @@ export const purchaseRequirementRoutes = {
             transition(ctx, ctx.body, 'approved', (d) => {
                 if (str(d.status) !== 'pending_approval') throw new HttpError(409, 'This requirement is not waiting for approval.');
                 if (!isManagerStrict(ctx, d) && !bypass(ctx, 'prc.requirement.manager_approval')) throw new HttpError(403, 'Only the immediate manager of the requester can approve this requirement.');
-                return { patch: { status: 'approved', approvedBy: ctx.uid, approvedAt: nowIso() }, note: '', label: 'Approved by the immediate manager' };
+                return { patch: { status: 'approved', approvalMode: 'approve', approvedBy: ctx.uid, approvedAt: nowIso() }, note: '', label: 'Approved by the immediate manager' };
             })
         ),
     ],
@@ -1252,15 +1262,16 @@ export const purchaseRequirementRoutes = {
             return transition(ctx, ctx.body, 'returned', (d) => {
                 const status = str(d.status);
                 const f = flags(ctx, d);
-                if (status === 'pending_approval') {
+                if (status === 'pending_approval' || (underReview(d) && isManagerStrict(ctx, d))) {
                     if (!f.returnManager) throw new HttpError(403, 'Only the immediate manager can return a requirement that is waiting for approval.');
                     if (!isManagerStrict(ctx, d)) bypass(ctx, 'prc.requirement.manager_approval');
                     if (to !== 'user') throw new HttpError(400, 'A manager returns a requirement to the requester.');
-                    return { patch: { status: 'returned_user', returnedBy: 'manager', returnReason: reason }, note: `To requester: ${reason}`, label: 'Returned by the manager' };
+                    const review = status !== 'pending_approval';
+                    return { patch: { status: 'returned_user', returnedBy: 'manager', returnReason: reason, ...(review ? { approvedAt: '' } : {}) }, note: `To requester: ${reason}`, label: review ? 'Returned by the manager on review' : 'Returned by the manager' };
                 }
                 if (!f.returnDesk) throw new HttpError(403, 'Only procurement personnel (who did not approve it) can return this requirement.');
                 if (str(d.requesterUid) === ctx.uid || approvedByMe(ctx, d)) bypass(ctx, 'prc.requirement.desk_independence');
-                if (to === 'manager') return { patch: { status: 'pending_approval', approvedBy: '', approvedAt: '', returnedBy: 'procurement', returnReason: reason }, note: `To manager: ${reason}`, label: 'Returned by procurement to the manager' };
+                if (to === 'manager') return { patch: { status: 'pending_approval', approvalMode: 'approve', approvedBy: '', approvedAt: '', returnedBy: 'procurement', returnReason: reason }, note: `To manager: ${reason}`, label: 'Returned by procurement to the manager' };
                 return { patch: { status: 'returned_user', approvedBy: '', approvedAt: '', returnedBy: 'procurement', returnReason: reason }, note: `To requester: ${reason}`, label: 'Returned by procurement to the requester' };
             });
         }),
@@ -1275,6 +1286,7 @@ export const purchaseRequirementRoutes = {
                 if (!covers(scope, objs(d.lines))) throw new HttpError(403, 'This requirement belongs to another buyer group.');
                 if (str(d.requesterUid) === ctx.uid && !bypass(ctx, 'prc.requirement.desk_independence')) throw new HttpError(403, 'You cannot acknowledge your own requirement.');
                 if (approvedByMe(ctx, d) && !bypass(ctx, 'prc.requirement.desk_independence')) throw new HttpError(403, 'You approved this requirement, so you cannot also acknowledge it.');
+                if (underReview(d) && isManagerStrict(ctx, d) && !bypass(ctx, 'prc.requirement.desk_independence')) throw new HttpError(403, 'You are the reviewing manager of this requirement, so another buyer must acknowledge it.');
                 // Stock for a warehouse goes to procurement only after the stores have reviewed and released it.
                 const gate = storesGate(d);
                 if (gate && !bypass(ctx, 'prc.requirement.stores_release')) throw new HttpError(409, gate);

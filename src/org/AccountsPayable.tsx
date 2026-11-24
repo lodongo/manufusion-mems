@@ -159,7 +159,7 @@ function InvoiceDetail({ id }: { id: string }) {
                 <h2 className='text-sm font-semibold text-ink'>Chart of authority</h2>
                 <Steps steps={d.steps} />
                 {d.status === 'pending_approval' && !d.can.decide && d.can.why && <p className='text-xs text-muted'>{d.can.why}</p>}
-                <p className='text-[11px] text-muted'>Final approval posts Dr GR/IR, Dr input VAT, the charges and price variance, Cr supplier payables.</p>
+                <p className='text-xs text-muted'>Final approval posts Dr GR/IR, Dr input VAT, the charges and price variance, Cr supplier payables.</p>
             </section>
             <div className='flex flex-wrap gap-2'>
                 {d.can.decide && (
@@ -525,7 +525,7 @@ function Dashboard() {
                     ['Payments in approval', data.paymentsPending, 'text-amber-300'],
                 ].map(([k, v, c]) => (
                     <div key={String(k)} className='rounded-xl border border-line p-3'>
-                        <p className='text-[11px] text-muted'>{k}</p>
+                        <p className='text-xs text-muted'>{k}</p>
                         <p className={`text-lg font-semibold ${c}`}>{v}</p>
                     </div>
                 ))}

@@ -151,7 +151,7 @@ function InvoiceForm({ po, receipt, onDone, onClose }: { po: DPo; receipt: DRece
                         </li>
                     ))}
                 </ul>
-                <p className='text-[11px] text-muted'>Nothing is posted to payables until the last chart-of-authority approval.</p>
+                <p className='text-xs text-muted'>Nothing is posted to payables until the last chart-of-authority approval.</p>
                 <Button variant='secondary' onClick={() => onDone(`Invoice ${result.id} recorded.`)}>
                     Done
                 </Button>
@@ -413,7 +413,7 @@ function ReceiptEvent({ po, r, onDone }: { po: DPo; r: DReceipt; onDone: (m: str
                             </div>
                         )
                     )}
-                    {po.ap.canAdjust && liveInv && !['paid', 'part_paid'].includes(liveInv.status) && <p className='text-[11px] text-muted'>To reverse or re-post, the invoice must first be withdrawn or reversed by accounts payable.</p>}
+                    {po.ap.canAdjust && liveInv && !['paid', 'part_paid'].includes(liveInv.status) && <p className='text-xs text-muted'>To reverse or re-post, the invoice must first be withdrawn or reversed by accounts payable.</p>}
                 </div>
             )}
         </li>
@@ -488,7 +488,7 @@ export function DeliveryDashboard({ po }: { po: DPo }) {
     const days = po.approvedAt && firstAt ? Math.max(0, Math.round((Date.parse(firstAt) - Date.parse(po.approvedAt.slice(0, 10))) / 86_400_000)) : null;
     const tile = (k: string, v: ReactNode, tone = 'text-ink') => (
         <div className='rounded-xl border border-line p-3'>
-            <p className='text-[11px] text-muted'>{k}</p>
+            <p className='text-xs text-muted'>{k}</p>
             <p className={`text-lg font-semibold ${tone}`}>{v}</p>
         </div>
     );
@@ -519,7 +519,7 @@ export function DeliveryDashboard({ po }: { po: DPo }) {
                         </li>
                     ))}
                 </ul>
-                <p className='text-[11px] text-muted'>{onTime} line(s) complete.</p>
+                <p className='text-xs text-muted'>{onTime} line(s) complete.</p>
             </Section>
             <Section title='Receipts and invoices'>
                 <ul className='space-y-1 text-xs'>
