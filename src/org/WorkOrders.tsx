@@ -7,6 +7,8 @@ import { workspaceNavigate as navigate } from '../lib/route';
 import { Alert, Field, SelectField } from '../components/ui';
 import MntTaskAssessment from './MntTaskAssessment';
 import MntWorkOrder from './MntWorkOrder';
+import { PlanningWindows, ReadinessReport } from './MntReadinessBoard';
+import { Segmented } from '../components/screen';
 import RichTable, { type Column } from '../components/RichTable';
 import { restoredTableTab } from '../lib/tableTabs';
 import { Badge, Button, Card, Spinner, TextArea, useLoad } from '../admin/kit';
@@ -32,6 +34,7 @@ interface Row extends MaintenanceRouting {
     status: string;
     statusLabel: string;
     workflowCode?:string;workflowStatusCode?:string;workflowSince?:string;workflowReason?:string;
+    readinessPct?:number|null;readinessPhase?:string;readinessDelays?:number;
     origin: string;
     executionMode?:string;
     wrCode: string;
@@ -165,9 +168,10 @@ export default function WorkOrders({ id, sub }: { id?: string; sub?: string }) {
 // ---------------------------------------------------------------------------
 
 function OrderList({ setup }: { setup: MntSetup }) {
-    type Tab = 'assessment' | 'planning' | 'execution' | 'verification' | 'mine' | 'closed' | 'all';
-    const [tab, setTab] = useState<Tab>(() => restoredTableTab<Tab>(['assessment', 'planning', 'execution', 'verification', 'mine', 'closed', 'all'], 'assessment'));
-    const { data, error, loading, reload } = useLoad(() => callBackend<{ rows: Row[];testDeletionEnabled?:boolean;legacyAssessmentCount?:number }>('/api/org/mnt/wo/list', { view: tab }), [tab]);
+    type Tab = 'assessment' | 'planning' | 'readiness' | 'windows' | 'execution' | 'verification' | 'mine' | 'closed' | 'all';
+    const [tab, setTab] = useState<Tab>(() => restoredTableTab<Tab>(['assessment', 'planning', 'readiness', 'windows', 'execution', 'verification', 'mine', 'closed', 'all'], 'assessment'));
+    const listTab = tab !== 'readiness' && tab !== 'windows';
+    const { data, error, loading, reload } = useLoad(() => (listTab ? callBackend<{ rows: Row[];testDeletionEnabled?:boolean;legacyAssessmentCount?:number }>('/api/org/mnt/wo/list', { view: tab }) : Promise.resolve(null)), [tab]);
     const cur = setup.currency;
     const columns = useMemo<Array<Column<Row>>>(
         () => [
@@ -179,6 +183,7 @@ function OrderList({ setup }: { setup: MntSetup }) {
             {key:'workflowCode',label:'State code',value:r=>r.workflowStatusCode||r.workflowCode||''},
             {key:'workflowSince',label:'State since',value:r=>r.workflowSince||'',render:r=>r.workflowSince?new Date(r.workflowSince).toLocaleString():'—'},
             {key:'workflowReason',label:'Current blocker',value:r=>r.workflowReason||'',hidden:true},
+            {key:'readiness',label:'Readiness',type:'number',value:r=>r.readinessPct??null,render:r=>r.readinessPct==null?'—':<span className='flex items-center gap-2 whitespace-nowrap'><span className='h-1.5 w-12 overflow-hidden rounded-full bg-line'><span className='block h-full bg-brand' style={{width:`${r.readinessPct}%`}}/></span>{r.readinessPct}%{r.readinessDelays?<span className='text-red-500'> · {r.readinessDelays} late</span>:null}</span>},
             { key: 'status', label: 'Status', value: (r) => r.statusLabel, render: (r) => <Badge tone={TONE[r.status] ?? 'muted'}>{r.statusLabel}</Badge> },
             { key: 'priority', label: 'Priority', value: (r) => r.priorityLabel },
             {
@@ -218,6 +223,8 @@ function OrderList({ setup }: { setup: MntSetup }) {
     const tabs: Array<[Tab, string]> = [
         ['assessment', 'Assessment'],
         ['planning', 'Planning'],
+        ['readiness', 'Readiness'],
+        ['windows', 'Planning windows'],
         ['execution', 'Execution'],
         ['verification', 'Verify & close'],
         ['mine', 'Mine'],
@@ -226,17 +233,13 @@ function OrderList({ setup }: { setup: MntSetup }) {
     ];
     return (
         <div className='space-y-3'>
-            <div className='flex gap-1 overflow-x-auto rounded-xl border border-slate-800 p-1'>
-                {tabs.map(([k, label]) => (
-                    <button key={k} type='button' onClick={() => setTab(k)} className={`h-11 shrink-0 rounded-lg px-3 text-sm ${tab === k ? 'bg-emerald-500 text-onbrand' : 'text-slate-300'}`}>
-                        {label}
-                    </button>
-                ))}
-            </div>
+            <Segmented label='Work order views' value={tab} onChange={setTab} options={tabs.map(([value, label]) => ({ value, label }))} />
+            {tab === 'readiness' && <ReadinessReport />}
+            {tab === 'windows' && <PlanningWindows />}
             {!!data?.legacyAssessmentCount&&<Button variant="secondary" onClick={()=>navigate('organization_admin/work_orders/legacy_assessments')}>Legacy assessments ({data.legacyAssessmentCount})</Button>}
             {data?.testDeletionEnabled&&<MntTestDeletion kind="order" onDeleted={reload}/>}
             {error && <Alert tone='error'>{error}</Alert>}
-            {loading && !data ? (
+            {!listTab ? null : loading && !data ? (
                 <Spinner />
             ) : (
                 <RichTable

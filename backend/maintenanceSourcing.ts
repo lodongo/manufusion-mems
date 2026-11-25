@@ -366,7 +366,10 @@ async function receivedByRequirement(orgId: string, ids: string[]) {
                 if (objs(po.data.receipts).some((r) => str(r.status) === 'accepted')) cur.accepted = true;
             }
             if (!cur.orders.some((o) => o.id === po.id))
-                cur.orders.push({ id: po.id, number: str(po.data.number) || po.id, status: str(po.data.status), lineNo: Number(l.no) || 0, vendorName: str(po.data.vendorName), live });
+                cur.orders.push({ id: po.id, number: str(po.data.number) || po.id, status: str(po.data.status), lineNo: Number(l.no) || 0, vendorName: str(po.data.vendorName), live,
+                    createdAt: str(po.data.createdAt), approvedAt: str(po.data.approvedAt) || str(po.data.releasedAt), ackAt: str(isObj(po.data.ack) ? po.data.ack.at : ''),
+                    firstReceiptAt: objs(po.data.receipts).map((r) => str(r.at) || str(r.receivedAt) || str(r.date)).filter(Boolean).sort()[0] ?? '',
+                    lastReceiptAt: objs(po.data.receipts).map((r) => str(r.at) || str(r.receivedAt) || str(r.date)).filter(Boolean).sort().pop() ?? '' });
             out.set(id, cur);
         }
     }
@@ -426,8 +429,8 @@ export async function procurementTrace(orgId: string, ids: string[]) {
         const status = str(req.data.status);
         const qty = objs(req.data.lines).reduce((n, l) => n + (Number(l.quantity) || 0), 0);
         const service = objs(req.data.lines).some((l) => str(l.type) === 'service');
-        const q = cases.filter((c) => str(c.data.requirementId) === id && str(c.data.status) !== 'cancelled').map((c) => ({ id: c.id, number: str(c.data.number) || c.id, status: str(c.data.status) }));
-        const rq = requisitions.filter((c) => str(c.data.requirementId) === id && str(c.data.status) !== 'cancelled').map((c) => ({ id: c.id, number: str(c.data.number) || c.id, status: str(c.data.status) }));
+        const q = cases.filter((c) => str(c.data.requirementId) === id && str(c.data.status) !== 'cancelled').map((c) => ({ id: c.id, number: str(c.data.number) || c.id, status: str(c.data.status), createdAt: str(c.data.createdAt), closedAt: str(c.data.awardedAt) || str(c.data.signedAt) || str(c.data.closedAt) }));
+        const rq = requisitions.filter((c) => str(c.data.requirementId) === id && str(c.data.status) !== 'cancelled').map((c) => ({ id: c.id, number: str(c.data.number) || c.id, status: str(c.data.status), createdAt: str(c.data.createdAt), approvedAt: str(c.data.approvedAt) }));
         const o = orders.get(id);
         let stage = 'procurement';
         // Evidence further down the chain (a placed order, a receipt) takes precedence over the requirement status.
@@ -439,6 +442,7 @@ export async function procurementTrace(orgId: string, ids: string[]) {
         else if (q.length) stage = 'sourcing';
         out.set(id, {
             requirementId: id, status, stage, stageLabel: STAGE_LABEL[stage], quantity: qty, ordered: o?.ordered ?? 0, received: o?.received ?? 0,
+            createdAt: str(req.data.createdAt), submittedAt: str(req.data.submittedAt), approvedAt: str(req.data.approvedAt), acknowledgedAt: str(req.data.acknowledgedAt),
             quotations: q, requisitions: rq, orders: o?.orders ?? [], open: !DEAD.includes(status), service,
         });
     }

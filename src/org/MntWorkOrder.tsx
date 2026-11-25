@@ -18,6 +18,7 @@ import { FulfilmentTrack, ResourceStatus, SOURCE_LABEL, serviceJustificationLabe
 import { useFullScreen,MaintenanceResponsibility,ChoicePicker,type MntLists,type MntSetup } from './mntShared';
 import MntGateHint from './MntGateHint';
 import MntReadiness from './MntReadiness';
+import { ReadinessOverview } from './MntReadinessBoard';
 
 export type MntData = Record<string, any>;
 export const mntInput = 'mt-1 w-full rounded-xl border border-line bg-panel p-3 text-base text-ink';
@@ -846,6 +847,9 @@ export default function MntWorkOrder({ code }: { code: string }) {
                         </Button>
                     )}
             </div>
+            {data.readinessModel && (
+                <ReadinessOverview code={code} model={data.readinessModel} library={data.manualLibrary || {}} canPlan={!!can.plan} windowId={wo.planningWindowId || ''} onChanged={reload} />
+            )}
             {tasks.length > 0 && (wo.assessmentReady??wo.assessmentReviewCurrent) && data.checklist && (
                 <MntReadiness code={code} wo={wo} cycle={data.maintenanceCycle} checklist={data.checklist} canPlan={!!can.plan} testModeOverride={!!data.testModeOverride} currency={data.currency || ''} onDone={reload} />
             )}

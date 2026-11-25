@@ -291,7 +291,17 @@ export const forecastingRoutes = {
                 const c = str(m.data.categoryCode).toUpperCase();
                 if (c) counts.set(c, (counts.get(c) ?? 0) + 1);
             }
-            const categories = [...counts.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([code, materials]) => ({ code, materials }));
+            // Every material category the organization adopted in its Materials Master (Procurement setup), by name, plus any
+            // category still used by an approved material; names come from the adoption, else the published master.
+            const [{ adopted, masterSummary }] = await Promise.all([import('./procurementSetup')]);
+            const [adoption, master] = await Promise.all([adopted(ctx.orgId, 'material').catch(() => null), masterSummary('material').catch(() => null)]);
+            const names = new Map<string, string>();
+            for (const c of master?.categories ?? []) names.set(str(c.code).toUpperCase(), str(c.name));
+            for (const c of adoption?.categories ?? []) if (str(c.name)) names.set(str(c.code).toUpperCase(), str(c.name));
+            const codes = new Set<string>([...(adoption?.categories ?? []).map((c) => str(c.code).toUpperCase()), ...counts.keys()]);
+            const categories = [...codes].filter(Boolean)
+                .map((code) => ({ code, name: names.get(code) || code, materials: counts.get(code) ?? 0, adopted: (adoption?.categories ?? []).some((c) => str(c.code).toUpperCase() === code) }))
+                .sort((a, b) => a.name.localeCompare(b.name));
             return { ...publicSetup(setup, version, saved), canEdit: holdsAnywhere(ctx, [FC.setup]), canEvaluate: holdsAnywhere(ctx, [FC.edit, FC.setup]), categories };
         }),
     ],

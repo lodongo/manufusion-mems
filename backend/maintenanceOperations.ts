@@ -46,6 +46,8 @@ import { DEFAULT_MODULE_METADATA } from './moduleDefaults';
 import { storage } from './platform/sdk';
 import { signedUrl } from './structure';
 import { budgetStatus, costApprovalOf, estimateOf, periodOf, submitCost } from './maintenancePlanning';
+import { MANUAL_LIBRARY, readinessModel, readinessSnapshot } from './maintenanceReadinessModel';
+import { readinessActions } from './maintenanceReadiness';
 import {
     closurePrerequisites,
     isRequestClosureOrder,
@@ -439,6 +441,18 @@ export async function syncWorkOrderState(ctx:OrgContext,doc:Doc,source='refresh'
     facts.approved=maintenanceAssessmentReady(d,token);
     if(facts.approved){const ready=await readiness(ctx,wo),check=await planChecklist(ctx,wo,ready);facts.items=ready.items;facts.checklist=check.items;facts.costStatus=check.cost.status;}
   }
+  // Readiness model: every dimension side by side, kept as a snapshot for the prioritised readiness report.
+  let readinessPatch:Obj={};
+  if(!isRequestClosureOrder(d)&&['planning','plan_ready','released','scheduled'].includes(status)){
+    try{
+      const win=str(d.planningWindowId)?await getDoc(root(ctx)+'/mnt_planning_windows/'+identifier(d.planningWindowId)):null;
+      const model=readinessModel({wo:d,items:facts.items??[],checklist:facts.checklist??[],costStatus:facts.costStatus,assessmentApproved:!!facts.approved,window:win?{id:win.id,...win.data}:null,now:nowIso()});
+      const snap=readinessSnapshot(model),{asOf:_a,...cmp}=snap,{asOf:_b,...was}=object(d.readinessSnapshot) as Obj;void _a;void _b;
+      if(stableJson(cmp)!==stableJson(was))readinessPatch.readinessSnapshot=snap;
+      if(model.fullyReady&&!str(d.readinessAchievedAt))readinessPatch.readinessAchievedAt=nowIso();
+      if(!model.fullyReady&&str(d.readinessAchievedAt))Object.assign(readinessPatch,{readinessAchievedAt:'',readinessLostAt:nowIso()});
+    }catch(e){console.error('Readiness snapshot failed',wo.id,e);}
+  }
   if(!isRequestClosureOrder(d)&&['scheduled','in_progress'].includes(status)){
     const pending=tasksOf(wo).filter(t=>object(object(d.taskExecution)[str(t.id)]).status!=='completed');
     facts.windowStatus='ready';
@@ -451,8 +465,8 @@ export async function syncWorkOrderState(ctx:OrgContext,doc:Doc,source='refresh'
         try{await ensureClosureResources(ctx,wo);}catch(e){if(!(e instanceof HttpError))throw e;const reason=e.message;facts.closureResource={code:/service report|service feedback/i.test(reason)?'WO185':/service acceptance|service receipt/i.test(reason)?'WO187':/reconcil/i.test(reason)?'WO180':'WO186',reason};}
     }
   }
-  const state=stateOf(d,facts),patch=transitionPatch(d,state,nowIso(),source==='refresh'?'SYSTEM':ctx.uid,source==='refresh'?'System observation':name(ctx),source);
-  if(d.workflowCode===patch.workflowCode&&d.workflowReason===patch.workflowReason&&d.workflowLabel===patch.workflowLabel&&d.workflowSince===patch.workflowSince&&(d.workflowStatusCode===patch.workflowStatusCode||['closed','cancelled'].includes(status)))return wo;
+  const state=stateOf(d,facts),patch:Obj={...transitionPatch(d,state,nowIso(),source==='refresh'?'SYSTEM':ctx.uid,source==='refresh'?'System observation':name(ctx),source),...readinessPatch};
+  if(!Object.keys(readinessPatch).length&&d.workflowCode===patch.workflowCode&&d.workflowReason===patch.workflowReason&&d.workflowLabel===patch.workflowLabel&&d.workflowSince===patch.workflowSince&&(d.workflowStatusCode===patch.workflowStatusCode||['closed','cancelled'].includes(status)))return wo;
   try{await commit([{path:root(ctx)+'/work_orders/'+wo.id,fields:patch,mask:Object.keys(patch),updateTime:wo.updateTime}]);return {...wo,data:{...d,...patch}};}
   catch(e){const latest=await getDoc(root(ctx)+'/work_orders/'+wo.id);if(!latest||attempt===2)throw e;wo=latest;}
  }
@@ -2090,9 +2104,38 @@ export async function executeMaintenanceAction(ctx: OrgContext, wo: Doc, action:
     throw new HttpError(400, 'Unknown task execution action.');
 }
 
+/** Moves the scheduled dates (planning window mapping) under the same rules as locking the schedule. */
+async function applyDates(ctx: OrgContext, wo: Doc, start: string, end: string, reason: string, extra: Obj, action: string) {
+    const cycle = await getMaintenanceCycle(ctx);
+    validateCycleDates(str(wo.data.maintenanceTypeCode), start, end, cycle, wo.data);
+    const moves = validateStartDateMove(wo.data, start);
+    const baseline = protectExpectedDates(wo.data, {});
+    const changed = start !== str(wo.data.scheduledStart) || end !== str(wo.data.scheduledEnd);
+    const ca = object(wo.data.costApproval);
+    // A move to another budget period needs a new cost approval; a ready work order goes back to planning for it.
+    const supersede = periodOf(start) !== periodOf(str(wo.data.scheduledStart)) && !!str(ca.status);
+    const back = supersede && str(wo.data.status) === 'released';
+    await saveWo(ctx, wo, {
+        ...baseline, ...extra, scheduledStart: start, scheduledEnd: end, startDateMoves: moves,
+        ...(start !== str(wo.data.scheduledStart) ? { currentCycleAdmission: { startDay: cycle.startDay, timeZone: cycle.timeZone, version: cycle.version, at: nowIso() } } : {}),
+        dateChanges: changed ? [...rows(wo.data.dateChanges), { at: nowIso(), by: ctx.uid, name: name(ctx), fromStart: str(wo.data.scheduledStart), fromEnd: str(wo.data.scheduledEnd), toStart: start, toEnd: end, reason, source: 'planning_window' }] : rows(wo.data.dateChanges),
+        scheduleLock: { start, end, at: nowIso(), by: ctx.uid, name: name(ctx), source: 'planning_window' },
+        ...(supersede ? { costApproval: { ...ca, status: 'superseded' } } : {}),
+        ...(back ? { status: 'planning' } : {}),
+    }, action, `${start} to ${end} · ${reason}${supersede ? ' · cost approval superseded (period changed)' : ''}${back ? ' · back to planning for cost re-approval' : ''}`);
+    return { costSuperseded: supersede };
+}
+
 export async function maintenanceOperations(ctx: OrgContext) {
     const b = ctx.body,
         action = str(b.action);
+    let cachedScope: Awaited<ReturnType<typeof scopeOf>> | null = null;
+    const readinessResult = await readinessActions(ctx, action, {
+        order, authority, saveWo, applyDates, syncOrderAfter, displayName: name,
+        authorityAt: async (c, path, permission, gate) => { await maintenancePermission(c, permission, path); if (gate) await requireMaintenanceRole(c, gate, path); },
+        visible: async (c, path) => { cachedScope ??= await scopeOf(c); return canAt(c, 'MNT.view', path, cachedScope); },
+    });
+    if (readinessResult !== undefined) return readinessResult;
     if (action === 'line_options') {
         const scope = await scopeOf(ctx),
             nodes = await listDocs(`${root(ctx)}/structure`),
@@ -2258,7 +2301,13 @@ export async function maintenanceOperations(ctx: OrgContext) {
             serviceReportUrls:Object.fromEntries(await Promise.all(Object.values(object(wo.data.serviceReports)).flatMap(v=>Object.values(object(v))).map(object).filter(v=>str(v.path)).map(async v=>[str(v.path),await signedUrl(str(v.path)).catch(()=> '')]))),
             statusReview:summarizeWorkOrderReview(d,nowIso(),dueAt),
             readiness: readinessData,
-            checklist: retrospective?null:await planChecklist(ctx, wo, readinessData),
+            ...await (async()=>{
+                if(retrospective)return {checklist:null,readinessModel:null};
+                const check=await planChecklist(ctx, wo, readinessData);
+                const win=str(wo.data.planningWindowId)?await getDoc(root(ctx)+'/mnt_planning_windows/'+identifier(wo.data.planningWindowId)):null;
+                const approved=maintenanceAssessmentReady(wo.data,configuredMaintenanceRole({...ctx,testMode:false},'MNT.ASSESS.REVIEW',recordPath(wo),(await getDoc(root(ctx)+'/maintenance_workflow_settings/default'))?.data.approverRoles));
+                return {checklist:check,readinessModel:['planning','plan_ready','released','scheduled'].includes(str(wo.data.status))?readinessModel({wo:wo.data,items:approved?readinessData.items:[],checklist:approved?check.items:[],costStatus:check.cost.status,assessmentApproved:approved,window:win?{id:win.id,...win.data}:null,now:nowIso()}):null,manualLibrary:MANUAL_LIBRARY};
+            })(),
             currency: str(ctx.org.data.currencyCode),
             permissions,
             assessmentBlockReason,

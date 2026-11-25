@@ -203,7 +203,7 @@ export function readForecastSetup(v: unknown): ForecastSetup {
             const mode = String((act as Record<string, unknown>).mode ?? 'all');
             if (!['all', 'selected'].includes(mode)) throw new Error('Choose which material categories are forecast');
             const cats = Array.isArray((act as Record<string, unknown>).categories) ? [...new Set(((act as Record<string, unknown>).categories as unknown[]).map((c) => String(c).trim().toUpperCase()).filter(Boolean))] : [];
-            if (cats.length > 200 || cats.some((c) => !/^[A-Z0-9_-]{1,30}$/.test(c))) throw new Error('Activated categories must be up to 200 valid category codes');
+            if (cats.length > 200 || cats.some((c) => !/^[A-Z0-9][A-Z0-9._ /-]{0,59}$/.test(c))) throw new Error('Activated categories must be up to 200 valid category codes');
             if (mode === 'selected' && !cats.length) throw new Error('Select at least one material category, or forecast every category');
             const distribution = String(v.distribution ?? d.distribution);
             if (!['auto', 'normal'].includes(distribution)) throw new Error('Choose the lead-time demand distribution');
