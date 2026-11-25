@@ -4,6 +4,7 @@ import { verifiedPeople, checkedRoom, membersOf } from './chatCommon';
 import { audit } from './audit';
 import { publishActionUpdate } from './actionNotifications';
 import { actionPhotoUrl, validateActionPhoto } from './actionPhotos';
+import { refuseManualWorkflowChange } from './workflowActions';
 
 const ROOT=(orgId:string)=>'organizations/'+orgId+'/chat_actions';
 const actionPath=(orgId:string,id:string)=>ROOT(orgId)+'/'+id;
@@ -162,6 +163,7 @@ export const actionHubRoutes={
     'POST /api/org/actions/respond':[orgRoute('actions.respond',null,async ctx=>{
         const id=str(ctx.body.actionId),decision=str(ctx.body.decision);
         const {doc,ids}=await target(ctx,id);
+        refuseManualWorkflowChange(doc.data);
         if(!ids.includes(ctx.uid))throw new HttpError(403,'Only an assignee can respond.');
         if(!['accept','review','decline'].includes(decision))throw new HttpError(400,'Choose an action response.');
         const path=assignees(ctx.orgId,id)+'/'+ctx.uid;
@@ -179,6 +181,7 @@ export const actionHubRoutes={
     'POST /api/org/actions/progress':[orgRoute('actions.progress',null,async ctx=>{
         const id=str(ctx.body.actionId),status=str(ctx.body.status);
         const {doc,ids}=await target(ctx,id);
+        refuseManualWorkflowChange(doc.data);
         if(!ids.includes(ctx.uid))throw new HttpError(403,'Only your own assigned actions can be updated.');
         if(!['open','closed','canceled'].includes(status))throw new HttpError(400,'Choose Open, Closed or Canceled.');
         const path=assignees(ctx.orgId,id)+'/'+ctx.uid;
@@ -200,6 +203,7 @@ export const actionHubRoutes={
     'POST /api/org/actions/acknowledge':[orgRoute('actions.acknowledge',null,async ctx=>{
         const id=str(ctx.body.actionId),uid=str(ctx.body.uid),decision=str(ctx.body.decision);
         const {doc,ids}=await target(ctx,id);
+        refuseManualWorkflowChange(doc.data);
         if(str(doc.data.requesterUid)!==ctx.uid||!ids.includes(uid))throw new HttpError(403,'Only the requester can acknowledge the assignee’s closure.');
         if(!['acknowledge','return'].includes(decision))throw new HttpError(400,'Choose acknowledgment or return.');
         const path=assignees(ctx.orgId,id)+'/'+uid,current=await getDoc(path);

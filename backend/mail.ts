@@ -121,6 +121,7 @@ async function mailView(ctx: OrgContext, doc: {id:string;data:Record<string,unkn
         action:isObj(d.action)?d.action:{},actionId:str(d.actionId),
         allowReply:d.allowReply!==false,allowReplyAll:d.allowReplyAll!==false,allowDelete:d.allowDelete!==false,
         focus:d.focus!==false,category:str(d.category),priority:str(d.priority),
+        workflow:str(d.workflowTaskId)?{taskId:str(d.workflowTaskId),status:str(d.workflowStatus)==='closed'?'closed':'open',link:str(d.workflowLink),linkLabel:str(d.workflowLinkLabel),module:str(d.workflowModule),ref:str(d.workflowRef),stage:str(d.workflowStage),outcome:str(d.workflowOutcome),closedAt:str(d.workflowClosedAt)}:null,
         attachments:await Promise.all(attachments.map(async(a)=>{
             const path=str(a.path), valid=path.startsWith('organizations/'+ctx.orgId+'/mail_files/');
             let url='';
@@ -155,7 +156,8 @@ export const mailRoutes={
         const doc=await getDoc(root(ctx)+'/'+id);
         if(!doc) throw new HttpError(404,'Mail not found in your mailbox.');
         // Opening marks the message read unless the reader's "mark as read" setting defers it (markRead:false).
-        const mark=ctx.body.markRead!==false;
+        // An open workflow action stays unread until its step is completed in MEMS (opening it is not doing it).
+        const mark=ctx.body.markRead!==false&&str(doc.data.workflowStatus)!=='open';
         if(mark&&doc.data.read!==true && str(doc.data.folder)!=='drafts') await updateFields(root(ctx)+'/'+id,{read:true});
         return {item:await mailView(ctx,{...doc,data:{...doc.data,read:mark?true:doc.data.read===true}},true)};
     })],
@@ -310,7 +312,10 @@ export const mailRoutes={
             const doc=await getDoc(path);
             if(!doc)continue;
             const old=str(doc.data.folder);
+            const openWorkflow=str(doc.data.workflowStatus)==='open';
+            if((kind==='delete'||kind==='destroy')&&openWorkflow)throw new HttpError(403,'This workflow action stays in your mailbox until its step is completed in MEMS.');
             if((kind==='delete'||kind==='destroy')&&doc.data.allowDelete===false)throw new HttpError(403,'The sender disabled recipient deletion of this message.');
+            if(kind==='read'&&openWorkflow)continue;
             if(kind==='destroy'){if(old!=='deleted')throw new HttpError(409,'Move mail to Deleted Items before permanently deleting it.');await deleteDoc(path);changed++;continue;}
             const update:Record<string,string|boolean>={updatedAt:nowIso()};
             if(kind==='read')update.read=true;

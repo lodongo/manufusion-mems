@@ -1177,7 +1177,7 @@ async function configuredMaterialWorkflow(orgId:string,code:'PRC-001'|'PRC-002')
             action:(str(x.action)|| (i===steps.length-1?'approve':'review')) as MaterialWorkflowStep['action']};})};
 }
 /** A snapshot retains the exact approver definition under which a request was submitted. */
-function materialWorkflowSnapshot(record:Obj):MaterialWorkflowDefinition|null{
+export function materialWorkflowSnapshot(record:Obj):MaterialWorkflowDefinition|null{
     if(!isObj(record.workflowSnapshot))return null;
     const d=record.workflowSnapshot;
     if(!Array.isArray(d.steps)||!d.steps.length||!['PRC-001','PRC-002'].includes(str(d.code)))return null;
@@ -1197,7 +1197,7 @@ function materialStageLabel(record:Obj,workflow:MaterialWorkflowDefinition):stri
     const index=Math.max(0,Math.min(workflow.steps.length-1,(Number(record.approvalLevel)||1)-1));
     return workflowStageName(workflow.steps[index],index,workflow.steps.length);
 }
-async function materialApproverCanAct(ctx:OrgContext,record:Obj,workflow:MaterialWorkflowDefinition):Promise<boolean>{
+export async function materialApproverCanAct(ctx:OrgContext,record:Obj,workflow:MaterialWorkflowDefinition):Promise<boolean>{
     // Read-only permission checks must not record a bypass just by rendering a list.
     // Actual approval actions call bypass() below so only executed overrides are audited.
     if(ctx.testMode===true&&ctx.role==='org_super_admin')return true;

@@ -86,7 +86,7 @@ async function postedOf(orgId: string, po: Obj, delivery: Obj, units: Map<string
 const recNoOf = (dv: Obj) => str(dv.recNo) || str(dv.id);
 
 /** Chart of authority approval: who may act on the current level now, and why not. */
-function decider(ctx: OrgContext, d: Obj, perm: string): { ok: boolean; why: string; testMode?: boolean } {
+export function decider(ctx: OrgContext, d: Obj, perm: string): { ok: boolean; why: string; testMode?: boolean } {
     if (str(d.status) !== 'pending_approval') return { ok: false, why: '' };
     const step = stepsOf(d).find((s) => s.status === 'pending');
     if (!step || !can(ctx, perm)) return { ok: false, why: '' };

@@ -50,7 +50,7 @@ function safeReadHtml(source:string):string {
 type Person={uid:string;email:string;name:string};
 type Attachment={id:string;name:string;mime:string;size:number;url:string};
 type FolderItem={id:string;name:string};
-type MailItem={allowReply?:boolean;allowReplyAll?:boolean;allowDelete?:boolean;action?:MailAction;actionId?:string;id:string;threadId:string;inReplyTo:string;fromUid:string;fromName:string;fromEmail:string;to:string[];cc:string[];bcc:string[];subject:string;excerpt:string;html:string;sentAt:string;updatedAt:string;folder:string;read:boolean;starred:boolean;flagged:boolean;focus:boolean;category:string;priority:string;attachments:Attachment[]};
+type MailItem={allowReply?:boolean;allowReplyAll?:boolean;allowDelete?:boolean;action?:MailAction;actionId?:string;id:string;threadId:string;inReplyTo:string;fromUid:string;fromName:string;fromEmail:string;to:string[];cc:string[];bcc:string[];subject:string;excerpt:string;html:string;sentAt:string;updatedAt:string;folder:string;read:boolean;starred:boolean;flagged:boolean;focus:boolean;category:string;priority:string;attachments:Attachment[];workflow?:{taskId:string;status:'open'|'closed';link:string;linkLabel:string;module:string;ref:string;stage:string;outcome:string;closedAt:string}|null};
 type Listing={items:MailItem[];folders:FolderItem[];externalSendingEnabled:boolean};
 type MailAction={enabled:boolean;title:string;description:string;deadline:string;photoPath:string;recipientUids:string[]};
 type ComposeSeed={mode:'new'|'reply'|'replyall'|'forward'|'draft';original?:MailItem;group?:WorkGroup;withAction?:boolean};
@@ -602,6 +602,11 @@ export default function OrgMail({myEmail,initialId=''}:{myEmail:string;initialId
                     </div>
                     <div className='min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6'>
                         <h1 className='break-words text-[20px] font-semibold leading-snug'>{detail.subject||'(No subject)'}</h1>
+                        {detail.workflow&&<div role='status' className='mt-3 rounded-md border p-3 text-[13px] ol-line' style={{background:detail.workflow.status==='open'?'rgba(202,80,16,0.08)':'rgba(16,124,16,0.08)'}}>
+                            <p className='font-semibold'>{detail.workflow.status==='open'?'Workflow action · open':'Workflow action · closed'}{detail.workflow.ref?' · '+detail.workflow.ref:''}</p>
+                            <p className='mt-1 ol-sub'>{detail.workflow.status==='open'?'Your step: '+detail.workflow.stage+'. This email stays unread and cannot be deleted until the step is completed in '+(detail.workflow.linkLabel||'MEMS')+'.':detail.workflow.outcome}</p>
+                            {detail.workflow.status==='open'&&<button type='button' onClick={()=>navigate('organization_home/'+(detail.workflow?.link||'my_workflow'))} className='mt-2 inline-flex min-h-11 items-center gap-1 rounded px-3 font-semibold text-white' style={{background:'#0f6cbd'}}>Open {detail.workflow.linkLabel||'the workflow'} <ArrowRight className='h-4 w-4'/></button>}
+                        </div>}
                         {(detail.category||detail.priority==='high')&&<div className='mt-2 flex flex-wrap gap-1.5'>{detail.priority==='high'&&<span className='rounded px-2 py-0.5 text-[12px] font-semibold ol-danger' style={{background:'rgba(197,15,31,0.1)'}}>High importance</span>}{detail.category&&<span className='rounded px-2 py-0.5 text-[12px] ol-chip'>{detail.category}</span>}</div>}
                         <div className='mt-4 rounded-md border p-3 ol-line'>
                             <div className='flex items-start gap-3'>

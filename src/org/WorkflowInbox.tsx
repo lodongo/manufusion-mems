@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { CheckCircle2, CheckSquare, Circle, Clock3, ExternalLink, X, XCircle } from 'lucide-react';
 import { callBackend } from '../lib/backend';
 import UnifiedApprovalInbox from './UnifiedApprovalInbox';
+import WorkflowActionsPanel from './WorkflowActionsPanel';
 import { navigate } from '../lib/route';
 import { Alert } from '../components/ui';
 import RichTable, { type Column } from '../components/RichTable';
@@ -280,6 +281,7 @@ export default function WorkflowInbox() {
                 }
                 toolbar={<Segmented label='Workflow views' value={filter} options={options} onChange={setFilter} />}
             >
+                <WorkflowActionsPanel />
                 <UnifiedApprovalInbox />
                 {error && <Alert tone='error'>{error}</Alert>}
                 {notice && <Alert tone={notice.tone}>{notice.text}</Alert>}

@@ -111,7 +111,7 @@ function visible(ctx: OrgContext, d: Obj): boolean {
     return canView(ctx) && ['approved', 'suspended'].includes(status);
 }
 
-function flags(ctx: OrgContext, d: Obj) {
+export function flags(ctx: OrgContext, d: Obj) {
     const status = str(d.status);
     const manage = can(ctx, 'PRC.vendors.manage');
     const approve = can(ctx, 'PRC.vendors.approve');

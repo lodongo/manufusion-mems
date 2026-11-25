@@ -262,7 +262,7 @@ interface CoaStep {
 const stepsOf = (p: Obj): CoaStep[] => (Array.isArray(p.steps) ? (p.steps as unknown[]).filter(isObj).map((x) => ({ ...x }) as unknown as CoaStep) : []);
 
 /** May this person act on the current Chart of Authority level of a proposal (and why not). */
-async function coaCheck(ctx: OrgContext, p: Obj): Promise<{ ok: boolean; why: string; testMode: boolean }> {
+export async function coaCheck(ctx: OrgContext, p: Obj): Promise<{ ok: boolean; why: string; testMode: boolean }> {
     const { myPositions } = await po();
     const steps = stepsOf(p);
     const step = steps.find((x) => x.status === 'pending');

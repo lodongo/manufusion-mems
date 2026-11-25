@@ -70,6 +70,7 @@ import { plnMfgFoundationRoutes } from './plnMfgFoundation';
 import { plnMfgReleaseRoutes } from './plnMfgRelease';
 import { plnDemandRoutes } from './plnDemand';
 import { plnPlanningRoutes } from './plnPlanning';
+import { workflowActionRoutes } from './workflowActions';
 import { plnCostCenterCapacityRoutes } from './plnCostCenterCapacity';
 import { plnManufacturingResourceRoutes } from './plnManufacturingResources';
 import { plnMfgPilotRoutes } from './plnMfgPilotSeed';
@@ -1619,6 +1620,7 @@ export const handler = router(recordWiredRoutes({
     ...plnMfgReleaseRoutes,
     ...plnDemandRoutes,
     ...plnPlanningRoutes,
+    ...workflowActionRoutes,
     ...plnCostCenterCapacityRoutes,
     ...plnManufacturingResourceRoutes,
     ...plnMfgPilotRoutes,

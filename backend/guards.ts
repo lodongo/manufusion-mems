@@ -533,9 +533,11 @@ export function orgRoute(name: string, permission: string | null, fn: (ctx: OrgC
         const finishApproval = await enforceOrgTransactionGovernance({ orgId, name, permission, effectivePermissionGranted: granted, org, uid: ctx.uid, body:ctx.body });
         let result: unknown;
         let tracked: Awaited<ReturnType<typeof withChangeTracking>> | null = null;
+        let fullCtx: OrgContext | null = null;
         try {
             // Material changes made by this request are collected and handed to MRP once it has succeeded.
-            tracked = await withChangeTracking(() => fn({ ...ctx, me, org, orgId, role, roleName: access.roleName, permissions: access.permissions, directPermissions: access.directPermissions, grants: access.grants, workGroupPolicy:access.workGroupPolicy, domain, testMode, bypassed }));
+            fullCtx = { ...ctx, me, org, orgId, role, roleName: access.roleName, permissions: access.permissions, directPermissions: access.directPermissions, grants: access.grants, workGroupPolicy:access.workGroupPolicy, domain, testMode, bypassed };
+            tracked = await withChangeTracking(() => fn(fullCtx!));
             result = tracked.result;
         } catch (err) {
             try { await finishApproval?.(false); }
@@ -553,6 +555,11 @@ export function orgRoute(name: string, permission: string | null, fn: (ctx: OrgC
                 details:'Business handler succeeded but approval completion write failed'}]);
         }
         await auditTestOverride('success');
+        // Workflow actions (email, To-do, chat) follow every successful change of a workflow record. Never fails the request.
+        if (fullCtx) {
+            try { const { syncWorkflowActions } = await import('./workflowActions'); await syncWorkflowActions(fullCtx, name); }
+            catch (wfError) { console.error('Workflow actions not synchronised', wfError instanceof Error ? wfError.message : 'unknown'); }
+        }
         if (tracked && (tracked.changes.length || tracked.unresolved.length)) {
             await notifyMaterialChanges({ orgId, uid: ctx.uid, actorName: str(me.data.email), route: name, changes: tracked.changes.filter((c) => c.orgId === orgId), unresolved: tracked.unresolved });
         }
