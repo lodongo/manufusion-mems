@@ -86,6 +86,7 @@ async function status() {
     const mrpState = await sweepState();
     const stState = await getDoc(ST_STATE);
     const fcState = await getDoc(FC_STATE);
+    const wfState = await getDoc(WF_STATE);
     return {
         engine: { name: 'MEMS shared automation engine', version: '2.0', registered: JOBS.map((j) => j.id),
             tickMinutes: 5, lastHeartbeat: lastSeen, connected, sharedTrigger: scheduler },
@@ -118,6 +119,13 @@ async function status() {
                 lastStartedAt: str(stState?.data.lastStartedAt), lastCompletedAt: str(stState?.data.lastCompletedAt),
                 lastError: str(stState?.data.lastError), lastErrorAt: str(stState?.data.lastErrorAt),
                 lastResult: stState?.data.lastResult || null },
+            { id: WF_JOB_ID, label: 'Workflow actions (email, To-do and chat for every step waiting on a person)', category: 'Workflow',
+                enabled: true, schedule: { minutes: 15 },
+                scheduleText: `Every 15 minutes; also after every workflow change${str(wfState?.data.cursor) ? ' · resuming an unfinished sweep' : ''}`,
+                configurable: 'none',
+                lastStartedAt: str(wfState?.data.lastStartedAt), lastCompletedAt: str(wfState?.data.lastCompletedAt),
+                lastError: str(wfState?.data.lastError), lastErrorAt: str(wfState?.data.lastErrorAt),
+                lastResult: wfState?.data.lastResult || null },
         ],
         history: runs.map((r) => ({ id: r.id, ...r.data })),
     };
@@ -274,6 +282,39 @@ async function executeStockTakeSessions(mode: 'scheduled' | 'manual', deadline: 
     }
 }
 
+// ===== Workflow actions sweep =====
+// Creates missing workflow actions (changes made by automations) and closes those whose step is complete. Resumable.
+
+const WF_JOB_ID = 'wf.actions-sweep';
+const WF_STATE = 'system/workflow_actions_state';
+export const workflowSweepDue = (lastCompletedAt: string, cursor: string, at: Date) => !!cursor || at.getTime() - (Date.parse(lastCompletedAt || '') || 0) >= 15 * 60_000;
+
+async function executeWorkflowSweep(mode: 'scheduled' | 'manual', deadline: number) {
+    const startedAt = nowIso();
+    const t0 = Date.now();
+    const eventId = `${startedAt.replace(/[^0-9]/g, '')}_${randomId(4)}`;
+    const prior = (await getDoc(WF_STATE))?.data ?? {};
+    await writeDoc(WF_STATE, { ...prior, lastStartedAt: startedAt });
+    try {
+        const { sweepAll } = await import('./workflowActions');
+        const r = await sweepAll(deadline, str(prior.cursor));
+        const completedAt = nowIso();
+        const result = { organizations: r.organizations, created: r.created, closed: r.closed, complete: !r.next, resumeFrom: r.next };
+        await writeDoc(WF_STATE, { ...prior, lastStartedAt: startedAt, cursor: r.next, ...(r.next ? {} : { lastCompletedAt: completedAt }), lastResult: result, lastError: '', lastErrorAt: '' });
+        await writeDoc(`${RUNS_COL}/${eventId}`, { jobId: WF_JOB_ID, mode, status: 'success', startedAt, completedAt, durationMs: Date.now() - t0, ...result,
+            summary: `${r.created} workflow action(s) created and ${r.closed} closed in ${r.organizations} organization(s)${r.next ? '; continues next tick' : ''}` }, { exists: false });
+        await audit([{ category: 'automation', action: 'wf.actions_sweep.success', details: `${mode}: ${r.created} created, ${r.closed} closed${r.next ? ' (partial)' : ''}` }]);
+        return result;
+    } catch (e) {
+        const message = e instanceof Error ? e.message : 'Workflow actions sweep failed';
+        const completedAt = nowIso();
+        await writeDoc(WF_STATE, { ...prior, lastStartedAt: startedAt, lastError: message.slice(0, 250), lastErrorAt: completedAt });
+        await writeDoc(`${RUNS_COL}/${eventId}`, { jobId: WF_JOB_ID, mode, status: 'failed', startedAt, completedAt, durationMs: Date.now() - t0, error: message.slice(0, 250) }, { exists: false });
+        await audit([{ category: 'automation', action: 'wf.actions_sweep.failure', outcome: 'failure', details: message.slice(0, 400) }]);
+        throw e;
+    }
+}
+
 // ===== Weekly background forecasting =====
 // Re-forecasts every material of every organization whose category is activated for forecasting (and whose setup
 // keeps the weekly run on). Results are recommendations only, accepted or rejected by people. Resumable per material.
@@ -361,6 +402,14 @@ const JOBS: Job[] = [
             return weeklyDue(str(st.lastCompletedAt), str(st.cursor), at);
         },
         run: (mode, deadline) => executeForecastWeekly(mode, deadline),
+    },
+    {
+        id: WF_JOB_ID,
+        due: async (at) => {
+            const st = (await getDoc(WF_STATE))?.data ?? {};
+            return workflowSweepDue(str(st.lastCompletedAt), str(st.cursor), at);
+        },
+        run: (mode, deadline) => executeWorkflowSweep(mode, deadline),
     },
 ];
 const TICK_BUDGET_MS = 100_000;

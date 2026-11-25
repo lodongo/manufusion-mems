@@ -150,7 +150,7 @@ function visible(ctx: OrgContext, d: Obj): boolean {
     return false;
 }
 
-function flags(ctx: OrgContext, d: Obj) {
+export function flags(ctx: OrgContext, d: Obj) {
     const status = str(d.status);
     const mine = str(d.requesterUid) === ctx.uid;
     const desk = can(ctx, 'PRC.req.acknowledge') && ((!mine && !approvedByMe(ctx, d)) || ctx.testMode === true);

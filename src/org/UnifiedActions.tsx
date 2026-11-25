@@ -4,15 +4,18 @@ import { callBackend } from '../lib/backend';
 import { navigate } from '../lib/route';
 import { appPrompt } from '../components/dialogs';
 
-interface Assignment {uid:string;decision:string;status:string;reviewNote:string;updatedAt:string;acknowledgedAt:string;progressNotes:Array<{note:string;at:string;by:string}>;}
+interface Assignment {uid:string;decision:string;status:string;reviewNote:string;updatedAt:string;acknowledgedAt:string;acknowledgementNote?:string;progressNotes:Array<{note:string;at:string;by:string}>;}
 export interface HubAction {
     id:string;source:string;sourceId:string;roomId:string;title:string;description:string;header?:string;body?:string;
     deadline:string;requesterUid:string;recipientUids:string[];assignments:Assignment[];
     canceled:boolean;createdAt:string;mailThreadId:string;mailSubject:string;
+    workflowStatus?:string;workflowLink?:string;workflowLinkLabel?:string;workflowModule?:string;workflowStage?:string;workflowOutcome?:string;
 }
 const actionLabel=(a:HubAction,me:string,mode:'mine'|'sent')=>{
     if(mode==='sent')return a.recipientUids.length+' assignee'+(a.recipientUids.length===1?'':'s');
     const rec=a.assignments.find(x=>x.uid===me);
+    // Workflow actions close only when the step is completed in their module.
+    if(a.source==='workflow')return rec?.acknowledgedAt?'Closed · '+(rec.acknowledgementNote||a.workflowOutcome||'step completed'):'Open · complete it in '+(a.workflowLinkLabel||'its module');
     if(!rec)return 'Assigned';
     if(rec.acknowledgedAt)return 'Closed · acknowledged';
     if(rec.status==='closed')return 'Awaiting requester acknowledgement';
@@ -77,7 +80,12 @@ export default function UnifiedActions({uid,mode='mine',sourceFilter=''}:{uid:st
                 {expanded&&<div className='space-y-3 border-t border-line p-3 text-xs'>
                     {(a.body||a.description)&&<p className='whitespace-pre-wrap text-sm text-ink'>{a.body||a.description}</p>}
                     <p className='flex items-center gap-2 text-muted'><CalendarDays className='h-4 w-4'/> Deadline: {a.deadline||'Not specified'}</p>
-                    {mode==='mine'&&mine?<>
+                    {a.source==='workflow'?<div className='space-y-2'>
+                        <p className='font-semibold text-brand'>{actionLabel(a,uid,mode)}</p>
+                        {a.workflowStage&&<p className='text-ink'>Your step: {a.workflowStage}</p>}
+                        <p className='text-muted'>This action was sent by MEMS Workflow. It cannot be accepted, declined or closed here: it closes on its own when the step is completed in {a.workflowLinkLabel||'its module'}.</p>
+                        <button type='button' onClick={()=>navigate('organization_home/'+(a.workflowLink||'my_workflow'))} className='inline-flex min-h-11 items-center gap-1 rounded-lg bg-brand px-4 text-xs font-semibold text-onbrand'>Open {a.workflowLinkLabel||'the workflow'} <ArrowRight className='h-4 w-4'/></button>
+                    </div>:mode==='mine'&&mine?<>
                         <p className='font-semibold text-brand'>{actionLabel(a,uid,mode)}</p>
                         {mine.reviewNote&&<p className='rounded-lg bg-amber-500/10 p-2 text-amber-600'>{mine.reviewNote}</p>}
                         {(mine.progressNotes||[]).slice(-6).map((n,i)=><p key={i} className='rounded-lg border border-line bg-page p-2'><span className='font-semibold'>{new Date(n.at).toLocaleString()} · </span>{n.note}</p>)}

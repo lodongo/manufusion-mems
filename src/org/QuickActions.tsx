@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type ChangeEvent } from 'react';
 import { Camera, FileImage, Plus, Save, Trash2, X, RefreshCw } from 'lucide-react';
 import { callBackend } from '../lib/backend';
+import { navigate } from '../lib/route';
 import { Alert } from '../components/ui';
 import { Button, Spinner } from '../admin/kit';
 import RichTable, { type Column } from '../components/RichTable';
@@ -18,7 +19,7 @@ type Personal={
     createdAt:string;updatedAt:string;closedAt:string;
 };
 type Assignment={
-    uid:string;decision:string;status:string;acknowledgedAt:string;
+    uid:string;decision:string;status:string;acknowledgedAt:string;acknowledgementNote?:string;
     reviewNote:string;progressNotes:Progress[];
 };
 type Monitored={
@@ -45,7 +46,8 @@ function monitoredRow(a:Monitored,uid:string):ActionRow{
     const allDone=relevant.length>0&&relevant.every(x=>!!x.acknowledgedAt);
     const complete=own?!!own.acknowledgedAt:allDone;
     const canceled=a.canceled||own?.status==='canceled'||own?.decision==='declined';
-    const status=canceled?'Canceled':complete?'Closed':own?.status==='closed'
+    const workflow=a.source==='workflow';
+    const status=workflow?(complete?'Closed':'Open · complete in module'):canceled?'Canceled':complete?'Closed':own?.status==='closed'
         ?'Awaiting acknowledgement':own?.decision==='pending'?'Awaiting acceptance'
         :own?.decision==='review'?'Clarification':!own&&a.assignments.some(x=>x.status==='closed'&&!x.acknowledgedAt)
         ?'Awaiting acknowledgement':'Open';
@@ -278,7 +280,12 @@ export default function QuickActions({uid}:{uid:string}){
                         void callBackend('/api/org/quick/todo/delete',{id:picked.id}).then(()=>{setSelected('');void reload()}).catch(e=>setError(problem(e)))}}>
                     <Trash2 className='h-4 w-4'/> Delete</button>
             </div>}
-            {picked.monitored&&<>
+            {picked.monitored&&picked.monitored.source==='workflow'&&<div className='space-y-2 rounded-xl border border-line bg-page p-3 text-xs'>
+                <p className='font-semibold text-brand'>{assignment?.acknowledgedAt?'Closed · '+(assignment.acknowledgementNote||'step completed'):'Open · it closes when the step is completed in '+(String((picked.monitored as unknown as Record<string,unknown>).workflowLinkLabel||'')||'its module')}</p>
+                <p className='text-muted'>Workflow actions cannot be accepted, declined or closed by hand.</p>
+                <Button onClick={()=>navigate('organization_home/'+(String((picked.monitored as unknown as Record<string,unknown>).workflowLink||'')||'my_workflow'))}>Open the workflow</Button>
+            </div>}
+            {picked.monitored&&picked.monitored.source!=='workflow'&&<>
                 {assignment?.reviewNote&&<p className='rounded-lg bg-amber-500/10 p-3 text-xs text-amber-700'>{assignment.reviewNote}</p>}
                 {(assignment?.progressNotes||[]).slice(-12).map((n,i)=><div key={n.at+i} className='rounded-lg border border-line bg-page p-2 text-xs'>
                     <p className='whitespace-pre-wrap text-ink'>{n.note}</p>

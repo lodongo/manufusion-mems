@@ -125,7 +125,7 @@ export const chatMessageRoutes = {
         ]);
         return {
             room: { id: room.id, ...room.data, sendPolicy: str(room.data.sendPolicy) === 'admins' ? 'admins' : 'all', infoPolicy: str(room.data.infoPolicy) === 'all' ? 'all' : 'admins' },
-            people: profiles, ...messages,
+            people: room.data.workflowRoom === true ? [...profiles, { uid: 'mems_workflow', name: 'MEMS Workflow', photoUrl: '' }] : profiles, ...messages,
             ...live,
             serverTime: nowIso(),
         };
