@@ -232,8 +232,9 @@ function Editor({ workflow, roles, users, directoryError, onBack, onSaved }: { w
                 confirmLabel: terminate ? 'Terminate & save' : 'Save workflow',
                 tone: terminate ? 'danger' : 'primary',
                 acknowledge: terminate ? 'I understand active approvals will be terminated and the affected requests must be resubmitted.' : undefined,
+                reason: { label: 'Reason for this change', minLength: 10, placeholder: 'For example: a second review level for new spare parts' },
             },
-            async () => {
+            async (changeReason) => {
                 const r = await callBackend<{ ok: boolean; terminated?: number }>(API + '/save', {
                     code: workflow.code,
                     enabled: draft.enabled,
@@ -244,6 +245,7 @@ function Editor({ workflow, roles, users, directoryError, onBack, onSaved }: { w
                     terminateActive: terminate,
                     terminationReason: reason.trim(),
                     terminationConfirmation: normalizePhrase(phrase),
+                    changeReason,
                 });
                 onSaved(
                     terminate

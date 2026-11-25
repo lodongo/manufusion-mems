@@ -36,11 +36,12 @@ test('material extension starts from approved organization master, not PRC refer
     assert.ok(backend.includes("source.data.warehouseIds"));
     assert.ok(backend.includes("getDoc(root+'/warehouses/'+warehouseId)"));
     assert.ok(backend.includes("warehouseIds:[...new Set("));
-    assert.ok(material.includes('Extend from Organization Materials Master'));
+    assert.ok(material.includes('Extend an approved material to another warehouse'));
     assert.ok(material.includes('approvedMasterMaterials='));
     assert.ok(material.includes('extensionSearchResults='));
     assert.ok(material.includes('extensionTargets='));
-    assert.ok(material.includes('Submit extension through PRC-002 workflow'));
+    assert.ok(material.includes('Submit extension for approval'));
+    assert.ok(material.includes('justification:extendJustification.trim()'));
 });
 test('legacy pending requests fail closed in production and recover only under audited development test mode',()=>{
     assert.equal(backend.includes("'POST /api/org/procurement/materials/workflow/migrate'"),false);
@@ -52,12 +53,12 @@ test('legacy pending requests fail closed in production and recover only under a
     assert.ok(backend.includes('legacyApprovalHistory:Array.isArray(previous.approvalHistory)'));
     assert.ok(backend.includes("bypass(ctx,'material.workflow.missing_snapshot_test_recovery')"));
     assert.ok(backend.includes("bypass(ctx,'material.workflow.assignment_and_maker_checker')"));
-    assert.ok(backend.includes("masterDataId=await approveWithMasterIdentity"));
+    assert.ok(backend.includes("const issued=await approveWithMasterIdentity"));
     assert.ok(backend.includes("materialTestRecoveryWorkflow(ctx,expectedCode)"));
 });
 test('missing snapshot dashboard exposes blue-bordered recovery actions only to authorized test superadmin',()=>{
     const ui=read('src/org/MaterialMasterDashboard.tsx');
-    assert.ok(ui.includes('Approve · test recovery'));
+    assert.ok(ui.includes('one-step test recovery'));
     assert.ok(ui.includes('testOverride={m.testOverride}'));
     assert.ok(ui.includes('audited one-step recovery'));
     assert.ok(backend.includes('materialTestOverride(ctx)||!!workflow'));
@@ -66,8 +67,8 @@ test('missing snapshot dashboard exposes blue-bordered recovery actions only to 
 });
 test('user-facing material approval and inbox show configured stage names instead of fixed approver numbers',()=>{
     assert.ok(material.includes("workflowStage?:string"));
-    assert.ok(material.includes("label:'Workflow stage'"));
-    assert.ok(material.includes("m.workflowStage||'Workflow assignment required'"));
+    assert.ok(material.includes("label:'Stage'"));
+    assert.ok(material.includes("r.stage||r.status.replaceAll('_',' ')"));
     assert.ok(inbox.includes("workflowStage?: string"));
     assert.ok(inbox.includes("label: 'Workflow stage'"));
 });

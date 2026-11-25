@@ -15,8 +15,28 @@
 //   - Movement uses the spread of issues over months, not the quantity alone, so a single large issue does not make a
 //     material "fast moving" (a material is fast moving because it is needed regularly).
 //
-// Score: sum of weight × rating over the factors declared in setup. Minimum = sum of weights (all rated 1), maximum =
-// 3 × sum of weights. The score is scaled linearly to 1–4 and rounded: 4 → A, 3 → B, 2 → C, 1 → D.
+// Two methods, chosen in setup:
+//
+// 1. Risk-based (default for new setups). Follows the consequence × likelihood logic of NORSOK Z-008, ISO 14224 and
+//    ISO 31000, and spare-parts practice of letting supply risk decide how far ahead the part must be held:
+//      - Consequence C (1–3) is the WORST rating of the consequence factors declared (safety, food safety, environment,
+//        compliance, production, downtime cost, restoration time, quality, reputation, commonality). Averaging would
+//        let an easy-to-buy part hide a line stop; the worst consequence governs.
+//      - Redundancy mitigates: an installed standby (redundancy rated 1) lowers a non-HSE consequence by one level.
+//      - Likelihood L (1–3) of needing the part: failure likelihood, raised by one for sudden failures and lowered by
+//        one when failure is predictable well in advance.
+//      - Supply risk S (1–3): weighted mean of the supply factors (sources, lead time, local availability, substitutes,
+//        custom, repairability, obsolescence, emergency purchase), rounded half up.
+//      - Class = configurable 3 × 3 risk matrix of C × L; a supply risk of 3 raises it one class (setup can switch off).
+//      - The risk index C × L × S (1–27) ranks materials within a class, like an RPN.
+// 2. Weighted score (the original method, kept for setups that use it): sum of weight × rating, scaled linearly to
+//    1–4 and rounded: 4 → A, 3 → B, 2 → C, 1 → D.
+//
+// Both keep the high-consequence override and report a sensitivity analysis: the factors whose rating, moved by one
+// step, would change the class. A class with such swing factors is borderline and worth a second look.
+//
+// Movement also reports the demand pattern (Syntetos–Boylan: smooth, erratic, intermittent, lumpy from the average
+// inter-demand interval ADI and the squared coefficient of variation CV² of demand sizes) and the XYZ variability class.
 // ---------------------------------------------------------------------------
 
 export type Rating = 1 | 2 | 3;
@@ -66,8 +86,21 @@ const classOfLevel = (n: number): ClassLetter => (['D', 'C', 'B', 'A'] as ClassL
 
 export interface FactorSetting {
     enabled: boolean;
-    weight: 1 | 2 | 3;
+    /** 1 (normal) to 5 (dominant). In the risk method it weighs only the supply-risk mean. */
+    weight: number;
 }
+export type Method = 'risk' | 'weighted';
+/** The role of each factor in the risk method. */
+export const ROLE: Record<string, 'consequence' | 'likelihood' | 'mitigation' | 'supply'> = {
+    SAF: 'consequence', FSQ: 'consequence', ENV: 'consequence', REG: 'consequence', PRD: 'consequence', DTC: 'consequence',
+    MTR: 'consequence', QLT: 'consequence', RPT: 'consequence', COM: 'consequence',
+    FRQ: 'likelihood', PRE: 'likelihood', RED: 'mitigation',
+    SUP: 'supply', LDT: 'supply', LOC: 'supply', SUB: 'supply', CUS: 'supply', REP: 'supply', OBS: 'supply', EMG: 'supply',
+};
+/** Risk matrix rows: consequence 3, 2, 1 (top to bottom); columns: likelihood 1, 2, 3. */
+export type Matrix = [[ClassLetter, ClassLetter, ClassLetter], [ClassLetter, ClassLetter, ClassLetter], [ClassLetter, ClassLetter, ClassLetter]];
+export const DEFAULT_MATRIX: Matrix = [['B', 'A', 'A'], ['C', 'B', 'B'], ['D', 'D', 'C']];
+export const PATTERNS = { smooth: 'Smooth', erratic: 'Erratic', intermittent: 'Intermittent', lumpy: 'Lumpy', none: 'No demand' } as const;
 
 export interface CriticalitySetup {
     factors: Record<string, FactorSetting>;
@@ -82,6 +115,19 @@ export interface CriticalitySetup {
     thresholds: { m4: number; m3: number; m2: number };
     /** Months after approval before an assessment is due for review. */
     reviewMonths: number;
+    /** Risk-based (consequence × likelihood with supply uplift) or the weighted score. */
+    method: Method;
+    matrix: Matrix;
+    /** A supply risk of 3 raises the class by one. */
+    supplyUplift: boolean;
+    /** An installed standby lowers a non-HSE consequence by one level. */
+    redundancyMitigation: boolean;
+    /** Review interval per class (months); critical materials are reviewed more often. */
+    reviewMonthsByClass: Record<ClassLetter, number>;
+    /** Material category codes the analysis applies to; empty means every category. */
+    scopeCategories: string[];
+    /** Demand pattern cut-offs (Syntetos–Boylan 1.32 and 0.49) and XYZ coefficient-of-variation limits. */
+    pattern: { adi: number; cv2: number; x: number; y: number };
 }
 
 export const ON_DEMAND_STRATEGY = 'RP07';
@@ -95,8 +141,18 @@ export function defaultSetup(): CriticalitySetup {
         minHistoryMonths: 6,
         thresholds: { m4: 10, m3: 6, m2: 3 },
         reviewMonths: 12,
+        method: 'risk',
+        matrix: DEFAULT_MATRIX.map((r) => [...r]) as Matrix,
+        supplyUplift: true,
+        redundancyMitigation: true,
+        reviewMonthsByClass: { A: 6, B: 12, C: 24, D: 36 },
+        scopeCategories: [],
+        pattern: { adi: 1.32, cv2: 0.49, x: 0.5, y: 1 },
     };
 }
+/** Review interval for a class under the setup. */
+export const reviewMonthsFor = (setup: CriticalitySetup, cls: string) => setup.reviewMonthsByClass?.[cls as ClassLetter] ?? setup.reviewMonths;
+export const inScope = (setup: CriticalitySetup, categoryCode: string) => !setup.scopeCategories?.length || setup.scopeCategories.includes(categoryCode);
 
 const CELL_RE = /^[ABCD][1-4]$/;
 export const isCell = (v: unknown): v is string => typeof v === 'string' && CELL_RE.test(v);
@@ -109,8 +165,8 @@ export function readSetup(v: unknown): CriticalitySetup {
     for (const f of FACTORS) {
         const s = o.factors && typeof o.factors === 'object' ? o.factors[f.code] : undefined;
         const weight = Number(s?.weight ?? 1);
-        if (![1, 2, 3].includes(weight)) throw new Error(`Weight of ${f.name} must be 1, 2 or 3`);
-        factors[f.code] = { enabled: s ? s.enabled === true : base.factors[f.code].enabled, weight: weight as 1 | 2 | 3 };
+        if (![1, 2, 3, 4, 5].includes(weight)) throw new Error(`Weight of ${f.name} must be a whole number from 1 to 5`);
+        factors[f.code] = { enabled: s ? s.enabled === true : base.factors[f.code].enabled, weight };
     }
     const enabled = Object.values(factors).filter((x) => x.enabled).length;
     if (enabled < 3) throw new Error('Declare at least three criticality factors');
@@ -128,6 +184,33 @@ export function readSetup(v: unknown): CriticalitySetup {
     const m3 = whole(t.m3, 'Months with issues for fast moving', 1, 12);
     const m2 = whole(t.m2, 'Months with issues for slow moving', 1, 12);
     if (!(m4 > m3 && m3 > m2)) throw new Error('Movement thresholds must decrease: very fast > fast > slow');
+    // A setup saved before the risk method existed keeps the weighted score until an administrator switches it.
+    const method = String(o.method ?? (o.factors ? 'weighted' : base.method));
+    if (!['risk', 'weighted'].includes(method)) throw new Error('Choose the criticality method');
+    const used = FACTORS.filter((f) => factors[f.code].enabled);
+    if (method === 'risk' && !used.some((f) => ROLE[f.code] === 'consequence')) throw new Error('The risk method needs at least one consequence factor');
+    const letters = (v: unknown) => typeof v === 'string' && ['A', 'B', 'C', 'D'].includes(v);
+    const rawMatrix = Array.isArray(o.matrix) ? o.matrix : base.matrix;
+    if (rawMatrix.length !== 3 || rawMatrix.some((r: unknown) => !Array.isArray(r) || r.length !== 3 || !r.every(letters))) throw new Error('The risk matrix needs a class A to D in each of its nine cells');
+    const matrix = rawMatrix.map((r: string[]) => [...r]) as Matrix;
+    // Higher consequence or likelihood may never give a lower class: the matrix must be monotonic.
+    for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) {
+        if (j < 2 && classRank(matrix[i][j + 1]) < classRank(matrix[i][j])) throw new Error('In the risk matrix, a higher likelihood cannot give a lower class');
+        if (i < 2 && classRank(matrix[i][j]) < classRank(matrix[i + 1][j])) throw new Error('In the risk matrix, a higher consequence cannot give a lower class');
+    }
+    const rb = o.reviewMonthsByClass && typeof o.reviewMonthsByClass === 'object' ? o.reviewMonthsByClass : null;
+    const reviewMonths = whole(o.reviewMonths ?? 12, 'Review interval (months)', 3, 60);
+    const reviewMonthsByClass = Object.fromEntries(CLASSES.map((c) => [c, whole(rb ? rb[c] : rb === null && o.factors ? reviewMonths : base.reviewMonthsByClass[c], `Review interval for class ${c} (months)`, 3, 60)])) as Record<ClassLetter, number>;
+    const scope = Array.isArray(o.scopeCategories) ? [...new Set(o.scopeCategories.map((x: unknown) => String(x).trim().toUpperCase()).filter(Boolean))] as string[] : [];
+    if (scope.length > 100 || scope.some((c) => !/^[A-Z0-9_-]{1,30}$/.test(c))) throw new Error('Scope must list up to 100 valid material category codes');
+    const pt = o.pattern && typeof o.pattern === 'object' ? o.pattern : base.pattern;
+    const dec = (x: unknown, label: string, min: number, max: number) => {
+        const n = Number(x);
+        if (!Number.isFinite(n) || n < min || n > max) throw new Error(`${label} must be from ${min} to ${max}`);
+        return Math.round(n * 100) / 100;
+    };
+    const pattern = { adi: dec(pt.adi, 'ADI cut-off', 1, 6), cv2: dec(pt.cv2, 'CV² cut-off', 0.1, 4), x: dec(pt.x, 'X limit', 0.1, 2), y: dec(pt.y, 'Y limit', 0.2, 4) };
+    if (pattern.y <= pattern.x) throw new Error('The Y limit must be above the X limit');
     return {
         factors,
         hseOverride: o.hseOverride !== false,
@@ -135,28 +218,101 @@ export function readSetup(v: unknown): CriticalitySetup {
         cutoff,
         minHistoryMonths: whole(o.minHistoryMonths ?? 6, 'Minimum issue history (months)', 6, 24),
         thresholds: { m4, m3, m2 },
-        reviewMonths: whole(o.reviewMonths ?? 12, 'Review interval (months)', 3, 60),
+        reviewMonths,
+        method: method as Method,
+        matrix,
+        supplyUplift: o.supplyUplift !== false,
+        redundancyMitigation: o.redundancyMitigation !== false,
+        reviewMonthsByClass,
+        scopeCategories: scope,
+        pattern,
     };
+}
+
+/** The weighted-score class (original method). */
+function weightedClass(setup: CriticalitySetup, used: Factor[], ratings: Record<string, number>) {
+    let score = 0, min = 0, max = 0;
+    for (const f of used) {
+        const w = setup.factors[f.code].weight;
+        min += w; max += 3 * w; score += w * (Number(ratings[f.code]) || 1);
+    }
+    const scaled = max > min ? 1 + (3 * (score - min)) / (max - min) : 1;
+    const level = Math.min(4, Math.max(1, Math.round(scaled)));
+    return { score, min, max, scaled, cls: classOfLevel(level) };
+}
+const clamp3 = (n: number) => Math.min(3, Math.max(1, n));
+/** The risk-based class: worst consequence × likelihood on the matrix, supply uplift. */
+function riskClass(setup: CriticalitySetup, used: Factor[], ratings: Record<string, number>) {
+    const r = (code: string) => (used.some((f) => f.code === code) ? Number(ratings[code]) || 1 : 0);
+    const consequence = used.filter((f) => ROLE[f.code] === 'consequence');
+    const rated = (f: Factor) => Number(ratings[f.code]) || 1;
+    let c = Math.max(1, ...consequence.map(rated));
+    const driver = consequence.filter((f) => rated(f) === c).map((f) => f.name).join(', ');
+    const hseDriven = consequence.some((f) => f.hse && rated(f) === c);
+    let mitigated = false;
+    if (setup.redundancyMitigation && r('RED') === 1 && c > 1 && !hseDriven) { c -= 1; mitigated = true; }
+    let l = r('FRQ') || 2;
+    if (r('PRE') === 3) l = clamp3(l + 1);
+    if (r('PRE') === 1) l = clamp3(l - 1);
+    const supply = used.filter((f) => ROLE[f.code] === 'supply');
+    const wsum = supply.reduce((n, f) => n + setup.factors[f.code].weight, 0);
+    const mean = wsum ? supply.reduce((n, f) => n + setup.factors[f.code].weight * (Number(ratings[f.code]) || 1), 0) / wsum : 2;
+    const sr = clamp3(Math.floor(mean + 0.5));
+    const matrixClass = setup.matrix[3 - c][l - 1];
+    const uplifted = setup.supplyUplift && sr === 3 && matrixClass !== 'A';
+    const cls = uplifted ? classOfLevel(classRank(matrixClass) + 1) : matrixClass;
+    return { consequence: c, consequenceDriver: driver, mitigated, likelihood: l, supplyRisk: sr, supplyMean: Math.round(mean * 100) / 100, matrixClass, uplifted, cls, riskIndex: c * l * sr };
 }
 
 /** Criticality from the ratings of the factors declared in setup. */
 export function scoreCriticality(setup: CriticalitySetup, ratings: Record<string, number>) {
     const used = FACTORS.filter((f) => setup.factors[f.code]?.enabled);
     const missing = used.filter((f) => ![1, 2, 3].includes(Number(ratings[f.code]))).map((f) => f.name);
-    let score = 0;
-    let min = 0;
-    let max = 0;
-    for (const f of used) {
-        const w = setup.factors[f.code].weight;
-        min += w;
-        max += 3 * w;
-        score += w * (Number(ratings[f.code]) || 1);
-    }
-    const scaled = max > min ? 1 + (3 * (score - min)) / (max - min) : 1;
-    const level = Math.min(4, Math.max(1, Math.round(scaled)));
     const overrideBy = setup.hseOverride ? used.filter((f) => f.hse && Number(ratings[f.code]) === 3).map((f) => f.name) : [];
-    const cls: ClassLetter = overrideBy.length ? 'A' : classOfLevel(level);
-    return { complete: missing.length === 0, missing, score, min, max, scaled: Math.round(scaled * 100) / 100, level, criticalityClass: cls, overrideBy };
+    const method: Method = setup.method ?? 'weighted';
+    const classOf = (rt: Record<string, number>): ClassLetter => {
+        const hse = setup.hseOverride && used.some((f) => f.hse && Number(rt[f.code]) === 3);
+        if (hse) return 'A';
+        return method === 'risk' ? riskClass(setup, used, rt).cls : weightedClass(setup, used, rt).cls;
+    };
+    const w = weightedClass(setup, used, ratings);
+    const risk = method === 'risk' ? riskClass(setup, used, ratings) : null;
+    const cls: ClassLetter = overrideBy.length ? 'A' : risk ? risk.cls : w.cls;
+    // Sensitivity: which single one-step rating change would move the class, and where to.
+    const swing: Array<{ factor: string; code: string; from: number; to: number; becomes: ClassLetter }> = [];
+    if (!missing.length) for (const f of used) {
+        const from = Number(ratings[f.code]);
+        for (const to of [from - 1, from + 1]) {
+            if (to < 1 || to > 3) continue;
+            const becomes = classOf({ ...ratings, [f.code]: to });
+            if (becomes !== cls) swing.push({ factor: f.name, code: f.code, from, to, becomes });
+        }
+    }
+    return {
+        complete: missing.length === 0, missing, method,
+        score: risk ? risk.riskIndex : w.score, min: risk ? 1 : w.min, max: risk ? 27 : w.max,
+        scaled: Math.round(w.scaled * 100) / 100, level: classRank(cls), criticalityClass: cls, overrideBy,
+        risk, borderline: swing.length > 0, swing: swing.slice(0, 12),
+    };
+}
+
+/** Demand pattern (Syntetos–Boylan) and XYZ variability from monthly demand. */
+export function demandPattern(setup: CriticalitySetup, months: number[]) {
+    const p = setup.pattern ?? defaultSetup().pattern;
+    const n = months.length;
+    const sizes = months.filter((q) => q > 0);
+    if (!n || !sizes.length) return { pattern: 'none' as const, label: PATTERNS.none, adi: null, cv2: null, xyz: null as null | 'X' | 'Y' | 'Z', cv: null, method: 'Hold by criticality; no demand to forecast' };
+    const adi = Math.round((n / sizes.length) * 100) / 100;
+    const mean = sizes.reduce((a, b) => a + b, 0) / sizes.length;
+    const sd = Math.sqrt(sizes.reduce((a, b) => a + (b - mean) ** 2, 0) / sizes.length);
+    const cv2 = Math.round(((sd / mean) ** 2) * 100) / 100;
+    const allMean = months.reduce((a, b) => a + b, 0) / n;
+    const allSd = Math.sqrt(months.reduce((a, b) => a + (b - allMean) ** 2, 0) / n);
+    const cv = allMean > 0 ? Math.round((allSd / allMean) * 100) / 100 : null;
+    const pattern = adi < p.adi ? (cv2 < p.cv2 ? 'smooth' : 'erratic') : cv2 < p.cv2 ? 'intermittent' : 'lumpy';
+    const xyz = cv == null ? null : cv <= p.x ? 'X' : cv <= p.y ? 'Y' : 'Z';
+    const method = { smooth: 'Exponential smoothing or moving average', erratic: 'Smoothing with a higher safety stock', intermittent: 'Croston / SBA', lumpy: 'SBA, or hold by criticality (min/max)' }[pattern];
+    return { pattern, label: PATTERNS[pattern], adi, cv2, xyz, cv, method };
 }
 
 /** Monthly consumption over the last twelve months, oldest first, and how much issue history exists. */
@@ -182,7 +338,8 @@ export function movementFromData(setup: CriticalitySetup, d: MovementData) {
     // Share of the year's quantity issued in the busiest month: near 1 means one-off buying, not regular use.
     const busiest = recent.reduce((n, m) => Math.max(n, m.quantity), 0);
     const concentration = total > 0 ? Math.round((busiest / total) * 100) : 0;
-    return { enough, coveredMonths: covered, monthsWithIssues: issued, monthsWithIssuesPerYear: perYear, annualQuantity, concentrationPct: concentration, level };
+    const demand = demandPattern(setup, recent.map((m) => Math.max(0, m.quantity)));
+    return { enough, coveredMonths: covered, monthsWithIssues: issued, monthsWithIssuesPerYear: perYear, annualQuantity, concentrationPct: concentration, level, demand };
 }
 
 export const MOVEMENT_LABELS = ['', 'Very slow moving', 'Slow moving', 'Fast moving', 'Very fast moving'];

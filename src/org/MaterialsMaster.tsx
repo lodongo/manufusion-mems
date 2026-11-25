@@ -1,17 +1,20 @@
 import { useEffect, useRef, useState } from 'react';
-import { Plus, ArrowLeft, ArrowRight, Save, Send } from 'lucide-react';
+import { Plus, ArrowLeft, ArrowRight, Save, Send, AlertTriangle, RefreshCw, Warehouse } from 'lucide-react';
 import { callBackend } from '../lib/backend';
-import { Alert, Field, SelectField, Tabs } from '../components/ui';
-import RichTable from '../components/RichTable';
-import { Button, Card, PageTitle, Spinner, useLoad } from '../admin/kit';
+import { Alert, Field, SearchField, SelectField, Tabs, TextArea } from '../components/ui';
+import { Screen, Segmented, useConfirm } from '../components/screen';
+import RichTable, { type Column } from '../components/RichTable';
+import { Badge, Button, Spinner, useLoad } from '../admin/kit';
 import type { AttrDef, DictTree, ClassDetail } from '../components/AssetDictionaryBrowser';
-import { MATERIAL_LABELS } from '../components/AssetDictionaryBrowser';
-import { appConfirm, appPrompt } from '../components/dialogs';
+import { appConfirm } from '../components/dialogs';
 import CatalogueAttributeForm, { attributeIssues } from '../components/CatalogueAttributeForm';
 import { ChoiceChip, ConfirmBox, MatchCard, OpenItems, OptionCard, ReviewSection, ShortTextPreview, StepSection, WizardBar, type WizardStep } from './materialCreateUi';
 import { materialMasterHierarchy } from './materialMasterHierarchy';
 import { navigate } from '../lib/route';
 import MaterialMasterDashboard from './MaterialMasterDashboard';
+import MaterialApprovalsDashboard from './MaterialApprovalsDashboard';
+import MaterialWorkflowOverview from './MaterialWorkflowOverview';
+import MaterialIdentity, { nonConformingNumber, storesNumberText, type MaterialNumbers } from './materialIdentity';
 
 /** Supply relationships, including a selection-only confidential proprietary route. */
 const SUPPLY_TYPES: Array<{ code: 'OEM' | 'OCM' | 'BIDDED' | 'PROPRIETARY_SUPPLIER'; title: string; text: string; part: string }> = [
@@ -21,7 +24,11 @@ const SUPPLY_TYPES: Array<{ code: 'OEM' | 'OCM' | 'BIDDED' | 'PROPRIETARY_SUPPLI
     { code: 'PROPRIETARY_SUPPLIER', title: 'Proprietary Supplier', text: 'Material supplied through a proprietary source. No vendor details are needed; an optional proprietary part number may be recorded.', part: '' },
 ];
 
-type SavedMaterial = {requestId?:string;masterDataId?:string;warehouseRestrictionCodes?:string[];warehouseRestriction?:string;clusterCode?:string; canApprove?:boolean;canEdit?:boolean;canDelete?:boolean;canSubmit?:boolean;workflowStage?:string;workflowCode?:string;createdBy?:string;submittedBy?:string;warehouseId?:string;approvalLevel?:number;uom?:string;oemPartNumber?:string;ocmPartNumber?:string;generalPartNumber?:string;proprietaryPartNumber?:string; id: string; name: string; shortText: string; categoryCode: string; subcategoryCode: string; familyCode: string; materialCode: string; createdAt: string; status?:string; attributes?:Record<string,string>; assemblyIds?:string[]; supplyType?:string;materialNumber?:string;pushedAt?:string;warehouseIds?:string[] };
+type SavedMaterial = {returned?:boolean;materialNumberAliases?:string[];submittedAt?:string;requestId?:string;masterDataId?:string;warehouseRestrictionCodes?:string[];warehouseRestriction?:string;clusterCode?:string; canApprove?:boolean;canEdit?:boolean;canDelete?:boolean;canSubmit?:boolean;workflowStage?:string;workflowCode?:string;createdBy?:string;submittedBy?:string;warehouseId?:string;approvalLevel?:number;uom?:string;oemPartNumber?:string;ocmPartNumber?:string;generalPartNumber?:string;proprietaryPartNumber?:string; id: string; name: string; shortText: string; categoryCode: string; subcategoryCode: string; familyCode: string; materialCode: string; createdAt: string; status?:string; attributes?:Record<string,string>; assemblyIds?:string[]; supplyType?:string;materialNumber?:string;pushedAt?:string;warehouseIds?:string[] };
+type WorkView='waiting'|'returned'|'drafts'|'mine';
+type Section='work'|'materials'|'extensions'|'dashboard'|'workflow';
+type WorkRow={kind:'creation'|'extension';id:string;sourceId:string;name:string;shortText?:string;numbers:MaterialNumbers;status:string;stage:string;warehouseId?:string;at:string;mine:boolean;waiting:boolean;returned:boolean;draft:boolean;inApproval:boolean};
+type ExtensionRow={id:string;sourceId:string;warehouseId:string;materialName:string;materialNumber?:string;sourceMasterDataId?:string;status:string;approvalLevel:number;workflowStage?:string;canApprove?:boolean;createdBy?:string;createdAt?:string;submittedAt?:string;justification?:string};
 const treeApi = '/api/org/procurement/catalog/tree';
 const itemApi = '/api/org/procurement/catalog/item';
 const endpoint = '/api/org/procurement/materials';
@@ -86,7 +93,13 @@ export default function MaterialsMaster() {
     const [extendWarehouse,setExtendWarehouse]=useState('');
     const [extendVerified,setExtendVerified]=useState(false);
     const [extendBusy,setExtendBusy]=useState(false);
-    const {data:extensionRecords,reload:reloadExtensions}=useLoad(()=>callBackend<{items:Array<{id:string;sourceId:string;warehouseId:string;materialName:string;status:string;approvalLevel:number;workflowStage?:string;canApprove?:boolean;createdBy?:string}>}>(endpoint+'/extensions'));
+    const {data:extensionRecords,reload:reloadExtensions}=useLoad(()=>callBackend<{items:ExtensionRow[]}>(endpoint+'/extensions'));
+    const numbers=useLoad(()=>callBackend<{count:number;items:Array<{id:string;problem:string}>;canSync:boolean}>(endpoint+'/numbers/check').catch(()=>({count:0,items:[],canSync:false})));
+    const [section,setSection]=useState<Section>('work');
+    const [workView,setWorkView]=useState<WorkView>('waiting');
+    const [syncNotice,setSyncNotice]=useState('');
+    const [extendJustification,setExtendJustification]=useState('');
+    const confirm=useConfirm();
     const [reviewMaterial,setReviewMaterial]=useState<SavedMaterial|null>(null);
         const editDraft = (m:SavedMaterial) => {
         if(!m.canEdit)return;
@@ -102,7 +115,6 @@ export default function MaterialsMaster() {
             assemblyIds:Array.isArray(m.assemblyIds)?m.assemblyIds.join(','):'',
         });
     };
-    const [listView,setListView]=useState('my_drafts');
     const testOverride=records?.testOverride===true;
     const openExtension=(source:{id:string;name:string;status?:string})=>{
         if(!records?.canExtend){setError('You do not have permission to extend an organization material.');return;}
@@ -111,12 +123,12 @@ export default function MaterialsMaster() {
             setError('Only an approved organization material can be extended. Pending or draft materials must first complete the creation workflow.');
             return;
         }
-        setExtendSource(record);setExtendWarehouse('');setExtendVerified(false);setError('');
+        setExtendSource(record);setExtendWarehouse('');setExtendVerified(false);setExtendJustification('');setError('');
     };
     const approvedMasterMaterials=(records?.items??[]).filter(m=>['approved','active'].includes(m.status||''));
     const extensionSearchResults=approvedMasterMaterials.filter(m=>{
         const q=extendSearch.trim().toLowerCase();
-        return !q||[m.name,m.shortText,m.materialNumber,m.id,m.categoryCode,m.familyCode]
+        return !q||[m.name,m.shortText,m.materialNumber,m.masterDataId,m.id,m.categoryCode,m.familyCode,m.oemPartNumber,m.ocmPartNumber,m.proprietaryPartNumber,...(m.materialNumberAliases??[])]
             .some(v=>(v||'').toLowerCase().includes(q));
     }).slice(0,80);
     const extensionTargets=(options?.warehouses??[]).filter(w=>
@@ -125,7 +137,6 @@ export default function MaterialsMaster() {
         !(extendSource.warehouseIds??[]).includes(w.id)&&
         !(extensionRecords?.items??[]).some(e=>e.sourceId===extendSource.id&&
             e.warehouseId===w.id&&!['rejected','cancelled','workflow_terminated'].includes(e.status)));
-    const [listSearch,setListSearch]=useState('');
     const [similar,setSimilar]=useState<{items:Array<{id:string;name:string;shortText:string;warehouseId:string;score:number;matchedFields:string[];attributeMatches:number;attributeTotal:number;partMatch:boolean;status:string}>;totalCompared:number}|null>(null);
     // Every selection is derived from the active PRC Materials Master; no industry
     // recommendation may silently hide a valid material or a saved draft choice.
@@ -344,7 +355,7 @@ export default function MaterialsMaster() {
     });
     const extensionPanel=extendSource&&<StepSection title='Extend organization material' hint='Source: Organization Materials Master (not the MEMS Admin catalogue). Warehouse extension is governed by PRC-002.'>
         <p className='mb-3 break-words text-sm font-semibold text-ink'>{extendSource.name}
-            <span className='block text-xs font-normal text-muted'>{extendSource.materialNumber||extendSource.id} · {extendSource.shortText}</span>
+            <span className='block text-xs font-normal text-muted'>{storesNumberText(extendSource)} · {extendSource.shortText}</span>
         </p>
         {extensionTargets.length===0&&<Alert tone='warn'>No eligible warehouses are available for extension. The material may already be mapped, an extension may be pending, or the warehouse category may not be configured.</Alert>}
         <SelectField id='mm-extend-wh' label='Target warehouse' required value={extendWarehouse}
@@ -352,17 +363,20 @@ export default function MaterialsMaster() {
             <option value=''>Select accessible warehouse</option>
             {extensionTargets.map(w=><option key={w.id} value={w.id}>{w.name} ({w.code})</option>)}
         </SelectField>
+        <div className='mt-3'><TextArea label='Why is it needed in this warehouse? *' value={extendJustification} maxLength={600} onChange={e=>setExtendJustification(e.target.value)}
+            hint={`${extendJustification.trim().length<10?'At least 10 characters. ':''}${extendJustification.length}/600. The approver reads this.`}
+            error={extendJustification.length>0&&extendJustification.trim().length<10?'Give at least 10 characters.':undefined}/></div>
         <div className='mt-3'><ConfirmBox checked={extendVerified} onChange={setExtendVerified}>
             I verified this existing approved material, its classification and the target warehouse. No duplicate extension should be created.
         </ConfirmBox></div>
         <div className='mt-4 flex flex-wrap gap-2'>
             <Button variant='secondary' className='flex-1 sm:flex-none' onClick={()=>setExtendSource(null)}>Cancel</Button>
-            <Button testOverride={testOverride} className='flex-[2] sm:flex-none' disabled={!extendWarehouse||!extendVerified||extendBusy} busy={extendBusy}
+            <Button testOverride={testOverride} className='flex-[2] sm:flex-none' disabled={!extendWarehouse||!extendVerified||extendJustification.trim().length<10||extendBusy} busy={extendBusy}
                 onClick={async()=>{setExtendBusy(true);setError('');try{
-                    await callBackend(endpoint+'/extension',{sourceId:extendSource.id,warehouseId:extendWarehouse});
+                    await callBackend(endpoint+'/extension',{sourceId:extendSource.id,warehouseId:extendWarehouse,justification:extendJustification.trim()});
                     setExtendSource(null);setExtendSearchOpen(false);setAdding(false);reloadExtensions();reload();
                 }catch(e){setError(e instanceof Error?e.message:'Material extension request failed.');}
-                finally{setExtendBusy(false);}}}>Submit extension through PRC-002 workflow</Button>
+                finally{setExtendBusy(false);}}}>Submit extension for approval</Button>
         </div>
     </StepSection>;
 
@@ -520,7 +534,7 @@ export default function MaterialsMaster() {
                     .map(c=><button type='button' key={c.code}
                         aria-pressed={registration.clusterCode===c.code}
                         disabled={!c.adoptable||!!applyingCluster||saving}
-                        className={`block w-full rounded-xl border p-3 text-left disabled:cursor-not-allowed disabled:opacity-70 ${registration.clusterCode===c.code?'border-emerald-600 bg-emerald-50/50':'border-line bg-panel'}`}
+                        className={`block w-full rounded-xl border p-3 text-left disabled:cursor-not-allowed disabled:opacity-70 ${registration.clusterCode===c.code?'border-brand bg-brand/10':'border-line bg-panel'}`}
                         onClick={()=>void selectCluster(c)}>
                         <span className='block font-semibold text-ink'>{c.code} · {c.name}</span>
                         <span className='block text-xs text-soft'>{c.locationName} · Material subcategories: {c.subcategoryCodes.join(', ')||'None'}</span>
@@ -574,40 +588,122 @@ export default function MaterialsMaster() {
     if (adding) return wizard;
     if (reviewMaterial) return <MaterialMasterDashboard
         id={reviewMaterial.id}
-        onBack={()=>{setReviewMaterial(null);reload();reloadExtensions();}}
+        onBack={()=>{setReviewMaterial(null);reload();reloadExtensions();numbers.reload();}}
         onChanged={()=>{reload();reloadExtensions();}}
         onEdit={id=>{const m=records?.items.find(x=>x.id===id);if(m){editDraft(m);setReviewMaterial(null);}}}
-        onExtend={id=>{const m=records?.items.find(x=>x.id===id);if(m){openExtension(m);setExtendSearchOpen(true);setReviewMaterial(null);}}}
+        onExtend={id=>{const m=records?.items.find(x=>x.id===id);if(m){openExtension(m);setReviewMaterial(null);}}}
     />;
-    return <div className='space-y-4'>
-        <PageTitle title='Materials Master' subtitle='Create and manage organization materials. Extend existing approved organization materials without creating a new catalogue entry.'
-            action={<div className='flex flex-wrap gap-2'>
-                {records?.canExtend&&<Button testOverride={testOverride} variant='secondary' onClick={()=>{setExtendSearchOpen(p=>!p);setExtendSource(null);setError('');}}>
-                    Extend existing
-                </Button>}
-                {records?.canCreate&&<Button testOverride={testOverride} onClick={startNew}><Plus className='h-4 w-4'/>Add material</Button>}
-            </div>}/>
-        {error && <Alert tone='error'>{error}</Alert>}
-        {extendSearchOpen&&<Card className='space-y-3'>
-            <h2 className='font-semibold text-ink'>Extend from Organization Materials Master</h2>
-            <p className='text-xs text-muted'>Search existing approved materials across this organization by material number, name, description, category or family. This is the organization's materials database, not the MEMS Admin catalogue.</p>
-            <Field id='org-material-search' label='Search organization materials' value={extendSearch}
-                placeholder='Material number, material name or family' onChange={e=>setExtendSearch(e.target.value)}/>
-            <p className='text-xs text-muted'>{extensionSearchResults.length} matching approved material(s) shown</p>
-            <div className='max-h-[50dvh] space-y-2 overflow-y-auto overscroll-contain'>
-                {extensionSearchResults.map(m=><div key={m.id}
-                    className='flex flex-wrap items-center justify-between gap-2 rounded-xl border border-line p-3'>
-                    <div className='min-w-0 flex-1'>
-                        <p className='text-sm font-semibold text-ink'>{m.name}</p>
-                        <p className='text-xs text-soft'>{m.materialNumber||m.id} · {m.shortText||m.familyCode}</p>
-                        <p className='text-xs text-soft'>Current warehouses: {[m.warehouseId,...(m.warehouseIds??[])].filter(Boolean).filter((v,i,a)=>a.indexOf(v)===i).length}</p>
-                    </div>
-                    <Button testOverride={testOverride} variant='secondary' onClick={()=>openExtension(m)}>Extend</Button>
-                </div>)}
-                {!extensionSearchResults.length&&<Alert tone='info'>No approved organization material matches this search. A material must be approved before it can be extended.</Alert>}
-            </div>
-        </Card>}
-        {extensionPanel}
-        {recordsLoading?<Spinner/>:<Card><div className='-mx-1 mb-4 flex gap-2 overflow-x-auto overscroll-x-contain px-1 pb-1 sm:flex-wrap'>{([{key:'my_approvals',label:'Awaiting My Approval',count:(records?.items??[]).filter(m=>m.canApprove).length,show:!!records?.isApprover},{key:'my_requests',label:'My Submitted Requests',count:(records?.items??[]).filter(m=>m.submittedBy===records?.currentUserId&&m.status==='pending_approval').length,show:true},{key:'my_drafts',label:'Drafts I Can Manage',count:(records?.items??[]).filter(m=>m.status==='draft'&&(m.canEdit||m.canDelete||m.canSubmit)).length,show:true},{key:'approved',label:'Approved Materials',count:(records?.items??[]).filter(m=>['approved','active','disabled'].includes(m.status??'')).length,show:true},{key:'other_requests',label:'Other Pending Requests',count:(records?.items??[]).filter(m=>m.status==='pending_approval'&&m.submittedBy!==records?.currentUserId&&!m.canApprove).length,show:true}] as const).filter(t=>t.show).map(t=><button type='button' key={t.key} onClick={()=>setListView(t.key)} className={'min-h-11 shrink-0 whitespace-nowrap rounded-xl px-3 py-2 text-sm font-medium border '+(listView===t.key?'bg-brand/15 text-ink border-brand':'bg-page text-soft border-line')}>{t.label} <span className='ml-1 rounded-full bg-slate-700 px-2 py-0.5 text-xs'>{t.count}</span></button>)}</div><div className='flex flex-wrap items-center justify-between gap-2 mb-3'><h2 className='font-semibold text-white'>{({my_approvals:'Awaiting My Approval',my_requests:'My Submitted Requests',my_drafts:'Drafts I Can Manage',approved:'Approved Materials',other_requests:'Other Pending Requests'} as Record<string,string>)[listView]}</h2></div><RichTable<SavedMaterial> id={'materials-'+listView} title={({my_approvals:'Awaiting My Approval',my_requests:'My Submitted Requests',my_drafts:'Drafts I Can Manage',approved:'Approved Materials',other_requests:'Other Pending Requests'} as Record<string,string>)[listView]} fileName={'materials_'+listView} rows={(records?.items??[]).filter(m=>listView==='my_approvals'?m.canApprove:listView==='my_requests'?m.submittedBy===records?.currentUserId&&m.status==='pending_approval':listView==='my_drafts'?m.status==='draft'&&(m.canEdit||m.canDelete||m.canSubmit):listView==='approved'?['approved','active','disabled'].includes(m.status??''):m.status==='pending_approval'&&m.submittedBy!==records?.currentUserId&&!m.canApprove)} rowKey={m=>m.id} onRowClick={setReviewMaterial} empty='No materials in this view.' columns={[{key:'material',label:'Material / Short Text',value:m=>m.name+' '+(m.shortText??''),render:m=><span className='block min-w-[12rem] max-w-[18rem] whitespace-normal'><span className='block font-semibold text-white'>{m.name}</span><span className='block text-xs text-slate-400 line-clamp-2'>{m.shortText}</span></span>},{key:'reference',label:'Reference',value:m=>(m.masterDataId||m.id)+' '+(m.materialCode??''),render:m=><span className='block font-mono text-xs'>{m.masterDataId||m.id}<span className='block text-slate-400'>{m.masterDataId?'Request '+m.id+' · ':''}{m.materialCode}</span></span>},{key:'parts',label:'Part numbers',hidden:true,value:m=>[m.oemPartNumber,m.ocmPartNumber,m.generalPartNumber].filter(Boolean).join(', ')},{key:'category',label:'Category / Family',value:m=>m.categoryCode+' '+(m.familyCode??''),render:m=><span className='block'>{m.categoryCode}<span className='block text-xs text-slate-400'>{m.familyCode}</span></span>},{key:'warehouse',label:'Warehouse',value:m=>options?.warehouses.find(w=>w.id===m.warehouseId)?.name??m.warehouseId??'—'},{key:'status',label:'Status',value:m=>(m.status??'draft').replaceAll('_',' '),render:m=><span className='rounded-full bg-slate-800 px-2 py-1 text-xs'>{(m.status??'draft').replaceAll('_',' ')}</span>},{key:'submitted',label:'Submitted',type:'date',value:m=>m.createdAt??'',render:m=>m.createdAt?new Date(m.createdAt).toLocaleDateString():'—'},{key:'approval',label:'Workflow stage',value:m=>m.status==='pending_approval'?(m.workflowStage||'Workflow assignment required'):'—'},]}/></Card>}
-    </div>;
+
+    const items=records?.items??[];
+    const uid=records?.currentUserId;
+    const extensions=extensionRecords?.items??[];
+    const whName=(id?:string)=>options?.warehouses.find(w=>w.id===id)?.name??id??'—';
+    const work:WorkRow[]=[
+        ...items.map(m=>({kind:'creation' as const,id:m.id,sourceId:m.id,name:m.name,shortText:m.shortText,numbers:m,status:m.status??'draft',stage:m.workflowStage??'',
+            warehouseId:m.warehouseId,at:m.submittedAt||m.createdAt,mine:m.createdBy===uid||m.submittedBy===uid,
+            waiting:!!m.canApprove,returned:m.status==='draft'&&!!m.returned,draft:m.status==='draft'&&!m.returned&&!!(m.canEdit||m.canDelete||m.canSubmit),inApproval:m.status==='pending_approval'})),
+        ...extensions.map(e=>({kind:'extension' as const,id:e.id,sourceId:e.sourceId,name:e.materialName,shortText:'Extension to '+whName(e.warehouseId),numbers:{materialNumber:e.materialNumber,masterDataId:e.sourceMasterDataId,requestId:e.id},
+            status:e.status,stage:e.status==='returned'?'Returned for correction':e.workflowStage??'',warehouseId:e.warehouseId,at:e.submittedAt||e.createdAt||'',mine:e.createdBy===uid,
+            waiting:!!e.canApprove,returned:e.status==='returned'&&e.createdBy===uid,draft:false,inApproval:e.status==='pending_approval'})),
+    ];
+    const workViews:Array<{value:WorkView;label:string;rows:WorkRow[]}>=[
+        {value:'waiting',label:'Waiting for me',rows:work.filter(r=>r.waiting)},
+        {value:'returned',label:'Returned to me',rows:work.filter(r=>r.returned&&r.mine)},
+        {value:'drafts',label:'My drafts',rows:work.filter(r=>r.draft)},
+        {value:'mine',label:'My requests in approval',rows:work.filter(r=>r.mine&&r.inApproval)},
+    ];
+    const currentWork=workViews.find(v=>v.value===workView)??workViews[0];
+    const register=items.filter(m=>m.status!=='draft');
+    const openRow=(r:{kind:string;sourceId:string})=>{const m=items.find(x=>x.id===r.sourceId);if(m)setReviewMaterial(m);else setError('The source material is not visible to you.');};
+    const syncNumbers=()=>confirm.ask({
+        title:'Synchronise material numbers',
+        message:<><p>{numbers.data?.count} approved material{numbers.data?.count===1?'':'s'} will get a conforming stores number (and a master data number where missing). Earlier numbers stay searchable as aliases; posted journals and documents keep the number they were posted under.</p></>,
+        confirmLabel:'Synchronise',phrase:'SYNCHRONISE',
+    },async()=>{
+        const r=await callBackend<{synchronised:Array<{materialId:string;from:string;materialNumber:string}>;failed:Array<{materialId:string;reason:string}>;remaining:number}>(endpoint+'/numbers/sync',{confirm:'SYNCHRONISE'});
+        setSyncNotice(`${r.synchronised.length} synchronised${r.failed.length?`, ${r.failed.length} failed (${r.failed[0].reason})`:''}${r.remaining?`, ${r.remaining} remaining — run it again`:''}.`);
+        numbers.reload();reload();reloadExtensions();
+    });
+    const workColumns:Column<WorkRow>[]=[
+        {key:'material',label:'Material',value:r=>r.name+' '+(r.shortText??''),render:r=><span className='block min-w-[12rem] max-w-[18rem] whitespace-normal'><span className='block font-semibold text-ink'>{r.name}</span><span className='block text-xs text-soft line-clamp-2'>{r.shortText}</span></span>},
+        {key:'request',label:'Request',value:r=>r.id,render:r=><span className='font-mono text-xs'>{r.id}<span className='block text-muted'>{r.kind==='creation'?'New material':'Extension'}</span></span>},
+        {key:'stage',label:'Stage',value:r=>r.stage||r.status.replaceAll('_',' ')},
+        {key:'warehouse',label:'Warehouse',value:r=>whName(r.warehouseId)},
+        {key:'at',label:'Since',type:'date',value:r=>(r.at||'').slice(0,10)},
+        {key:'numbers',label:'Stores number',value:r=>storesNumberText(r.numbers),hidden:true},
+    ];
+    const registerColumns:Column<SavedMaterial>[]=[
+        {key:'number',label:'Stores number',value:m=>m.materialNumber&&!nonConformingNumber(m.materialNumber)?m.materialNumber:'',render:m=><span className='font-mono text-xs font-semibold text-ink'>{storesNumberText(m)}</span>},
+        {key:'material',label:'Material / short text',value:m=>m.name+' '+(m.shortText??''),render:m=><span className='block min-w-[12rem] max-w-[18rem] whitespace-normal'><span className='block font-semibold text-ink'>{m.name}</span><span className='block text-xs text-soft line-clamp-2'>{m.shortText}</span></span>},
+        {key:'master',label:'Master data number',value:m=>m.masterDataId??''},
+        {key:'request',label:'Request number',value:m=>m.requestId||m.id,hidden:true},
+        {key:'category',label:'Category / family',value:m=>m.categoryCode+' '+(m.familyCode??''),render:m=><span className='block'>{m.categoryCode}<span className='block text-xs text-soft'>{m.familyCode}</span></span>},
+        {key:'warehouses',label:'Warehouses',type:'number',value:m=>new Set([m.warehouseId,...(m.warehouseIds??[])].filter(Boolean)).size},
+        {key:'status',label:'Status',value:m=>m.workflowStage||(m.status??'').replaceAll('_',' '),render:m=><Badge tone={['approved','active'].includes(m.status??'')?'brand':m.status==='pending_approval'?'warn':['rejected','workflow_terminated'].includes(m.status??'')?'danger':'muted'}>{m.status==='pending_approval'?'Under approval':(m.status??'').replaceAll('_',' ')}</Badge>},
+        {key:'parts',label:'Part numbers',hidden:true,value:m=>[m.oemPartNumber,m.ocmPartNumber,m.generalPartNumber,m.proprietaryPartNumber].filter(Boolean).join(', ')},
+        {key:'aliases',label:'Earlier numbers',hidden:true,value:m=>(m.materialNumberAliases??[]).join(', ')},
+        {key:'created',label:'Created',type:'date',value:m=>(m.createdAt??'').slice(0,10)},
+    ];
+    const extensionColumns:Column<ExtensionRow>[]=[
+        {key:'id',label:'Extension request',value:e=>e.id,render:e=><span className='font-mono text-xs font-semibold text-ink'>{e.id}</span>},
+        {key:'material',label:'Material',value:e=>e.materialName+' '+(e.materialNumber??''),render:e=><span className='block min-w-[10rem] whitespace-normal'><span className='block font-semibold text-ink'>{e.materialName}</span><span className='block font-mono text-xs text-soft'>{e.materialNumber}</span></span>},
+        {key:'warehouse',label:'To warehouse',value:e=>whName(e.warehouseId)},
+        {key:'status',label:'Status',value:e=>e.status==='pending_approval'?(e.workflowStage??'Under approval'):e.status.replaceAll('_',' '),render:e=><Badge tone={e.status==='approved'?'brand':e.status==='pending_approval'?'warn':e.status==='returned'?'warn':['rejected','workflow_terminated'].includes(e.status)?'danger':'muted'}>{e.status==='pending_approval'?(e.workflowStage??'Under approval'):e.status.replaceAll('_',' ')}</Badge>},
+        {key:'why',label:'Justification',value:e=>e.justification??'',hidden:true},
+        {key:'requested',label:'Requested',type:'date',value:e=>(e.createdAt??'').slice(0,10)},
+    ];
+    const tableHeight='h-[calc(100dvh-19rem)]';
+    return <>
+        <Screen title='Materials Master' subtitle='New materials, warehouse extensions and their approvals'
+            actions={<>
+                {records?.canExtend&&<Button testOverride={testOverride} variant='secondary' aria-label='Extend an existing material' onClick={()=>{setExtendSearchOpen(p=>!p);setExtendSource(null);setError('');}}>
+                    <Warehouse className='h-4 w-4'/><span className='hidden sm:inline'>Extend</span></Button>}
+                {records?.canCreate&&<Button testOverride={testOverride} onClick={startNew}><Plus className='h-4 w-4'/>New<span className='hidden sm:inline'> material</span></Button>}
+            </>}
+            toolbar={<Segmented label='Materials Master sections' value={section} onChange={setSection} options={[
+                {value:'work',label:'My work',count:workViews[0].rows.length+workViews[1].rows.length},
+                {value:'materials',label:'Materials',count:register.length},
+                {value:'extensions',label:'Extensions',count:extensions.length},
+                {value:'dashboard',label:'Dashboard'},
+                {value:'workflow',label:'Workflow'},
+            ]}/>}>
+            {error && <Alert tone='error'>{error}</Alert>}
+            {syncNotice && <Alert tone='success'>{syncNotice}</Alert>}
+            {!!numbers.data?.count&&<div className='flex flex-wrap items-center gap-3 rounded-2xl border border-amber-500/50 bg-amber-500/10 p-3'>
+                <AlertTriangle aria-hidden className='h-5 w-5 shrink-0 text-amber-600'/>
+                <p className='min-w-0 flex-1 text-sm text-ink'><span className='font-semibold'>{numbers.data.count} material number{numbers.data.count===1?' does':'s do'} not conform.</span> <span className='text-soft'>{numbers.data.items[0]?.problem}{numbers.data.count>1?' and others':''}.</span></p>
+                {numbers.data.canSync?<Button variant='secondary' onClick={syncNumbers}><RefreshCw className='h-4 w-4'/> Synchronise numbers</Button>
+                    :<p className='text-xs text-muted'>A Materials Master administrator can synchronise them.</p>}
+            </div>}
+            {extendSearchOpen&&<section className='space-y-3 rounded-2xl border border-line bg-panel p-3'>
+                <h2 className='text-sm font-semibold text-ink'>Extend an approved material to another warehouse</h2>
+                <SearchField label='Search approved materials' value={extendSearch} placeholder='Stores number, name, part number or family' onChange={e=>setExtendSearch(e.target.value)}/>
+                <p className='text-xs text-muted'>{extensionSearchResults.length} approved material(s)</p>
+                <div className='max-h-[45dvh] space-y-2 overflow-y-auto overscroll-contain'>
+                    {extensionSearchResults.map(m=><div key={m.id} className='flex flex-wrap items-center justify-between gap-2 rounded-xl border border-line p-3'>
+                        <div className='min-w-0 flex-1'>
+                            <p className='text-sm font-semibold text-ink'>{m.name}</p>
+                            <MaterialIdentity m={m} compact/>
+                            <p className='text-xs text-soft'>In {new Set([m.warehouseId,...(m.warehouseIds??[])].filter(Boolean)).size} warehouse(s)</p>
+                        </div>
+                        <Button testOverride={testOverride} variant='secondary' onClick={()=>openExtension(m)}>Extend</Button>
+                    </div>)}
+                    {!extensionSearchResults.length&&<Alert tone='info'>No approved material matches. A material must be approved before it can be extended.</Alert>}
+                </div>
+            </section>}
+            {extensionPanel}
+            {recordsLoading&&!records?<Spinner/>:<>
+                {section==='work'&&<>
+                    <Segmented label='My work' value={currentWork.value} onChange={setWorkView} options={workViews.map(v=>({value:v.value,label:v.label,count:v.rows.length}))}/>
+                    <RichTable<WorkRow> id={'materials.work.'+currentWork.value} title={currentWork.label} fileName={'materials_'+currentWork.value} rows={currentWork.rows} rowKey={r=>r.kind+r.id} onRowClick={openRow} columns={workColumns} height={tableHeight}
+                        empty={currentWork.value==='waiting'?'Nothing is waiting for your decision.':currentWork.value==='returned'?'Nothing has been returned to you.':currentWork.value==='drafts'?'No drafts.':'You have no requests under approval.'}/>
+                </>}
+                {section==='materials'&&<RichTable<SavedMaterial> id='materials.register' title='Organization materials' fileName='materials_register' rows={register} rowKey={m=>m.id} onRowClick={setReviewMaterial} columns={registerColumns} height={tableHeight} empty='No materials yet.'/>}
+                {section==='extensions'&&<RichTable<ExtensionRow> id='materials.extensions' title='Warehouse extensions' fileName='materials_extensions' rows={extensions} rowKey={e=>e.id} onRowClick={e=>openRow({kind:'extension',sourceId:e.sourceId})} columns={extensionColumns} height={tableHeight} empty='No extension requests yet.'/>}
+                {section==='dashboard'&&<MaterialApprovalsDashboard onOpen={(type,id)=>openRow({kind:type,sourceId:type==='extension'?extensions.find(e=>e.id===id)?.sourceId??'':id})}/>}
+                {section==='workflow'&&<MaterialWorkflowOverview/>}
+            </>}
+        </Screen>
+        {confirm.sheet}
+    </>;
 }

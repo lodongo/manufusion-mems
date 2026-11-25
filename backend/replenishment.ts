@@ -35,6 +35,7 @@ import { allowedNodeIds, nextOrgCounter } from './positions';
 import { PROCUREMENT_UNITS } from './procurementUnits';
 import { requirementsPath } from './procurementSetup';
 import { record } from './org';
+import { materialNumberKeys } from './materialLifecycleIds';
 import {
     AUTOMATED_METHODS, CONSUMPTION_TYPES, METHODS, RETURN_TYPES,
     factorsOf, legacyMethodOf, methodOf, numberOrNull, plan, routeFor, type Channel, type Params, type PlanResult,
@@ -103,7 +104,8 @@ export async function pipelineDocs(orgId: string) {
         runQuery({ from: [{ collectionId: 'replenishment_signals' }], where: fieldIn('status', ['acknowledged']) }, root(orgId)),
         listDocs(`${root(orgId)}/materials`),
     ]);
-    const materialsByNumber = new Map(materials.filter((m) => str(m.data.materialNumber)).map((m) => [str(m.data.materialNumber), m.id] as [string, string]));
+    // Order lines may carry the stores number, or an earlier number the material was known by (request, master or alias).
+    const materialsByNumber = new Map(materials.flatMap((m) => materialNumberKeys(m.id, m.data).map((k) => [k, m.id] as [string, string])));
     return { requirements, quotations, requisitions, orders, signals, materialsByNumber };
 }
 

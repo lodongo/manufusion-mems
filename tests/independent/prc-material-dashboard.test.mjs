@@ -45,13 +45,14 @@ test('master list opens the six-tab dashboard with Approvals first and no list a
     assert.ok(master.includes('onRowClick={setReviewMaterial}'));
     assert.ok(master.includes('<MaterialMasterDashboard'));
     assert.equal(master.includes("key:'actions',label:'Actions'"),false);
-    for(const name of ['approvals','dashboard','attributes','warehouses','availability','history']){
-        assert.ok(dash.includes("key:'"+name+"'"),'missing tab: '+name);
+    // Rebuilt material record: Overview first (linked numbers, lifecycle), then Approvals, Warehouses (stock merged), Attributes, History.
+    for(const name of ['overview','approvals','warehouses','attributes','history']){
+        assert.ok(dash.includes("key: '"+name+"'"),'missing tab: '+name);
     }
-    assert.ok(dash.indexOf("key:'approvals'")<dash.indexOf("key:'dashboard'"));
-    assert.ok(dash.includes("useState<Tab>('approvals')"));
+    assert.ok(dash.includes("useState<Tab>('overview')"));
     assert.ok(dash.includes('testOverride={m.testOverride}'));
-    assert.ok(dash.includes('Material actions'));
+    assert.ok(dash.includes('More actions'));
+    assert.ok(dash.includes('<MaterialIdentity m={m} />'));
     assert.ok(dash.includes('Approve extension'));
     assert.ok(backend.includes("'POST /api/org/procurement/materials/dashboard'"));
     assert.ok(backend.includes('materialApproverCanAct(ctx,extension,snapshot)'));

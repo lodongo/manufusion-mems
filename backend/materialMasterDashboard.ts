@@ -161,7 +161,12 @@ export async function materialMasterDashboard(ctx: OrgContext, id: string, looku
     add({id:'created',at:str(d.createdAt),action:'Material created',by:str(d.createdBy),details:'Original material request',origin:'Record'});
     add({id:'submitted',at:str(d.submittedAt),action:'Submitted for approval',by:str(d.submittedBy),details:str(d.workflowCode)||'PRC-001',origin:'Record'});
     add({id:'approved',at:str(d.approvedAt),action:'Material approved',by:str(d.approvedBy),details:str(d.workflowStage)||'',origin:'Record'});
-    add({id:'allocated',at:str(d.numberAllocatedAt),action:'Approved master data ID assigned',by:str(d.numberAllocatedBy),details:str(d.masterDataId||d.materialNumber),origin:'Record'});
+    add({id:'allocated',at:str(d.numberAllocatedAt),action:'Master data and stores numbers issued',by:str(d.numberAllocatedBy),details:[str(d.masterDataId),str(d.materialNumber)].filter(Boolean).join(' · '),origin:'Record'});
+    add({id:'synchronised',at:str(d.numberSynchronisedAt),action:'Material numbers synchronised',by:str(d.numberSynchronisedBy),details:str(d.materialNumber)+(Array.isArray(d.materialNumberAliases)&&d.materialNumberAliases.length?' (was '+d.materialNumberAliases.map(str).join(', ')+')':''),origin:'Record'});
+    for(const [i,r] of (Array.isArray(d.returnHistory)?d.returnHistory:[]).entries()){
+        if(!isObj(r))continue;
+        add({id:'returned-'+i,at:str(r.at),action:'Returned for correction (level '+(Number(r.level)||1)+')',by:str(r.by),details:str(r.comment),origin:'Workflow'});
+    }
     add({id:'published',at:str(d.pushedAt),action:'Published to original warehouse',by:str(d.pushedBy),details:warehouseLabel(sourceId).warehouseName,origin:'Record'});
     add({id:'updated',at:str(d.updatedAt),action:'Material updated',by:str(d.updatedBy),details:'Latest saved change',origin:'Record'});
     add({id:'disabled',at:str(d.disabledAt),action:'Material disabled',by:str(d.disabledBy),details:'Status change',origin:'Record'});
@@ -172,8 +177,15 @@ export async function materialMasterDashboard(ctx: OrgContext, id: string, looku
     }
     for(const ext of matchingExtensions){
         const whName=warehouseLabel(str(ext.data.warehouseId)).warehouseName;
-        add({id:'extension-'+ext.id,at:str(ext.data.createdAt),action:'Warehouse extension requested',
-            by:str(ext.data.createdBy),details:whName,origin:'Record'});
+        add({id:'extension-'+ext.id,at:str(ext.data.createdAt),action:'Warehouse extension requested ('+ext.id+')',
+            by:str(ext.data.createdBy),details:whName+(str(ext.data.justification)?' · '+str(ext.data.justification):''),origin:'Record'});
+        for(const [i,r] of (Array.isArray(ext.data.workflowRounds)?ext.data.workflowRounds:[]).entries()){
+            if(!isObj(r))continue;
+            for(const [j,h] of (Array.isArray(r.history)?r.history:[]).entries()){
+                if(!isObj(h))continue;
+                add({id:'extension-'+ext.id+'-r'+i+'-'+j,at:str(h.at),action:'Extension workflow: '+formatStatus(str(h.decision)),by:str(h.by),details:whName+(str(h.comment)?' · '+str(h.comment):''),origin:'Workflow'});
+            }
+        }
         for(const [i,vote] of (Array.isArray(ext.data.approvalHistory)?ext.data.approvalHistory:[]).entries()){
             if(!isObj(vote))continue;
             add({id:'extension-'+ext.id+'-'+i,at:str(vote.at),
@@ -188,7 +200,7 @@ export async function materialMasterDashboard(ctx: OrgContext, id: string, looku
     const recent=await runQuery({from:[{collectionId:'audit_events'}],
         orderBy:orderDesc('at'),limit:auditCap},base);
     const extIds=matchingExtensions.map(x=>x.id);
-    const tokens=[id,...extIds,str(d.masterDataId),str(d.materialNumber)].filter(Boolean);
+    const tokens=[id,...extIds,str(d.masterDataId),str(d.materialNumber),...(Array.isArray(d.materialNumberAliases)?d.materialNumberAliases.map(str):[])].filter(Boolean);
     for(const item of recent){
         const ev=item.data;
         if(!['data','security','governance'].includes(str(ev.category)))continue;
@@ -215,6 +227,12 @@ export async function materialMasterDashboard(ctx: OrgContext, id: string, looku
             warehouseRestrictionCodes:Array.isArray(d.warehouseRestrictionCodes)?d.warehouseRestrictionCodes.map(str):[],
             ...(isObj(d.attributes)?{attributes:d.attributes}:{}),
             approvalLevel:Number(d.approvalLevel)||0,workflowCode:str(d.workflowCode),
+            requestId:str(d.requestId)||id,
+            materialNumberAliases:Array.isArray(d.materialNumberAliases)?d.materialNumberAliases.map(str):[],
+            previousMaterialNumber:str(d.previousMaterialNumber),materialNumberScheme:str(d.materialNumberScheme),
+            returned:d.returned===true,returnReason:str(d.returnReason),returnedAt:str(d.returnedAt),returnCount:Number(d.returnCount)||0,
+            approvedAt:str(d.approvedAt),
+            extensionRequests:matchingExtensions.map(x=>({id:x.id,warehouseId:str(x.data.warehouseId),warehouseName:warehouseLabel(str(x.data.warehouseId)).warehouseName,status:str(x.data.status)})),
         },
         attributes,warehouses:whRows,availability:stock,
         history:history.slice(0,500),

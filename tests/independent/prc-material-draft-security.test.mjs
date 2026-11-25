@@ -80,8 +80,8 @@ test('runtime routes gate all write actions, use optimistic locking, audit and t
     // Row actions were moved into the selected material dashboard.
     assert.ok(master.includes('onRowClick={setReviewMaterial}'));
     assert.ok(!master.includes("key:'actions',label:'Actions'"));
-    assert.ok(ui.includes('m.canEdit&&<Button'));
-    assert.ok(ui.includes('m.canDelete&&<Button'));
-    assert.ok(ui.includes('m.canSubmit&&<Button'));
+    assert.match(ui,/m\.canEdit && <Button/);
+    assert.match(ui,/m\.canDelete && <Button/);
+    assert.match(ui,/m\.canSubmit \? \(/);
     assert.ok(overrides.includes('testModeEnvironmentAllowed'));
 });
