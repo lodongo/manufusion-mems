@@ -35,8 +35,12 @@ export interface OverviewProps {
     facts: Array<{ label: string; value: string; mono?: boolean; hint?: string }>;
     chips: Array<{ label: string; tone: 'brand' | 'muted' | 'warn' | 'danger' }>;
     ask: Ask;
-    onOpen: (tab: 'Current Status' | 'Stock Control' | 'Replenishment') => void;
+    onOpen: (tab: OverviewTab) => void;
+    /** Current status at a glance: each signal says where it stands and, when it needs attention, where to act. */
+    signals?: StatusSignal[];
 }
+export type OverviewTab = 'Current Status' | 'Stock Control' | 'Replenishment' | 'Criticality Analysis' | 'Forecasting';
+export interface StatusSignal { label: string; value: string; note?: string; tone: 'brand' | 'muted' | 'warn' | 'danger'; open?: OverviewTab }
 
 const MAX_PHOTOS = 8;
 const MAX_CHARS = 1_900_000;
@@ -390,6 +394,37 @@ export default function MaterialOverview(props: OverviewProps) {
                 </div>
             </section>
 
+            {!!props.signals?.length && (
+                <section aria-label='Current status' className='rounded-2xl border border-line bg-panel p-3'>
+                    <div className='mb-2 flex items-center justify-between gap-2'>
+                        <h3 className='text-xs font-medium uppercase tracking-wide text-muted'>Current status</h3>
+                        {(() => { const n = props.signals.filter((x) => x.tone === 'warn' || x.tone === 'danger').length; return <Badge tone={n ? 'warn' : 'brand'}>{n ? `${n} need${n === 1 ? 's' : ''} attention` : 'All in order'}</Badge>; })()}
+                    </div>
+                    <ul className='grid gap-2 sm:grid-cols-2 lg:grid-cols-3'>
+                        {props.signals.map((x) => {
+                            const dot = x.tone === 'danger' ? 'bg-red-500' : x.tone === 'warn' ? 'bg-amber-500' : x.tone === 'brand' ? 'bg-brand' : 'bg-line';
+                            const body = (
+                                <>
+                                    <span aria-hidden className={`mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full ${dot}`} />
+                                    <span className='min-w-0 flex-1'>
+                                        <span className='block text-xs text-muted'>{x.label}</span>
+                                        <span className='block truncate text-sm font-semibold text-ink'>{x.value}</span>
+                                        {x.note && <span className='block text-xs text-soft'>{x.note}</span>}
+                                    </span>
+                                </>
+                            );
+                            return (
+                                <li key={x.label}>
+                                    {x.open ? (
+                                        <button type='button' onClick={() => props.onOpen(x.open!)} className='flex min-h-14 w-full items-start gap-2 rounded-xl bg-page p-2.5 text-left active:bg-line/40'>{body}</button>
+                                    ) : <div className='flex min-h-14 items-start gap-2 rounded-xl bg-page p-2.5'>{body}</div>}
+                                </li>
+                            );
+                        })}
+                    </ul>
+                </section>
+            )}
+
             <div className='grid gap-3 lg:grid-cols-2 lg:items-start'>
             {/* Stock health */}
             <button type='button' onClick={() => props.onOpen('Current Status')} className='block w-full rounded-2xl border border-line bg-panel p-4 text-left active:bg-page'>
@@ -410,7 +445,7 @@ export default function MaterialOverview(props: OverviewProps) {
                         ] as Array<[string, number | null]>
                     ).map(([k, v]) => (
                         <div key={k} className='min-w-0 rounded-xl bg-page px-2 py-2'>
-                            <dt className='text-[11px] text-muted'>{k}</dt>
+                            <dt className='text-xs text-muted'>{k}</dt>
                             <dd className='truncate text-sm font-semibold tabular-nums text-ink'>{v === null ? 'Not set' : fmt(v)}</dd>
                         </div>
                     ))}
@@ -424,7 +459,7 @@ export default function MaterialOverview(props: OverviewProps) {
                     {props.facts.map((f) => (
                         <div key={f.label} className='grid grid-cols-[minmax(0,2fr)_minmax(0,3fr)] items-baseline gap-3 py-2.5'>
                             <dt className='text-sm text-muted'>{f.label}</dt>
-                            <dd className={`min-w-0 break-words text-right text-sm font-medium text-ink ${f.mono ? 'break-all font-mono text-[13px]' : ''}`} title={f.value}>
+                            <dd className={`min-w-0 break-words text-right text-sm font-medium text-ink ${f.mono ? 'break-all font-mono text-sm' : ''}`} title={f.value}>
                                 {f.value}
                                 {f.hint && <span className='block text-xs font-normal text-muted'>{f.hint}</span>}
                             </dd>

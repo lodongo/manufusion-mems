@@ -20,7 +20,7 @@ import { hasPerm, orgRoute, type OrgContext } from './guards';
 import { allowedAt, audited, requireAt, holdsAnywhere } from './scopeGuard';
 import { bypass } from './testModeCore';
 import { CONSUMPTION_TYPES, RETURN_TYPES } from './replenishmentPlan';
-import { FACTORS, FACTOR_BY_CODE, MOVEMENT_LABELS, ON_DEMAND_STRATEGY, defaultSetup, isCell, movementFromData, onDemand, readSetup, scoreCriticality, type CriticalitySetup } from './criticalityModel';
+import { FACTORS, FACTOR_BY_CODE, MOVEMENT_LABELS, ON_DEMAND_STRATEGY, defaultSetup, inScope, isCell, movementFromData, onDemand, readSetup, reviewMonthsFor, scoreCriticality, type CriticalitySetup } from './criticalityModel';
 
 type Obj = Record<string, unknown>;
 const ID = /^[A-Za-z0-9_-]{1,120}$/;
@@ -126,7 +126,7 @@ async function applyResult(orgId: string, materialId: string, warehouseId: strin
     const path = infoPath(orgId, materialId, warehouseId);
     const info = (await getDoc(path))?.data ?? {};
     const cell = str(a.cell);
-    const reviewDue = new Date(Date.now() + setup.reviewMonths * 30.44 * 86_400_000).toISOString().slice(0, 10);
+    const reviewDue = new Date(Date.now() + reviewMonthsFor(setup, str(a.criticalityClass)) * 30.44 * 86_400_000).toISOString().slice(0, 10);
     const patch: Obj = {
         criticalityClass: str(a.criticalityClass),
         movementClass: Number(a.movementLevel) || null,
@@ -255,11 +255,13 @@ export const criticalityRoutes = {
         orgRoute('org.inventory.criticality.save', 'INV.criticality.assess', async (ctx) => {
             const { materialId, warehouseId } = ids(ctx.body);
             await requireAt(ctx, [CRIT.assess], warehouseId, 'write', 'Criticality assessment permission is required for this warehouse.');
-            if (!(await getDoc(`${root(ctx.orgId)}/materials/${materialId}`))) throw new HttpError(404, 'Material not found');
+            const materialDoc = await getDoc(`${root(ctx.orgId)}/materials/${materialId}`);
+            if (!materialDoc) throw new HttpError(404, 'Material not found');
             const path = assessmentPath(ctx.orgId, materialId, warehouseId);
             const existing = await getDoc(path);
             if (existing && str(existing.data.status) === 'submitted') throw new HttpError(409, 'This assessment is waiting for approval; it cannot be changed now.');
             const { setup, version } = await getCriticalitySetup(ctx.orgId);
+            if (!inScope(setup, str(materialDoc.data.categoryCode))) throw new HttpError(409, `Material category ${str(materialDoc.data.categoryCode) || '(none)'} is outside the scope of the criticality analysis. An administrator can widen the scope in Criticality setup.`);
             const ratings = readRatings(ctx.body.ratings, setup);
             const data = await movementData(ctx.orgId, materialId, warehouseId);
             const movement = movementFromData(setup, data);
@@ -300,7 +302,7 @@ export const criticalityRoutes = {
                 history: Array.isArray(prev.history) ? prev.history : [],
             };
             await writeDoc(path, doc as never);
-            await audited(ctx, submit ? 'inventory.criticality.submit' : 'inventory.criticality.save', `Criticality ${materialId} @ ${warehouseId}`, { cell: result.cell, score: result.score, scaled: result.scaled, override: result.overrideBy.join(', '), movementSource: result.movementSource });
+            await audited(ctx, submit ? 'inventory.criticality.submit' : 'inventory.criticality.save', `Criticality ${materialId} @ ${warehouseId}`, { cell: result.cell, method: result.method, score: result.score, scaled: result.scaled, borderline: result.borderline, override: result.overrideBy.join(', '), movementSource: result.movementSource });
             return { ok: true, status: doc.status, cell: result.cell };
         }),
     ],
@@ -351,9 +353,16 @@ export const criticalityRoutes = {
                     const d = a.data;
                     const ap = isObj(d.approved) ? d.approved : null;
                     const cell = ap ? str(ap.cell) : '';
-                    const reviewDue = ap ? new Date(Date.parse(str(ap.approvedAt)) + setup.reviewMonths * 30.44 * 86_400_000).toISOString().slice(0, 10) : '';
+                    const reviewDue = ap ? new Date(Date.parse(str(ap.approvedAt)) + reviewMonthsFor(setup, cell[0] || '') * 30.44 * 86_400_000).toISOString().slice(0, 10) : '';
                     const m = mm.get(str(d.materialId));
+                    const snap = d; // the evaluation is stored on the assessment itself
                     return {
+                        borderline: snap.borderline === true,
+                        hseOverride: Array.isArray(snap.overrideBy) && snap.overrideBy.length > 0,
+                        riskIndex: Number(snap.method === 'risk' ? snap.score : 0) || null,
+                        pattern: isObj(d.movementSnapshot) && isObj((d.movementSnapshot as Obj).demand) ? str(((d.movementSnapshot as Obj).demand as Obj).label) : '',
+                        xyz: isObj(d.movementSnapshot) && isObj((d.movementSnapshot as Obj).demand) ? str(((d.movementSnapshot as Obj).demand as Obj).xyz) : '',
+                        categoryCode: str(m?.categoryCode),
                         id: a.id,
                         materialId: str(d.materialId),
                         materialNumber: str(m?.materialNumber) || str(d.materialId),
@@ -371,7 +380,35 @@ export const criticalityRoutes = {
                         overdue: !!reviewDue && reviewDue < today,
                     };
                 });
-            return { rows, cutoff: setup.cutoff, strategyMode: setup.strategyMode, onDemandStrategy: ON_DEMAND_STRATEGY };
+            // Effectiveness of the analysis: coverage of in-scope stocked materials, class distribution (a healthy
+            // classification is selective: A is usually well under a quarter of items), overdue reviews, borderline
+            // results that deserve a second look, HSE overrides and the age of the open queue.
+            const inScopeKeys = new Set<string>();
+            for (const m of materials) {
+                if (!['approved', 'active'].includes(str(m.data.status)) || !inScope(setup, str(m.data.categoryCode))) continue;
+                for (const w of [str(m.data.warehouseId), ...(Array.isArray(m.data.warehouseIds) ? m.data.warehouseIds.map(str) : [])]) if (w && visible.has(w)) inScopeKeys.add(m.id + '_' + w);
+            }
+            const approvedRows = rows.filter((r) => !!r.cell);
+            const byClass = Object.fromEntries(['A', 'B', 'C', 'D'].map((c) => [c, approvedRows.filter((r) => r.criticalityClass === c).length]));
+            const share = (n: number) => (approvedRows.length ? Math.round((n / approvedRows.length) * 1000) / 10 : 0);
+            const covered = new Set(approvedRows.map((r) => r.materialId + '_' + r.warehouseId));
+            const assessedInScope = [...inScopeKeys].filter((k) => covered.has(k)).length;
+            const effectiveness = {
+                inScope: inScopeKeys.size,
+                assessed: assessedInScope,
+                coveragePct: inScopeKeys.size ? Math.round((assessedInScope / inScopeKeys.size) * 1000) / 10 : null,
+                byClass, sharePct: Object.fromEntries(Object.entries(byClass).map(([c, n]) => [c, share(n as number)])),
+                overdue: approvedRows.filter((r) => r.overdue).length,
+                borderline: rows.filter((r) => r.borderline).length,
+                hseOverrides: rows.filter((r) => r.hseOverride).length,
+                pending: rows.filter((r) => r.status === 'submitted').length,
+                warnings: [
+                    ...(share(byClass.A as number) > 25 ? [`${share(byClass.A as number)}% of assessed materials are class A. A selective classification usually keeps A well under 25%; review the matrix, weights or ratings.`] : []),
+                    ...(approvedRows.length >= 10 && (byClass.D as number) === 0 ? ['No material is class D. Check that low-consequence items are being rated honestly.'] : []),
+                    ...(inScopeKeys.size && assessedInScope / inScopeKeys.size < 0.5 ? ['Less than half of the in-scope stocked materials have an approved assessment.'] : []),
+                ],
+            };
+            return { rows, cutoff: setup.cutoff, strategyMode: setup.strategyMode, onDemandStrategy: ON_DEMAND_STRATEGY, method: setup.method, effectiveness };
         }),
     ],
 };

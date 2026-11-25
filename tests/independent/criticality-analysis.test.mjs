@@ -1,11 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { FACTORS, defaultSetup, readSetup, scoreCriticality, movementFromData, onDemand } from '../../backend/criticalityModel.ts';
+import { FACTORS, defaultSetup, readSetup, scoreCriticality, movementFromData, onDemand, demandPattern, reviewMonthsFor, inScope } from '../../backend/criticalityModel.ts';
 import { plan } from '../../backend/replenishmentPlan.ts';
 
 const read = (p) => readFileSync(new URL('../../' + p, import.meta.url), 'utf8');
-const only = (codes, extra = {}) => ({ ...defaultSetup(), factors: Object.fromEntries(FACTORS.map((f) => [f.code, { enabled: codes.includes(f.code), weight: 1 }])), ...extra });
+const only = (codes, extra = {}) => ({ ...defaultSetup(), method: 'weighted', factors: Object.fromEntries(FACTORS.map((f) => [f.code, { enabled: codes.includes(f.code), weight: 1 }])), ...extra });
 
 test('Factor catalogue covers consequence and supply risk with three described levels each', () => {
     assert.ok(FACTORS.length >= 20);
@@ -85,4 +85,76 @@ test('Workflow, approval, strategy lock, permissions and screens', () => {
     assert.match(ui, /export default function InventorySetup\(/);
     assert.match(read('src/org/OrgHomePage.tsx'), /'Alerts','Setup'\]/);
     assert.match(read('src/org/InventoryMaterialDetail.tsx'), /<MaterialCriticality materialId=\{id\} warehouseId=\{warehouseId\} onChanged=\{reload\} \/>/);
+});
+
+// ----- Risk-based method (NORSOK Z-008 / ISO 14224 / ISO 31000 consequence × likelihood with supply uplift) -----
+const risk = (codes, extra = {}) => ({ ...only(codes), method: 'risk', ...extra });
+
+test('Risk method: the worst consequence governs; easy supply cannot hide a line stop', () => {
+    const s = risk(['PRD', 'QLT', 'FRQ', 'SUP', 'LDT', 'SUB']);
+    // Line stops (3), failures occasional (2), supply easy (1): matrix C3/L2 = A. The weighted mean would give C.
+    const r = scoreCriticality(s, { PRD: 3, QLT: 1, FRQ: 2, SUP: 1, LDT: 1, SUB: 1 });
+    assert.equal(r.criticalityClass, 'A');
+    assert.equal(r.risk.consequence, 3);
+    assert.equal(r.risk.consequenceDriver, 'Production impact');
+    assert.equal(r.risk.likelihood, 2);
+    assert.equal(r.risk.supplyRisk, 1);
+    assert.equal(scoreCriticality({ ...s, method: 'weighted' }, { PRD: 3, QLT: 1, FRQ: 2, SUP: 1, LDT: 1, SUB: 1 }).criticalityClass, 'C');
+});
+
+test('Risk method: redundancy mitigates non-HSE consequence, predictability moves likelihood, supply risk uplifts', () => {
+    const s = risk(['PRD', 'RED', 'FRQ', 'PRE', 'SUP', 'LDT']);
+    const base = { PRD: 3, RED: 3, FRQ: 1, PRE: 2, SUP: 2, LDT: 2 };
+    assert.equal(scoreCriticality(s, base).criticalityClass, 'B', 'C3 × L1');
+    const standby = scoreCriticality(s, { ...base, RED: 1 });
+    assert.equal(standby.risk.mitigated, true);
+    assert.equal(standby.criticalityClass, 'C', 'standby: C2 × L1');
+    assert.equal(scoreCriticality(s, { ...base, PRE: 3 }).criticalityClass, 'A', 'sudden failure raises likelihood');
+    const hardSupply = scoreCriticality(s, { ...base, RED: 1, SUP: 3, LDT: 3 });
+    assert.equal(hardSupply.risk.uplifted, true);
+    assert.equal(hardSupply.criticalityClass, 'B', 'supply risk 3 lifts C to B');
+    assert.equal(scoreCriticality({ ...s, supplyUplift: false }, { ...base, RED: 1, SUP: 3, LDT: 3 }).criticalityClass, 'C');
+    assert.equal(hardSupply.risk.riskIndex, 2 * 1 * 3);
+});
+
+test('Sensitivity flags borderline classes and names the swing factors', () => {
+    const s = risk(['PRD', 'FRQ', 'SUP']);
+    const r = scoreCriticality(s, { PRD: 2, FRQ: 1, SUP: 2 });
+    assert.equal(r.criticalityClass, 'C');
+    assert.equal(r.borderline, true);
+    assert.ok(r.swing.some((x) => x.code === 'PRD' && x.to === 3 && x.becomes === 'B'));
+    const solid = scoreCriticality(only(['PRD', 'RED', 'SUP', 'LDT']), { PRD: 1, RED: 1, SUP: 1, LDT: 1 });
+    assert.equal(solid.criticalityClass, 'D');
+});
+
+test('Setup: monotonic matrix, weights 1-5, class review intervals, scope and legacy setups keep the weighted method', () => {
+    assert.equal(readSetup(undefined).method, 'risk');
+    const legacy = readSetup({ factors: defaultSetup().factors, cutoff: 'C2', thresholds: { m4: 10, m3: 6, m2: 3 }, reviewMonths: 18 });
+    assert.equal(legacy.method, 'weighted', 'a saved setup without a method keeps the weighted score');
+    assert.equal(reviewMonthsFor(legacy, 'A'), 18, 'and its single review interval');
+    assert.throws(() => readSetup({ ...defaultSetup(), matrix: [['D', 'A', 'A'], ['C', 'B', 'B'], ['D', 'D', 'C']] }), /consequence cannot give a lower class/);
+    assert.throws(() => readSetup({ ...defaultSetup(), matrix: [['A', 'B', 'A'], ['C', 'B', 'B'], ['D', 'D', 'C']] }), /likelihood cannot give a lower class/);
+    const f = { ...defaultSetup().factors, PRD: { enabled: true, weight: 5 } };
+    assert.equal(readSetup({ ...defaultSetup(), factors: f }).factors.PRD.weight, 5);
+    assert.throws(() => readSetup({ ...defaultSetup(), factors: { ...f, PRD: { enabled: true, weight: 6 } } }), /1 to 5/);
+    assert.equal(reviewMonthsFor(defaultSetup(), 'A'), 6);
+    assert.equal(reviewMonthsFor(defaultSetup(), 'D'), 36);
+    const scoped = readSetup({ ...defaultSetup(), scopeCategories: ['mech', 'ELEC'] });
+    assert.deepEqual(scoped.scopeCategories, ['MECH', 'ELEC']);
+    assert.equal(inScope(scoped, 'MECH'), true);
+    assert.equal(inScope(scoped, 'CHEM'), false);
+    assert.equal(inScope(defaultSetup(), 'CHEM'), true);
+    assert.throws(() => readSetup(risk(['SUP', 'LDT', 'SUB'])), /consequence factor/);
+});
+
+test('Demand pattern: Syntetos–Boylan quadrants and XYZ variability', () => {
+    const s = defaultSetup();
+    assert.equal(demandPattern(s, [5, 5, 6, 5, 4, 5, 5, 6, 5, 5, 4, 5]).pattern, 'smooth');
+    assert.equal(demandPattern(s, [5, 5, 6, 5, 4, 5, 5, 6, 5, 5, 4, 5]).xyz, 'X');
+    assert.equal(demandPattern(s, [1, 30, 2, 25, 1, 40, 3, 1, 35, 2, 1, 28]).pattern, 'erratic');
+    assert.equal(demandPattern(s, [0, 0, 4, 0, 0, 5, 0, 0, 4, 0, 0, 5]).pattern, 'intermittent');
+    const lumpy = demandPattern(s, [0, 0, 1, 0, 0, 40, 0, 0, 2, 0, 0, 30]);
+    assert.equal(lumpy.pattern, 'lumpy');
+    assert.equal(lumpy.xyz, 'Z');
+    assert.equal(demandPattern(s, [0, 0, 0]).pattern, 'none');
 });

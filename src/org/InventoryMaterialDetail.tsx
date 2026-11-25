@@ -13,6 +13,8 @@ import { Badge, Button, Card, Spinner, TextArea, useLoad } from '../admin/kit';
 import { fmtDate } from '../admin/format';
 import { AUTOMATED_METHODS, METHODS, PARAMS, factorsOf, methodOf, routeFor } from '../../backend/replenishmentPlan';
 import MaterialOverview, { type MaterialPhoto } from './MaterialOverview';
+import type { StatusSignal } from './MaterialOverview';
+import { nonConformingNumber } from './materialIdentity';
 
 // Material detail for one warehouse (INV), opened from Inventory on hand.
 //   Overview                 photos (taken on the phone), identity, stock health against min/max and key facts
@@ -131,6 +133,31 @@ interface Metadata {
 type Section = 'inventory' | 'procurement';
 type Values = Record<string, string>;
 type Errors = Record<string, string>;
+
+/** Current status signals for the Overview: master data, numbers, stock, supply, planning, criticality and the ledger. */
+function statusSignals(data: { material: Record<string, unknown>; inventory: Record<string, unknown> }, status: { reconciled: boolean; balances: Record<string, number> } | null | undefined): StatusSignal[] {
+    const m = data.material, inv = data.inventory ?? {};
+    const n = (v: unknown) => (v === null || v === undefined || v === '' || !Number.isFinite(Number(v)) ? null : Number(v));
+    const ms = String(m.status || '');
+    const today = new Date().toISOString().slice(0, 10);
+    const avail = status?.reconciled ? Number(status.balances.availableStock || 0) : null;
+    const min = n(inv.minimumLevel), max = n(inv.maximumLevel), safety = n(inv.safetyStock);
+    const supply = status?.reconciled ? Number(status.balances.onOrder || 0) + Number(status.balances.inTransit || 0) + Number(status.balances.onRequisition || 0) : null;
+    const strategy = String(inv.replenishmentStrategy || '');
+    const cell = String(inv.criticalityCell || '');
+    const due = String(inv.criticalityReviewDue || '');
+    const num = String(m.materialNumber || '');
+    const conforming = !!num && !nonConformingNumber(num);
+    const fmtq = (v: number) => v.toLocaleString(undefined, { maximumFractionDigits: 3 });
+    return [
+        { label: 'Master data', value: ['approved', 'active'].includes(ms) ? 'Approved' : ms.replace(/_/g, ' ') || 'Unknown', note: String(m.masterDataId || ''), tone: ['approved', 'active'].includes(ms) ? 'brand' : ms === 'disabled' ? 'danger' : 'warn' },
+        { label: 'Stores number', value: conforming ? num : 'Not synchronised', note: conforming ? 'Linked to ' + (String(m.requestId || '') || 'its request') : 'Ask a Materials Master administrator to synchronise numbers', tone: conforming ? 'brand' : 'warn' },
+        { label: 'Stock', value: avail === null ? 'Ledger not reconciled' : `${fmtq(avail)} available`, note: avail === null ? undefined : avail <= 0 ? 'Out of stock' : safety !== null && avail < safety ? 'Below safety stock' : min !== null && avail < min ? 'Below minimum' : max !== null && avail > max ? 'Above maximum' : 'Within levels', tone: avail === null ? 'muted' : avail <= 0 ? 'danger' : (safety !== null && avail < safety) || (min !== null && avail < min) ? 'warn' : max !== null && avail > max ? 'warn' : 'brand', open: 'Current Status' },
+        { label: 'Open supply', value: supply === null ? '—' : supply ? `${fmtq(supply)} coming` : 'None', note: 'Requisitions, orders and transit', tone: supply === null ? 'muted' : avail !== null && min !== null && avail < min && !supply ? 'danger' : 'muted', open: 'Replenishment' },
+        { label: 'Planning', value: strategy || 'No strategy', note: min === null && max === null ? 'Levels not set' : `Min ${min ?? '—'} · Max ${max ?? '—'}`, tone: !strategy ? 'warn' : 'muted', open: 'Replenishment' },
+        { label: 'Criticality', value: cell ? `Cell ${cell}` : 'Not assessed', note: cell ? (due ? (due < today ? `Review overdue since ${due}` : `Review due ${due}`) : undefined) : 'Assess consequence, likelihood and supply risk', tone: !cell ? 'warn' : due && due < today ? 'danger' : cell[0] === 'A' ? 'brand' : 'muted', open: 'Criticality Analysis' },
+    ];
+}
 
 const TABS = ['Overview', 'Current Status', 'Technical Data', 'Inventory Information', 'Stock Control', 'Replenishment', 'Procurement Information', 'Movements', 'Criticality Analysis', 'Forecasting', 'Audit'] as const;
 type Tab = (typeof TABS)[number];
@@ -1701,6 +1728,7 @@ export default function InventoryMaterialDetail({ id, warehouseId, onBack }: { i
                                         chips={o.chips}
                                         ask={ask}
                                         onOpen={changeTab}
+                                        signals={statusSignals(data, status)}
                                     />
                                 );
                             })()}

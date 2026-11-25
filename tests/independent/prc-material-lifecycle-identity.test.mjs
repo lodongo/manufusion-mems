@@ -30,7 +30,10 @@ test('request IDs are reserved atomically and approved master numbering is appro
     assert.ok(ids.includes('precondition:{exists:false}'));
     assert.ok(ids.includes('precondition:{updateTime}'));
     assert.ok(ids.includes("str(current.data.status)!=='pending_approval'"));
-    assert.ok(ids.includes('masterDataId,materialNumber:masterDataId'));
+    // The stores material number is issued in the same commit as approval and the MSTD number, never equal to it.
+    assert.ok(ids.includes('{path,data:{...changed,requestId,masterDataId,materialNumber,'));
+    assert.ok(ids.includes("material_number_reservations/'+materialNumber"));
+    assert.equal(ids.includes('materialNumber:masterDataId'),false);
 });
 test('creation and extension IDs are issued at request creation and MSTD at final approval',()=>{
     const backend=read('backend/procurement.ts');
@@ -43,10 +46,10 @@ test('creation and extension IDs are issued at request creation and MSTD at fina
     assert.ok(backend.includes("warehouseIds:[...new Set(["));
     assert.equal(backend.includes("if(action==='allocate')"),false);
     assert.equal(backend.includes("if(action==='push')"),false);
-    assert.ok(list.includes('m.masterDataId||m.id'));
+    assert.ok(list.includes('storesNumberText(m)'),'lists show the stores number, never a request number in its place');
     assert.ok(dashboard.includes('Creation request ID'));
     assert.ok(dashboard.includes('Approved master data ID'));
-    assert.ok(dashboard.includes("key:'approvals',label:'Approvals'"));
+    assert.ok(dashboard.includes("{ key: 'approvals', label: 'Approvals' }"));
     assert.ok(dashboard.includes('testOverride={m.testOverride}'));
 });
 test('test-mode superadmin approvals override maker-checker only in authorized development mode and are audited',()=>{

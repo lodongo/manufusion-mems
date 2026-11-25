@@ -11,16 +11,17 @@
 // The server repeats every rule and records every step in the audit trail.
 // ---------------------------------------------------------------------------
 
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { Fragment, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { CheckCircle2, Grid3X3, Save, Send, Undo2 } from 'lucide-react';
 import { callBackend } from '../lib/backend';
-import { Alert, Field } from '../components/ui';
+import { Alert, Field, SelectField } from '../components/ui';
 import RichTable, { type Column } from '../components/RichTable';
 import { Screen, Segmented, messageOf, useConfirm } from '../components/screen';
 import { Badge, Button, Card, Spinner, Toggle, useLoad } from '../admin/kit';
 import { fmtDate } from '../admin/format';
 import { ForecastSetupForm } from './Forecasting';
 import { AuditRegister, ChangeControlForm } from './MaterialAudit';
+import { scoreCriticality, ROLE, DEFAULT_MATRIX, type CriticalitySetup, type Matrix } from '../../backend/criticalityModel';
 
 const API = '/api/org/inventory/criticality/';
 
@@ -32,15 +33,7 @@ interface Factor {
     levels: [string, string, string];
     hse?: boolean;
 }
-interface Setup {
-    factors: Record<string, { enabled: boolean; weight: 1 | 2 | 3 }>;
-    hseOverride: boolean;
-    strategyMode: 'manual' | 'criticality';
-    cutoff: string;
-    minHistoryMonths: number;
-    thresholds: { m4: number; m3: number; m2: number };
-    reviewMonths: number;
-}
+type Setup = CriticalitySetup;
 interface Movement {
     enough: boolean;
     coveredMonths: number;
@@ -49,6 +42,7 @@ interface Movement {
     annualQuantity: number;
     concentrationPct: number;
     level: number | null;
+    demand?: { pattern: string; label: string; adi: number | null; cv2: number | null; xyz: string | null; cv: number | null; method: string };
 }
 interface Assessment {
     status: 'draft' | 'submitted' | 'approved' | 'returned';
@@ -87,24 +81,20 @@ const RATING_LABEL = ['', 'Insignificant', 'Moderately significant', 'Very signi
 const rank = (c: string) => ({ A: 4, B: 3, C: 2, D: 1 } as Record<string, number>)[c] ?? 0;
 const onDemand = (cell: string, cutoff: string) => /^[ABCD][1-4]$/.test(cell) && /^[ABCD][1-4]$/.test(cutoff) && rank(cell[0]) <= rank(cutoff[0]) && Number(cell[1]) <= Number(cutoff[1]);
 
-/** The same score the server computes: weighted ratings scaled from 1 to 4, high-consequence override to A. */
-function score(setup: Setup, factors: Factor[], ratings: Record<string, number>) {
-    const used = factors.filter((f) => setup.factors[f.code]?.enabled);
-    let s = 0;
-    let min = 0;
-    let max = 0;
-    for (const f of used) {
-        const w = setup.factors[f.code].weight;
-        min += w;
-        max += 3 * w;
-        s += w * (ratings[f.code] || 1);
+/** Same rule as the server: a higher consequence or likelihood may never give a lower class. */
+function matrixProblem(m: Matrix): string {
+    for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) {
+        if (j < 2 && rank(m[i][j + 1]) < rank(m[i][j])) return 'In the risk matrix, a higher likelihood cannot give a lower class.';
+        if (i < 2 && rank(m[i][j]) < rank(m[i + 1][j])) return 'In the risk matrix, a higher consequence cannot give a lower class.';
     }
-    const scaled = max > min ? 1 + (3 * (s - min)) / (max - min) : 1;
-    const level = Math.min(4, Math.max(1, Math.round(scaled)));
-    const overrideBy = setup.hseOverride ? used.filter((f) => f.hse && ratings[f.code] === 3).map((f) => f.name) : [];
-    const cls = overrideBy.length ? 'A' : (['D', 'C', 'B', 'A'][level - 1] as string);
-    const missing = used.filter((f) => ![1, 2, 3].includes(ratings[f.code])).length;
-    return { used, score: s, min, max, scaled: Math.round(scaled * 100) / 100, cls, overrideBy, missing };
+    return '';
+}
+
+/** The server's own model (shared code), so the screen shows exactly what the server will record. */
+function score(setup: Setup, factors: Factor[], ratings: Record<string, number>) {
+    const r = scoreCriticality(setup, ratings);
+    const used = factors.filter((f) => setup.factors[f.code]?.enabled);
+    return { used, score: r.score, min: r.min, max: r.max, scaled: r.scaled, cls: r.criticalityClass as string, overrideBy: r.overrideBy, missing: r.missing.length, risk: r.risk, swing: r.swing, borderline: r.borderline, method: r.method };
 }
 
 // ---------------------------------------------------------------------------
@@ -290,11 +280,32 @@ export function MaterialCriticality({ materialId, warehouseId, onChanged }: { ma
             <Card className='space-y-3'>
                 <div className='grid grid-cols-2 gap-2'>
                     <Result label='Approved cell' value={current.cell || 'Not assessed'} note={current.cell ? `${CLASS_LABEL[current.cell[0]]} · ${data.movementLabels[Number(current.cell[1])]}` : 'Procurement strategy stays manual'} />
-                    <Result label='This assessment' value={cell || '—'} note={cell ? `Score ${s.score} of ${s.max} → ${s.scaled}` : 'Movement still needed'} />
+                    <Result label='This assessment' value={cell || '—'} note={cell ? (s.risk ? `Risk index ${s.score} of 27` : `Score ${s.score} of ${s.max} → ${s.scaled}`) : 'Movement still needed'} />
                     <Result label='Procurement strategy' value={current.strategy || 'Not set'} note={current.strategySource === 'criticality' ? 'Set by the analysis (locked)' : setup.strategyMode === 'criticality' ? `Follows the analysis below ${setup.cutoff}` : 'Manual'} />
-                    <Result label='Review due' value={current.reviewDue || '—'} note={`Every ${setup.reviewMonths} months`} />
+                    <Result label='Review due' value={current.reviewDue || '—'} note={`Class ${s.cls}: every ${setup.reviewMonthsByClass?.[s.cls as 'A'] ?? setup.reviewMonths} months`} />
                 </div>
-                {s.overrideBy.length > 0 && <p className='text-xs text-amber-300'>Class A because {s.overrideBy.join(', ')} {s.overrideBy.length === 1 ? 'is' : 'are'} rated very significant.</p>}
+                {s.overrideBy.length > 0 && <p className='text-xs text-amber-600'>Class A because {s.overrideBy.join(', ')} {s.overrideBy.length === 1 ? 'is' : 'are'} rated very significant.</p>}
+                {s.risk && !s.missing && !s.overrideBy.length && (
+                    <div className='grid grid-cols-3 gap-2 text-center'>
+                        {([['Consequence', s.risk.consequence, s.risk.consequenceDriver + (s.risk.mitigated ? ' · lowered by standby' : '')], ['Likelihood', s.risk.likelihood, 'of needing the part'], ['Supply risk', s.risk.supplyRisk, `mean ${s.risk.supplyMean}${s.risk.uplifted ? ' · lifts one class' : ''}`]] as const).map(([k, v, note]) => (
+                            <div key={k} className='rounded-xl bg-page p-2'>
+                                <p className='text-xs text-muted'>{k}</p>
+                                <p className='text-lg font-semibold text-ink'>{v}<span className='text-xs font-normal text-muted'> / 3</span></p>
+                                <p className='line-clamp-2 text-xs text-soft'>{note}</p>
+                            </div>
+                        ))}
+                    </div>
+                )}
+                {s.risk && !s.missing && !s.overrideBy.length && <p className='text-xs text-soft'>Risk matrix: consequence {s.risk.consequence} × likelihood {s.risk.likelihood} gives class {s.risk.matrixClass}{s.risk.uplifted ? `, raised to ${s.cls} by supply risk` : ''}.</p>}
+                {!s.missing && s.borderline && (
+                    <div className='rounded-xl border border-amber-500/50 bg-amber-500/10 p-3'>
+                        <p className='text-xs font-semibold text-ink'>Borderline result: one rating step changes the class</p>
+                        <ul className='mt-1 space-y-0.5 text-xs text-soft'>
+                            {s.swing.slice(0, 5).map((w) => <li key={w.code + w.to}>{w.factor} {w.from} → {w.to} makes it class {w.becomes}</li>)}
+                        </ul>
+                        <p className='mt-1 text-xs text-muted'>Check these ratings with a second person before submitting.</p>
+                    </div>
+                )}
                 <CriticalityGrid cutoff={setup.cutoff} marks={marks} compact />
             </Card>
 
@@ -311,7 +322,7 @@ export function MaterialCriticality({ materialId, warehouseId, onChanged }: { ma
                                     <legend className='text-sm text-ink'>
                                         {f.name}
                                         {setup.factors[f.code].weight > 1 && <span className='ml-1 text-xs text-muted'>×{setup.factors[f.code].weight}</span>}
-                                        {f.hse && setup.hseOverride && <span className='ml-1 text-xs text-amber-300'>3 forces A</span>}
+                                        {f.hse && setup.hseOverride && <span className='ml-1 text-xs text-amber-600'>3 forces A</span>}
                                     </legend>
                                     <p className='text-xs text-muted'>
                                         {f.question}
@@ -356,6 +367,12 @@ export function MaterialCriticality({ materialId, warehouseId, onChanged }: { ma
                     <Result label='Months with issues' value={`${movement.monthsWithIssues} of ${movement.coveredMonths || 0}`} note={`${movement.monthsWithIssuesPerYear} per year`} />
                     <Result label='Annual quantity' value={movement.annualQuantity} note={movement.concentrationPct >= 60 ? `${movement.concentrationPct}% in one month: one-off buying` : `Busiest month ${movement.concentrationPct}%`} />
                 </div>
+                {movement.demand && (
+                    <div className='grid grid-cols-2 gap-2'>
+                        <Result label='Demand pattern' value={movement.demand.label} note={movement.demand.adi != null ? `ADI ${movement.demand.adi} months · CV² ${movement.demand.cv2}` : 'No issues in the period'} />
+                        <Result label='Variability (XYZ)' value={movement.demand.xyz ?? '—'} note={movement.demand.method} />
+                    </div>
+                )}
                 <p className='text-xs text-muted'>
                     Movement follows how many months of the year the material is issued (very fast ≥ {setup.thresholds.m4}, fast ≥ {setup.thresholds.m3}, slow ≥ {setup.thresholds.m2}, otherwise very slow), so one large issue does not make it fast moving.
                 </p>
@@ -443,6 +460,17 @@ interface RegisterRow {
     approvedAt: string;
     reviewDue: string;
     overdue: boolean;
+    borderline?: boolean;
+    hseOverride?: boolean;
+    riskIndex?: number | null;
+    pattern?: string;
+    xyz?: string;
+    categoryCode?: string;
+}
+interface Effectiveness {
+    inScope: number; assessed: number; coveragePct: number | null;
+    byClass: Record<string, number>; sharePct: Record<string, number>;
+    overdue: number; borderline: number; hseOverrides: number; pending: number; warnings: string[];
 }
 
 /**
@@ -482,7 +510,7 @@ export function CriticalitySummary({ materialId, warehouseId, onOpen }: { materi
                     {rated.map((f) => (
                         <div key={f.code} className='flex items-center gap-2 text-xs'>
                             <span className='w-28 shrink-0 truncate text-soft'>{f.name}</span>
-                            <span className='h-2 flex-1 rounded bg-slate-800'>
+                            <span className='h-2 flex-1 rounded bg-line'>
                                 <span className={`block h-2 rounded ${a!.ratings[f.code] === 3 ? 'bg-red-400' : a!.ratings[f.code] === 2 ? 'bg-amber-400' : 'bg-emerald-400'}`} style={{ width: `${(a!.ratings[f.code] / 3) * 100}%` }} />
                             </span>
                             <span className='w-4 text-right text-ink'>{a!.ratings[f.code]}</span>
@@ -500,7 +528,7 @@ export function CriticalitySummary({ materialId, warehouseId, onOpen }: { materi
                     </div>
                 </div>
             )}
-            {a && a.status === 'submitted' && <p className='text-xs text-amber-300'>A new assessment ({a.cell}) is waiting for approval.</p>}
+            {a && a.status === 'submitted' && <p className='text-xs text-amber-600'>A new assessment ({a.cell}) is waiting for approval.</p>}
             <Button variant='secondary' onClick={onOpen}>
                 Open criticality analysis
             </Button>
@@ -552,19 +580,23 @@ function CriticalitySetupForm() {
         ...(!(t.m4 > t.m3 && t.m3 > t.m2) ? ['Movement thresholds must decrease: very fast > fast > slow.'] : []),
         ...([t.m4, t.m3, t.m2].some((x) => !Number.isInteger(x) || x < 1 || x > 12) ? ['Movement thresholds are months per year, 1 to 12.'] : []),
         ...(!Number.isInteger(form.minHistoryMonths) || form.minHistoryMonths < 6 || form.minHistoryMonths > 24 ? ['Minimum issue history is 6 to 24 months.'] : []),
-        ...(!Number.isInteger(form.reviewMonths) || form.reviewMonths < 3 || form.reviewMonths > 60 ? ['Review interval is 3 to 60 months.'] : []),
+        ...(CLASSES.some((c) => { const v = form.reviewMonthsByClass?.[c]; return !Number.isInteger(v) || v < 3 || v > 60; }) ? ['Review intervals are 3 to 60 months for each class.'] : []),
+        ...(form.method === 'risk' && !enabled.some((f) => ROLE[f.code] === 'consequence') ? ['The risk method needs at least one consequence factor.'] : []),
+        ...(matrixProblem(form.matrix) ? [matrixProblem(form.matrix)] : []),
+        ...(!(form.pattern.y > form.pattern.x) ? ['The Y variability limit must be above the X limit.'] : []),
+        ...(form.scopeCategories.some((c) => !/^[A-Z0-9_-]{1,30}$/.test(c)) ? ['Scope holds an invalid category code.'] : []),
     ];
     const changed = JSON.stringify(form) !== JSON.stringify(data.setup);
     const maxScore = enabled.reduce((n, f) => n + 3 * form.factors[f.code].weight, 0);
     const set = (patch: Partial<Setup>) => setForm((f) => (f ? { ...f, ...patch } : f));
-    const setFactor = (code: string, patch: Partial<{ enabled: boolean; weight: 1 | 2 | 3 }>) => setForm((f) => (f ? { ...f, factors: { ...f.factors, [code]: { ...f.factors[code], ...patch } } } : f));
+    const setFactor = (code: string, patch: Partial<{ enabled: boolean; weight: number }>) => setForm((f) => (f ? { ...f, factors: { ...f.factors, [code]: { ...f.factors[code], ...patch } } } : f));
     const num = (v: string) => (v === '' ? NaN : Number(v));
 
     const save = () =>
         confirm.ask(
             {
                 title: 'Save the criticality setup?',
-                message: `${enabled.length} declared factors (maximum score ${maxScore}). Strategy: ${form.strategyMode === 'criticality' ? `follows the analysis; materials at or below ${form.cutoff} are bought on demand (${data.onDemandStrategy}).` : 'manual for every material.'} ${
+                message: `${form.method === 'risk' ? 'Risk-based method (consequence × likelihood, supply uplift)' : `Weighted score (maximum ${maxScore})`} with ${enabled.length} declared factors${form.method !== data.setup.method ? '; existing approved results keep their class until each is reassessed' : ''}. Strategy: ${form.strategyMode === 'criticality' ? `follows the analysis; materials at or below ${form.cutoff} are bought on demand (${data.onDemandStrategy}).` : 'manual for every material.'} ${
                     form.strategyMode !== data.setup.strategyMode || form.cutoff !== data.setup.cutoff ? 'Approved assessments are applied again under the new rule.' : ''
                 }`,
                 confirmLabel: 'Save setup',
@@ -627,10 +659,56 @@ function CriticalitySetupForm() {
                 <CriticalityGrid cutoff={form.cutoff} onPick={edit ? (cell) => set({ cutoff: cell }) : undefined} />
             </Card>
 
+            <Card className='space-y-3'>
+                <p className='text-sm font-semibold text-ink'>Method</p>
+                <div className='grid grid-cols-1 gap-2 sm:grid-cols-2'>
+                    {([['risk', 'Risk-based (recommended)', 'Worst consequence × likelihood on a risk matrix, raised for high supply risk. Follows NORSOK Z-008, ISO 14224 and ISO 31000.'], ['weighted', 'Weighted score', 'Every rating × its weight, summed and scaled to A–D. Simple, but an easy-to-buy part can average away a line stop.']] as const).map(([m, title, text]) => (
+                        <button key={m} type='button' disabled={!edit} aria-pressed={form.method === m} onClick={() => set({ method: m })} className={`min-h-16 rounded-xl border px-3 py-2 text-left text-xs ${form.method === m ? 'border-brand bg-brand/15 text-ink' : 'border-line text-soft'}`}>
+                            <span className='block text-sm font-semibold'>{title}</span>{text}
+                        </button>
+                    ))}
+                </div>
+                {form.method === 'risk' && <>
+                    <div>
+                        <p className='text-sm text-ink'>Risk matrix</p>
+                        <p className='text-xs text-muted'>Class for each consequence (rows) and likelihood (columns). A higher consequence or likelihood can never give a lower class.</p>
+                        <div className='mt-2 grid grid-cols-[auto_1fr_1fr_1fr] items-center gap-1.5'>
+                            <span />
+                            {['Rare (1)', 'Occasional (2)', 'Frequent (3)'].map((h) => <span key={h} className='text-center text-xs text-muted'>{h}</span>)}
+                            {form.matrix.map((row, i) => (
+                                <Fragment key={i}>
+                                    <span className='pr-1 text-xs text-muted'>Consequence {3 - i}</span>
+                                    {row.map((v, j) => (
+                                        <SelectField key={j} label={`Consequence ${3 - i}, likelihood ${j + 1}`} hideLabel disabled={!edit} value={v} onChange={(e) => set({ matrix: form.matrix.map((r, ii) => r.map((c, jj) => (ii === i && jj === j ? e.target.value : c))) as Matrix })}>
+                                            {CLASSES.map((c) => <option key={c} value={c}>{c}</option>)}
+                                        </SelectField>
+                                    ))}
+                                </Fragment>
+                            ))}
+                        </div>
+                        {edit && <button type='button' className='mt-2 min-h-11 rounded-lg border border-line px-3 text-xs text-soft' onClick={() => set({ matrix: DEFAULT_MATRIX.map((r) => [...r]) as Matrix })}>Restore the standard matrix</button>}
+                    </div>
+                    <label className='flex min-h-[44px] items-center gap-3'>
+                        <Toggle checked={form.supplyUplift} onChange={(v) => edit && set({ supplyUplift: v })} label='Supply uplift' />
+                        <span className='text-sm text-soft'>High supply risk (3) raises the class by one</span>
+                    </label>
+                    <label className='flex min-h-[44px] items-center gap-3'>
+                        <Toggle checked={form.redundancyMitigation} onChange={(v) => edit && set({ redundancyMitigation: v })} label='Redundancy mitigation' />
+                        <span className='text-sm text-soft'>An installed standby lowers a non-safety consequence by one level</span>
+                    </label>
+                </>}
+                <div>
+                    <p className='text-sm text-ink'>Scope</p>
+                    <Field label='Material categories analysed' disabled={!edit} value={form.scopeCategories.join(', ')} onChange={(e) => set({ scopeCategories: e.target.value.toUpperCase().split(/[\s,;]+/).filter(Boolean) })} hint='Category codes separated by commas. Leave empty to analyse every category.' />
+                </div>
+            </Card>
+
             <Card className='space-y-2'>
                 <p className='text-sm font-semibold text-ink'>Declared factors ({enabled.length})</p>
                 <p className='text-xs text-muted'>
-                    Each declared factor is rated 1 (insignificant), 2 (moderately significant) or 3 (very significant) and multiplied by its weight. The total is scaled from 1 to 4 between the lowest and the highest possible score and rounded: 4 A, 3 B, 2 C, 1 D.
+                    {form.method === 'risk'
+                        ? 'Each factor is rated 1 (insignificant), 2 (moderately significant) or 3 (very significant). Consequence factors: the worst rating counts. Likelihood: failure likelihood, moved by predictability. Supply factors: their weighted mean, so weights matter only there.'
+                        : 'Each declared factor is rated 1 (insignificant), 2 (moderately significant) or 3 (very significant) and multiplied by its weight. The total is scaled from 1 to 4 between the lowest and the highest possible score and rounded: 4 A, 3 B, 2 C, 1 D.'}
                 </p>
                 <label className='flex min-h-[44px] items-center gap-3'>
                     <Toggle checked={form.hseOverride} onChange={(v) => edit && set({ hseOverride: v })} label='High-consequence override' />
@@ -649,17 +727,18 @@ function CriticalitySetupForm() {
                                         <div className='min-w-0 flex-1'>
                                             <p className='truncate text-sm text-ink'>
                                                 {f.name}
-                                                {f.hse && <span className='ml-1 text-xs text-amber-300'>HSE</span>}
+                                                {f.hse && <span className='ml-1 text-xs text-amber-600'>HSE</span>}
+                                                {form.method === 'risk' && <span className='ml-1 text-xs text-muted'>· {ROLE[f.code]}</span>}
                                             </p>
                                             <p className='text-xs leading-snug text-muted'>{f.question}</p>
                                         </div>
-                                        <div className='flex shrink-0 gap-1' aria-label={`Weight of ${f.name}`}>
-                                            {([1, 2, 3] as const).map((w) => (
-                                                <button key={w} type='button' disabled={!edit || !fs.enabled} aria-pressed={fs.weight === w} onClick={() => setFactor(f.code, { weight: w })} className={`h-9 w-9 rounded-lg border text-xs ${fs.weight === w && fs.enabled ? 'border-brand bg-brand/15 text-ink' : 'border-line text-muted'}`}>
-                                                    ×{w}
-                                                </button>
-                                            ))}
-                                        </div>
+                                        {(form.method === 'weighted' || ROLE[f.code] === 'supply') && (
+                                            <div className='w-20 shrink-0'>
+                                                <SelectField label={`Weight of ${f.name}`} hideLabel disabled={!edit || !fs.enabled} value={String(fs.weight)} onChange={(e) => setFactor(f.code, { weight: Number(e.target.value) })}>
+                                                    {[1, 2, 3, 4, 5].map((w) => <option key={w} value={w}>×{w}</option>)}
+                                                </SelectField>
+                                            </div>
+                                        )}
                                     </div>
                                 );
                             })}
@@ -677,7 +756,19 @@ function CriticalitySetupForm() {
                 </div>
                 <div className='grid grid-cols-1 gap-3 sm:grid-cols-2'>
                     <Field id='crit-history' label='Minimum issue history (months)' inputMode='numeric' maxLength={2} disabled={!edit} value={Number.isNaN(form.minHistoryMonths) ? '' : String(form.minHistoryMonths)} onChange={(e) => set({ minHistoryMonths: num(e.target.value) })} hint='Less history: chosen by hand' />
-                    <Field id='crit-review' label='Review every (months)' inputMode='numeric' maxLength={2} disabled={!edit} value={Number.isNaN(form.reviewMonths) ? '' : String(form.reviewMonths)} onChange={(e) => set({ reviewMonths: num(e.target.value) })} hint='Assessments become due again' />
+                </div>
+                <p className='text-sm text-ink'>Demand pattern</p>
+                <p className='text-xs text-muted'>Syntetos–Boylan cut-offs (standard 1.32 and 0.49) and XYZ coefficient-of-variation limits. They describe the demand; the movement above still sets the grid column.</p>
+                <div className='grid grid-cols-2 gap-2 sm:grid-cols-4'>
+                    {([['adi', 'ADI cut-off (months)'], ['cv2', 'CV² cut-off'], ['x', 'X up to CV'], ['y', 'Y up to CV']] as const).map(([k, label]) => (
+                        <Field key={k} label={label} inputMode='decimal' disabled={!edit} value={Number.isNaN(form.pattern[k]) ? '' : String(form.pattern[k])} onChange={(e) => set({ pattern: { ...form.pattern, [k]: num(e.target.value) } })} />
+                    ))}
+                </div>
+                <p className='text-sm text-ink'>Review interval by class (months)</p>
+                <div className='grid grid-cols-2 gap-2 sm:grid-cols-4'>
+                    {CLASSES.map((c) => (
+                        <Field key={c} label={`Class ${c}`} inputMode='numeric' maxLength={2} disabled={!edit} value={Number.isNaN(form.reviewMonthsByClass[c]) ? '' : String(form.reviewMonthsByClass[c])} onChange={(e) => set({ reviewMonthsByClass: { ...form.reviewMonthsByClass, [c]: num(e.target.value) } })} />
+                    ))}
                 </div>
             </Card>
         </div>
@@ -685,7 +776,7 @@ function CriticalitySetupForm() {
 }
 
 function CriticalityRegister() {
-    const { data, error, loading } = useLoad(() => callBackend<{ rows: RegisterRow[]; cutoff: string; strategyMode: string; onDemandStrategy: string }>(API + 'register', {}), []);
+    const { data, error, loading } = useLoad(() => callBackend<{ rows: RegisterRow[]; cutoff: string; strategyMode: string; onDemandStrategy: string; method?: string; effectiveness?: Effectiveness }>(API + 'register', {}), []);
     const [cell, setCell] = useState('');
     const counts = useMemo(() => {
         const c: Record<string, number> = {};
@@ -703,7 +794,13 @@ function CriticalityRegister() {
         { key: 'warehouse', label: 'Warehouse', value: (r) => r.warehouse },
         { key: 'onDemand', label: 'On demand', value: (r) => (r.onDemand ? 'Yes' : 'No'), hidden: true },
         { key: 'approved', label: 'Approved', type: 'date', value: (r) => r.approvedAt || null, render: (r) => (r.approvedAt ? fmtDate(r.approvedAt) : ''), hidden: true },
-        { key: 'review', label: 'Review due', type: 'date', value: (r) => r.reviewDue || null, render: (r) => (r.reviewDue ? <span className={r.overdue ? 'text-amber-300' : ''}>{r.reviewDue}</span> : '') },
+        { key: 'review', label: 'Review due', type: 'date', value: (r) => r.reviewDue || null, render: (r) => (r.reviewDue ? <span className={r.overdue ? 'font-semibold text-amber-600' : ''}>{r.reviewDue}</span> : '') },
+        { key: 'risk', label: 'Risk index', type: 'number', value: (r) => r.riskIndex ?? null },
+        { key: 'borderline', label: 'Borderline', value: (r) => (r.borderline ? 'Yes' : 'No'), render: (r) => (r.borderline ? <Badge tone='warn'>Borderline</Badge> : '') },
+        { key: 'hse', label: 'HSE override', value: (r) => (r.hseOverride ? 'Yes' : 'No'), hidden: true },
+        { key: 'pattern', label: 'Demand pattern', value: (r) => r.pattern || '' },
+        { key: 'xyz', label: 'XYZ', value: (r) => r.xyz || '', hidden: true },
+        { key: 'category', label: 'Category', value: (r) => r.categoryCode || '', hidden: true },
     ];
     if (!data && loading) return <Spinner />;
     if (!data) return <Alert tone='error'>{error || 'The grid could not be loaded.'}</Alert>;
@@ -726,6 +823,18 @@ function CriticalityRegister() {
                     Tap a cell to list its materials. Strategy {data.strategyMode === 'criticality' ? `follows the analysis (${data.onDemandStrategy} at or below ${data.cutoff})` : 'is manual'}.{overdue ? ` ${overdue} assessments are due for review.` : ''}
                 </p>
             </Card>
+            {data.effectiveness && (
+                <Card className='space-y-2'>
+                    <p className='text-sm font-semibold text-ink'>Effectiveness of the analysis{data.method ? ` · ${data.method === 'risk' ? 'risk-based method' : 'weighted score'}` : ''}</p>
+                    <div className='grid grid-cols-2 gap-2 sm:grid-cols-4'>
+                        <Result label='Coverage' value={data.effectiveness.coveragePct == null ? '—' : `${data.effectiveness.coveragePct}%`} note={`${data.effectiveness.assessed} of ${data.effectiveness.inScope} in-scope stocked materials`} />
+                        <Result label='Class mix A / B / C / D' value={CLASSES.map((c) => data.effectiveness!.sharePct[c] ?? 0).map((v) => Math.round(v)).join(' / ')} note='% of approved assessments' />
+                        <Result label='Borderline' value={data.effectiveness.borderline} note='One rating step changes the class' />
+                        <Result label='Overdue reviews' value={data.effectiveness.overdue} note={`${data.effectiveness.pending} waiting for approval · ${data.effectiveness.hseOverrides} HSE overrides`} />
+                    </div>
+                    {data.effectiveness.warnings.map((w) => <Alert key={w} tone='warn'>{w}</Alert>)}
+                </Card>
+            )}
             <RichTable id='inv.criticality.register' title={cell ? `Cell ${cell}` : 'Criticality register'} fileName='Criticality_register' columns={columns} rows={rows} rowKey={(r) => r.id} empty='No assessments yet. Assess materials from Material detail > Criticality Analysis.' height='h-[calc(100dvh-26rem)]' />
         </div>
     );
