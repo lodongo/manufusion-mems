@@ -20,6 +20,7 @@ import RichTable, { type Column } from '../components/RichTable';
 import { Segmented, messageOf, useConfirm } from '../components/screen';
 import { Badge, Button, Card, Spinner, Toggle, useLoad } from '../admin/kit';
 import { fmtDate } from '../admin/format';
+import { MassEvaluation } from './ForecastRecommendations';
 import {
     LEVEL_FIELDS,
     METHODS,
@@ -998,6 +999,8 @@ interface SetupData {
     updatedAt: string;
     reason: string;
     canEdit: boolean;
+    canEvaluate?: boolean;
+    categories?: Array<{ code: string; materials: number }>;
 }
 
 export function ForecastSetupForm() {
@@ -1056,6 +1059,32 @@ export function ForecastSetupForm() {
             {notice && <Alert tone='success'>{notice}</Alert>}
             {problem && <Alert tone='warn'>{problem}</Alert>}
             {!edit && <Alert tone='info'>Read only: changing the setup needs the Forecasting Administrator role.</Alert>}
+            {data.canEvaluate && <MassEvaluation />}
+
+            <Card className='space-y-3'>
+                <p className='text-sm font-semibold text-ink'>Materials analysed</p>
+                <p className='text-xs text-muted'>Only activated material categories are forecast and assessed for criticality. Other materials show neither tab and are left out of every forecasting and criticality statistic and report.</p>
+                <div className='grid grid-cols-1 gap-2 sm:grid-cols-2'>
+                    {([['all', 'Every category'], ['selected', 'Selected categories only']] as const).map(([m, t]) => (
+                        <button key={m} type='button' disabled={!edit} aria-pressed={(form.activation?.mode ?? 'all') === m} onClick={() => set({ activation: { mode: m, categories: form.activation?.categories ?? [] } })} className={`min-h-12 rounded-xl border px-3 text-left text-sm font-semibold ${(form.activation?.mode ?? 'all') === m ? 'border-brand bg-brand/15 text-ink' : 'border-line text-soft'}`}>{t}</button>
+                    ))}
+                </div>
+                {form.activation?.mode === 'selected' && (
+                    <div className='max-h-72 space-y-1 overflow-y-auto overscroll-contain rounded-xl border border-line p-2'>
+                        {(data.categories ?? []).map((c) => {
+                            const on = (form.activation?.categories ?? []).includes(c.code);
+                            return (
+                                <label key={c.code} className='flex min-h-11 items-center gap-3 rounded-lg px-2 active:bg-page'>
+                                    <Toggle checked={on} onChange={(v) => edit && set({ activation: { mode: 'selected', categories: v ? [...(form.activation?.categories ?? []), c.code] : (form.activation?.categories ?? []).filter((x: string) => x !== c.code) } })} label={`Forecast ${c.code}`} />
+                                    <span className='flex-1 font-mono text-sm text-ink'>{c.code}</span>
+                                    <span className='text-xs text-muted'>{c.materials} material{c.materials === 1 ? '' : 's'}</span>
+                                </label>
+                            );
+                        })}
+                        {!data.categories?.length && <p className='p-2 text-sm text-muted'>No approved materials yet.</p>}
+                    </div>
+                )}
+            </Card>
             <p className='text-xs text-muted'>
                 Version {data.version}
                 {data.updatedAt ? ` · ${fmtDate(data.updatedAt)}` : ' · defaults (not saved yet)'}
@@ -1157,6 +1186,56 @@ export function ForecastSetupForm() {
                     <span className='text-sm text-soft'>Round levels up to whole units</span>
                 </label>
                 <p className='text-xs text-muted'>Minimum order quantity and order multiple from Procurement Information are applied to the reorder quantity.</p>
+            </Card>
+
+            <Card className='space-y-3'>
+                <p className='text-sm font-semibold text-ink'>Purchase on demand (PD), ageing and insurance spares</p>
+                <p className='text-xs text-muted'>PD means RP07 Direct purchase: no stock is held and each need is bought. A material is recommended for PD when its class is not protected and it was issued in few months of the last year with a short lead time, or when its stock is dead.</p>
+                <div className='grid grid-cols-1 gap-2 sm:grid-cols-3'>
+                    <Field label='PD: at most this many issue months a year' inputMode='numeric' maxLength={2} disabled={!edit} value={String(form.pd?.maxIssueMonthsPerYear ?? '')} onChange={(e) => set({ pd: { ...form.pd, maxIssueMonthsPerYear: e.target.value } })} />
+                    <Field label='PD: lead time at most (days)' inputMode='numeric' maxLength={3} disabled={!edit} value={String(form.pd?.maxLeadDays ?? '')} onChange={(e) => set({ pd: { ...form.pd, maxLeadDays: e.target.value } })} />
+                    {numField('tolerancePct', 'No-change tolerance (%)', { mode: 'decimal', hint: 'Smaller moves count as no change' })}
+                </div>
+                <div>
+                    <p className='text-xs text-muted'>Classes never put on PD</p>
+                    <div className='mt-1 grid grid-cols-4 gap-2'>
+                        {['A', 'B', 'C', 'D'].map((c) => {
+                            const on = (form.pd?.protectedClasses ?? []).includes(c);
+                            return <button key={c} type='button' disabled={!edit} aria-pressed={on} onClick={() => set({ pd: { ...form.pd, protectedClasses: on ? form.pd.protectedClasses.filter((x: string) => x !== c) : [...(form.pd?.protectedClasses ?? []), c] } })} className={`min-h-11 rounded-xl border text-sm font-semibold ${on ? 'border-brand bg-brand/15 text-ink' : 'border-line text-soft'}`}>{c}</button>;
+                        })}
+                    </div>
+                </div>
+                <div className='grid grid-cols-1 gap-2 sm:grid-cols-2'>
+                    {numField('slowMonths', 'Slow moving after (months without issue)', { max: 2 })}
+                    {numField('deadStockMonths', 'Dead stock after (months without issue)', { max: 2 })}
+                </div>
+                <div>
+                    <p className='text-xs text-muted'>Insurance spares: classes that keep a minimum even with no forecast demand</p>
+                    <div className='mt-1 grid grid-cols-4 gap-2'>
+                        {['A', 'B', 'C', 'D'].map((c) => {
+                            const on = (form.insuranceClasses ?? []).includes(c);
+                            return <button key={c} type='button' disabled={!edit} aria-pressed={on} onClick={() => set({ insuranceClasses: on ? form.insuranceClasses.filter((x: string) => x !== c) : [...(form.insuranceClasses ?? []), c] })} className={`min-h-11 rounded-xl border text-sm font-semibold ${on ? 'border-brand bg-brand/15 text-ink' : 'border-line text-soft'}`}>{c}</button>;
+                        })}
+                    </div>
+                </div>
+                {numField('insuranceMinQty', 'Insurance minimum (units)', { mode: 'decimal' })}
+                <SelectField label='Lead-time demand distribution' disabled={!edit} value={form.distribution ?? 'auto'} onChange={(e) => set({ distribution: e.target.value })} hint='Automatic uses Poisson or negative binomial for slow and intermittent spares, which sets the reorder point from the real tail of demand.'>
+                    <option value='auto'>Automatic (recommended)</option>
+                    <option value='normal'>Normal approximation for every material</option>
+                </SelectField>
+            </Card>
+
+            <Card className='space-y-2'>
+                <p className='text-sm font-semibold text-ink'>Background forecasting</p>
+                <label className='flex min-h-[44px] items-center gap-3'>
+                    <Toggle checked={form.autoWeekly !== false} onChange={(v) => edit && set({ autoWeekly: v })} label='Weekly forecasting' />
+                    <span className='text-sm text-soft'>Re-forecast every activated material once a week (Automation Center)</span>
+                </label>
+                <label className='flex min-h-[44px] items-center gap-3'>
+                    <Toggle checked={form.autoOnIssue !== false} onChange={(v) => edit && set({ autoOnIssue: v })} label='Forecast after every issue' />
+                    <span className='text-sm text-soft'>Re-forecast a material whenever stock of it is issued</span>
+                </label>
+                <p className='text-xs text-muted'>Background results are recommendations only. Nothing changes until an approver accepts them on the Recommendations tab, one by one or by group.</p>
             </Card>
 
             <Card className='space-y-2'>

@@ -224,6 +224,7 @@ export const criticalityRoutes = {
             canView(ctx);
             const { materialId, warehouseId } = ids(ctx.body);
             if (!(await warehouses(ctx, 'read')).some((w) => w.id === warehouseId)) throw new HttpError(404, 'Warehouse not found');
+            await (await import('./forecasting')).requireActivated(ctx.orgId, materialId);
             const [{ setup, version }, doc, data, info] = await Promise.all([
                 getCriticalitySetup(ctx.orgId),
                 getDoc(assessmentPath(ctx.orgId, materialId, warehouseId)),
@@ -261,6 +262,7 @@ export const criticalityRoutes = {
             const existing = await getDoc(path);
             if (existing && str(existing.data.status) === 'submitted') throw new HttpError(409, 'This assessment is waiting for approval; it cannot be changed now.');
             const { setup, version } = await getCriticalitySetup(ctx.orgId);
+            await (await import('./forecasting')).requireActivated(ctx.orgId, materialId);
             if (!inScope(setup, str(materialDoc.data.categoryCode))) throw new HttpError(409, `Material category ${str(materialDoc.data.categoryCode) || '(none)'} is outside the scope of the criticality analysis. An administrator can widen the scope in Criticality setup.`);
             const ratings = readRatings(ctx.body.ratings, setup);
             const data = await movementData(ctx.orgId, materialId, warehouseId);
@@ -343,12 +345,15 @@ export const criticalityRoutes = {
         orgRoute('org.inventory.criticality.register', 'INV.criticality.view', async (ctx) => {
             canView(ctx);
             const visible = new Set((await warehouses(ctx, 'read')).map((w) => w.id));
-            const [assessments, materials, whs, { setup }] = await Promise.all([listDocs(`${root(ctx.orgId)}/criticality_assessments`), listDocs(`${root(ctx.orgId)}/materials`), listDocs(`${root(ctx.orgId)}/warehouses`), getCriticalitySetup(ctx.orgId)]);
+            const [assessments, materials, whs, { setup }, forecastSetup] = await Promise.all([listDocs(`${root(ctx.orgId)}/criticality_assessments`), listDocs(`${root(ctx.orgId)}/materials`), listDocs(`${root(ctx.orgId)}/warehouses`), getCriticalitySetup(ctx.orgId), import('./forecasting').then((f) => f.getForecastSetup(ctx.orgId))]);
+            const { isActivated } = await import('./forecastModel');
+            // Materials of categories not activated for forecasting are left out of the register and its statistics.
+            const analysed = (categoryCode: string) => isActivated(forecastSetup.setup, categoryCode) && inScope(setup, categoryCode);
             const mm = new Map(materials.map((m) => [m.id, m.data]));
             const wm = new Map(whs.map((w) => [w.id, str(w.data.name) || w.id]));
             const today = nowIso().slice(0, 10);
             const rows = assessments
-                .filter((a: Doc) => visible.has(str(a.data.warehouseId)))
+                .filter((a: Doc) => visible.has(str(a.data.warehouseId)) && analysed(str(mm.get(str(a.data.materialId))?.categoryCode)))
                 .map((a: Doc) => {
                     const d = a.data;
                     const ap = isObj(d.approved) ? d.approved : null;
@@ -385,7 +390,7 @@ export const criticalityRoutes = {
             // results that deserve a second look, HSE overrides and the age of the open queue.
             const inScopeKeys = new Set<string>();
             for (const m of materials) {
-                if (!['approved', 'active'].includes(str(m.data.status)) || !inScope(setup, str(m.data.categoryCode))) continue;
+                if (!['approved', 'active'].includes(str(m.data.status)) || !analysed(str(m.data.categoryCode))) continue;
                 for (const w of [str(m.data.warehouseId), ...(Array.isArray(m.data.warehouseIds) ? m.data.warehouseIds.map(str) : [])]) if (w && visible.has(w)) inScopeKeys.add(m.id + '_' + w);
             }
             const approvedRows = rows.filter((r) => !!r.cell);
