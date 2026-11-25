@@ -85,6 +85,7 @@ async function status() {
     const mrp = await mrpSweepConfig();
     const mrpState = await sweepState();
     const stState = await getDoc(ST_STATE);
+    const fcState = await getDoc(FC_STATE);
     return {
         engine: { name: 'MEMS shared automation engine', version: '2.0', registered: JOBS.map((j) => j.id),
             tickMinutes: 5, lastHeartbeat: lastSeen, connected, sharedTrigger: scheduler },
@@ -103,6 +104,13 @@ async function status() {
                 lastStartedAt: str(mrpState?.data.lastStartedAt), lastCompletedAt: str(mrpState?.data.lastCompletedAt),
                 lastError: str(mrpState?.data.lastError), lastErrorAt: str(mrpState?.data.lastErrorAt),
                 lastResult: mrpState?.data.lastResult || null },
+            { id: FC_JOB_ID, label: 'Weekly forecasting (recommendations for activated materials)', category: 'Inventory',
+                enabled: true, schedule: { weekly: 'every 7 days' },
+                scheduleText: `Weekly; also after every issue (organizations can switch either off in Forecasting setup)${str(fcState?.data.cursor) ? ' · resuming an unfinished run' : ''}`,
+                configurable: 'none',
+                lastStartedAt: str(fcState?.data.lastStartedAt), lastCompletedAt: str(fcState?.data.lastCompletedAt),
+                lastError: str(fcState?.data.lastError), lastErrorAt: str(fcState?.data.lastErrorAt),
+                lastResult: fcState?.data.lastResult || null },
             { id: ST_JOB_ID, label: 'Stock take sessions (automatic creation and closing)', category: 'Inventory',
                 enabled: true, schedule: { daily: '00:00 Africa/Nairobi' },
                 scheduleText: `Daily at midnight (Nairobi)${str(stState?.data.cursor) ? ' · resuming an unfinished run' : ''}`,
@@ -266,6 +274,55 @@ async function executeStockTakeSessions(mode: 'scheduled' | 'manual', deadline: 
     }
 }
 
+// ===== Weekly background forecasting =====
+// Re-forecasts every material of every organization whose category is activated for forecasting (and whose setup
+// keeps the weekly run on). Results are recommendations only, accepted or rejected by people. Resumable per material.
+
+const FC_JOB_ID = 'inv.forecast-weekly';
+const FC_STATE = 'system/forecast_weekly_state';
+
+export function weeklyDue(lastCompletedAt: string, cursor: string, at: Date): boolean {
+    if (cursor) return true;
+    const last = Date.parse(lastCompletedAt || '') || 0;
+    return at.getTime() - last >= 7 * 86_400_000;
+}
+
+async function executeForecastWeekly(mode: 'scheduled' | 'manual', deadline: number) {
+    const startedAt = nowIso();
+    const t0 = Date.now();
+    const eventId = `${startedAt.replace(/[^0-9]/g, '')}_${randomId(4)}`;
+    const prior = (await getDoc(FC_STATE))?.data ?? {};
+    await writeDoc(FC_STATE, { ...prior, lastStartedAt: startedAt });
+    try {
+        const { weeklyForOrganization } = await import('./forecastRecommendations');
+        const orgs = (await listDocs('organizations')).filter((o) => !['suspended', 'pending_approval', 'rejected'].includes(str(o.data.status))).map((o) => o.id).sort();
+        const [cursorOrg, cursorMaterial] = str(prior.cursor).split('|');
+        const todo = cursorOrg ? orgs.filter((id) => id >= cursorOrg) : orgs;
+        const total = { organizations: 0, evaluated: 0, failed: 0 };
+        let next = '';
+        for (const orgId of todo) {
+            if (Date.now() > deadline) { next = orgId; break; }
+            const r = await weeklyForOrganization(orgId, deadline, orgId === cursorOrg ? cursorMaterial || '' : '');
+            total.organizations++; total.evaluated += r.done; total.failed += r.failed;
+            if (!r.complete) { next = `${orgId}|${r.cursor}`; break; }
+        }
+        const completedAt = nowIso();
+        const result = { ...total, complete: !next, resumeFrom: next };
+        await writeDoc(FC_STATE, { ...prior, lastStartedAt: startedAt, cursor: next, ...(next ? {} : { lastCompletedAt: completedAt }), lastResult: result, lastError: '', lastErrorAt: '' });
+        await writeDoc(`${RUNS_COL}/${eventId}`, { jobId: FC_JOB_ID, mode, status: 'success', startedAt, completedAt, durationMs: Date.now() - t0, ...result,
+            summary: `${total.evaluated} material(s) re-forecast in ${total.organizations} organization(s), ${total.failed} failed${next ? '; continues next tick' : ''}. Results are recommendations only.` }, { exists: false });
+        await audit([{ category: 'automation', action: 'inv.forecast_weekly.success', details: `${mode}: ${total.evaluated} evaluated, ${total.failed} failed${next ? ' (partial)' : ''}` }]);
+        return result;
+    } catch (e) {
+        const message = e instanceof Error ? e.message : 'Weekly forecasting failed';
+        const completedAt = nowIso();
+        await writeDoc(FC_STATE, { ...prior, lastStartedAt: startedAt, lastError: message.slice(0, 250), lastErrorAt: completedAt });
+        await writeDoc(`${RUNS_COL}/${eventId}`, { jobId: FC_JOB_ID, mode, status: 'failed', startedAt, completedAt, durationMs: Date.now() - t0, error: message.slice(0, 250) }, { exists: false });
+        await audit([{ category: 'automation', action: 'inv.forecast_weekly.failure', outcome: 'failure', details: message.slice(0, 400) }]);
+        throw e;
+    }
+}
+
 // ===== Job registry =====
 // One shared, OIDC-verified heartbeat drives every job. Each job decides whether it is due, runs under its own lock for
 // the tick, keeps its own state and history, and fails on its own without stopping the others.
@@ -296,6 +353,14 @@ const JOBS: Job[] = [
             return !!str(s.cursor) || stockTakeAutomationDue(str(s.lastCompletedAt), at);
         },
         run: (mode, deadline) => executeStockTakeSessions(mode, deadline),
+    },
+    {
+        id: FC_JOB_ID,
+        due: async (at) => {
+            const st = (await getDoc(FC_STATE))?.data ?? {};
+            return weeklyDue(str(st.lastCompletedAt), str(st.cursor), at);
+        },
+        run: (mode, deadline) => executeForecastWeekly(mode, deadline),
     },
 ];
 const TICK_BUDGET_MS = 100_000;

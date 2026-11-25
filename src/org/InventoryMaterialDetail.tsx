@@ -15,6 +15,7 @@ import { AUTOMATED_METHODS, METHODS, PARAMS, factorsOf, methodOf, routeFor } fro
 import MaterialOverview, { type MaterialPhoto } from './MaterialOverview';
 import type { StatusSignal } from './MaterialOverview';
 import { nonConformingNumber } from './materialIdentity';
+import { RecommendationCard, type Recommendation } from './ForecastRecommendations';
 
 // Material detail for one warehouse (INV), opened from Inventory on hand.
 //   Overview                 photos (taken on the phone), identity, stock health against min/max and key facts
@@ -1360,6 +1361,13 @@ export default function InventoryMaterialDetail({ id, warehouseId, onBack }: { i
 
     const flash = (tone: 'success' | 'error', text: string) => setNotice({ tone, text });
 
+    // Forecasting and criticality analysis only for materials of activated categories (Forecasting setup).
+    const activation = useLoad(() => callBackend<{ activated: boolean; recommendation: Recommendation | null; canDecide?: boolean }>('/api/org/inventory/forecast/activation', { materialId: id, warehouseId }).catch(() => ({ activated: true, recommendation: null })), [id, warehouseId]);
+    const analysed = activation.data?.activated !== false;
+    const visibleTabs = TABS.filter((t) => analysed || (t !== 'Criticality Analysis' && t !== 'Forecasting'));
+    useEffect(() => {
+        if (!analysed && (tab === 'Criticality Analysis' || tab === 'Forecasting')) setTab('Overview');
+    }, [analysed, tab]);
     const changeTab = (next: Tab) => {
         setTab(next);
         setEditing(false);
@@ -1691,7 +1699,7 @@ export default function InventoryMaterialDetail({ id, warehouseId, onBack }: { i
             bodyFlush
             toolbar={
                 <>
-                    <Segmented<Tab> label='Material sections' value={tab} onChange={changeTab} options={TABS.map((t) => ({ value: t, label: t }))} />
+                    <Segmented<Tab> label='Material sections' value={tab} onChange={changeTab} options={visibleTabs.map((t) => ({ value: t, label: t }))} />
                     {strip}
                 </>
             }
@@ -1732,7 +1740,7 @@ export default function InventoryMaterialDetail({ id, warehouseId, onBack }: { i
                                     />
                                 );
                             })()}
-                            <CriticalitySummary materialId={id} warehouseId={warehouseId} onOpen={() => changeTab('Criticality Analysis')} />
+                            {analysed && <CriticalitySummary materialId={id} warehouseId={warehouseId} onOpen={() => changeTab('Criticality Analysis')} />}
                         </ScrollBody>
                     )}
 
@@ -1834,8 +1842,18 @@ export default function InventoryMaterialDetail({ id, warehouseId, onBack }: { i
                         </ScrollBody>
                     )}
 
-                    {tab === 'Forecasting' && (
+                    {tab === 'Forecasting' && analysed && (
                         <ScrollBody>
+                            {activation.data?.recommendation && (
+                                <div className='mb-3'>
+                                    <RecommendationCard
+                                        r={activation.data.recommendation}
+                                        canDecide={activation.data?.canDecide === true}
+                                        onDone={(t) => { flash('success', t); activation.reload(); reload(); reloadLevelSource(); }}
+                                        onRefresh={async () => { await callBackend('/api/org/inventory/forecast/recommendation/refresh', { materialId: id, warehouseId }).catch(() => null); activation.reload(); }}
+                                    />
+                                </div>
+                            )}
                             <MaterialForecast
                                 materialId={id}
                                 warehouseId={warehouseId}

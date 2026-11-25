@@ -20,6 +20,7 @@ import { Screen, Segmented, messageOf, useConfirm } from '../components/screen';
 import { Badge, Button, Card, Spinner, Toggle, useLoad } from '../admin/kit';
 import { fmtDate } from '../admin/format';
 import { ForecastSetupForm } from './Forecasting';
+import ForecastRecommendations from './ForecastRecommendations';
 import { AuditRegister, ChangeControlForm } from './MaterialAudit';
 import { scoreCriticality, ROLE, DEFAULT_MATRIX, type CriticalitySetup, type Matrix } from '../../backend/criticalityModel';
 
@@ -537,11 +538,11 @@ export function CriticalitySummary({ materialId, warehouseId, onOpen }: { materi
 }
 
 export default function InventorySetup() {
-    const [tab, setTab] = useState<'setup' | 'grid' | 'forecast' | 'controls' | 'audits'>('setup');
+    const [tab, setTab] = useState<'setup' | 'grid' | 'forecast' | 'recommendations' | 'controls' | 'audits'>('setup');
     return (
         <Screen
             title='Inventory setup'
-            subtitle={tab === 'forecast' ? 'Forecasting' : tab === 'controls' ? 'Change control' : tab === 'audits' ? 'Material audits' : 'Criticality analysis'}
+            subtitle={tab === 'forecast' || tab === 'recommendations' ? 'Forecasting' : tab === 'controls' ? 'Change control' : tab === 'audits' ? 'Material audits' : 'Criticality analysis'}
             toolbar={
                 <Segmented
                     label='Setup views'
@@ -551,13 +552,14 @@ export default function InventorySetup() {
                         { value: 'setup', label: 'Criticality setup' },
                         { value: 'grid', label: 'Criticality grid' },
                         { value: 'forecast', label: 'Forecasting setup' },
+                        { value: 'recommendations', label: 'Forecast recommendations' },
                         { value: 'controls', label: 'Change control' },
                         { value: 'audits', label: 'Material audits' },
                     ]}
                 />
             }
         >
-            {tab === 'setup' ? <CriticalitySetupForm /> : tab === 'grid' ? <CriticalityRegister /> : tab === 'forecast' ? <ForecastSetupForm /> : tab === 'controls' ? <ChangeControlForm /> : <AuditRegister />}
+            {tab === 'setup' ? <CriticalitySetupForm /> : tab === 'grid' ? <CriticalityRegister /> : tab === 'forecast' ? <ForecastSetupForm /> : tab === 'recommendations' ? <ForecastRecommendations /> : tab === 'controls' ? <ChangeControlForm /> : <AuditRegister />}
         </Screen>
     );
 }

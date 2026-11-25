@@ -89,6 +89,12 @@ export function maskedIds(d: Obj | undefined): string[] {
     return Array.isArray(d?.masked) ? (d!.masked as unknown[]).filter(isObj).map((m) => str(m.id)).filter(Boolean) : [];
 }
 
+/** Materials of categories not activated for forecasting are neither forecast nor analysed. */
+export async function requireActivated(orgId: string, materialId: string) {
+    const { materialActivated } = await import('./forecastRecommendations');
+    if (!(await materialActivated(orgId, materialId))) throw new HttpError(409, 'This material category is not activated for forecasting and criticality analysis. An administrator can activate it in Forecasting setup.');
+}
+
 function canView(ctx: OrgContext) {
     if (ctx.role === 'org_super_admin') return;
     if (![FC.view, FC.edit, FC.approve, FC.setup, 'INV.view', 'INV.edit'].some((p) => hasPerm(ctx.permissions, p))) throw new HttpError(403, 'Inventory access required');
@@ -149,16 +155,16 @@ export async function leadTimeSamples(orgId: string, materialId: string, warehou
 }
 
 /** Inputs of the forecast that live on the material: lead times, class, strategy, stock, supply, price, order constraints. */
-export async function materialInputs(orgId: string, materialId: string, warehouseId: string, setup: ForecastSetup) {
+export async function materialInputs(orgId: string, materialId: string, warehouseId: string, setup: ForecastSetup, cache?: { crit?: Awaited<ReturnType<typeof getCriticalitySetup>>; supply?: Awaited<ReturnType<Awaited<typeof import('./replenishment')>['supplyIndex']>> | null }) {
     const [{ stockValOf }, repl] = await Promise.all([import('./finCore'), import('./replenishment')]);
     const [info, proc, val, samples, crit, stock, supply] = await Promise.all([
         getDoc(infoPath(orgId, materialId, warehouseId)),
         getDoc(procPath(orgId, materialId, warehouseId)),
         stockValOf(orgId, warehouseId, materialId).catch(() => null),
         leadTimeSamples(orgId, materialId, warehouseId, setup.leadTimeLookbackMonths),
-        getCriticalitySetup(orgId),
+        cache?.crit ? Promise.resolve(cache.crit) : getCriticalitySetup(orgId),
         repl.stockPosition(orgId, warehouseId, materialId, 365).catch(() => null),
-        repl.supplyIndex(orgId).catch(() => null),
+        cache && cache.supply !== undefined ? Promise.resolve(cache.supply) : repl.supplyIndex(orgId).catch(() => null),
     ]);
     const i = info?.data ?? {};
     const p = proc?.data ?? {};
@@ -278,7 +284,15 @@ export const forecastingRoutes = {
         orgRoute('org.inventory.forecast.setup.get', 'INV.forecast.view', async (ctx) => {
             canView(ctx);
             const { setup, version, saved } = await getForecastSetup(ctx.orgId);
-            return { ...publicSetup(setup, version, saved), canEdit: holdsAnywhere(ctx, [FC.setup]) };
+            // Material categories in use, to choose which are activated for forecasting and criticality analysis.
+            const counts = new Map<string, number>();
+            for (const m of await listDocs(`${root(ctx.orgId)}/materials`)) {
+                if (!['approved', 'active'].includes(str(m.data.status))) continue;
+                const c = str(m.data.categoryCode).toUpperCase();
+                if (c) counts.set(c, (counts.get(c) ?? 0) + 1);
+            }
+            const categories = [...counts.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([code, materials]) => ({ code, materials }));
+            return { ...publicSetup(setup, version, saved), canEdit: holdsAnywhere(ctx, [FC.setup]), canEvaluate: holdsAnywhere(ctx, [FC.edit, FC.setup]), categories };
         }),
     ],
 
@@ -307,7 +321,7 @@ export const forecastingRoutes = {
                     withdrawn++;
                 }
             }
-            await audited(ctx, 'inventory.forecast.setup.save', 'Forecasting setup', { version: current.version + 1, reason, levelMode: setup.levelMode, method: setup.method, minHistoryMonths: setup.minHistoryMonths, serviceLevels: setup.serviceLevels, roqMethod: setup.roqMethod, withdrawn });
+            await audited(ctx, 'inventory.forecast.setup.save', 'Forecasting setup', { version: current.version + 1, reason, levelMode: setup.levelMode, method: setup.method, minHistoryMonths: setup.minHistoryMonths, serviceLevels: setup.serviceLevels, roqMethod: setup.roqMethod, activation: setup.activation, previousActivation: current.setup.activation, distribution: setup.distribution, pd: setup.pd, insurance: { classes: setup.insuranceClasses, min: setup.insuranceMinQty }, deadStockMonths: setup.deadStockMonths, autoWeekly: setup.autoWeekly, autoOnIssue: setup.autoOnIssue, withdrawn });
             return { ok: true, version: current.version + 1, withdrawn };
         }),
     ],
@@ -328,6 +342,7 @@ export const forecastingRoutes = {
         orgRoute('org.inventory.forecast.get', 'INV.forecast.view', async (ctx) => {
             canView(ctx);
             const { materialId, warehouseId } = ids(ctx.body);
+            await requireActivated(ctx.orgId, materialId);
             await visibleWarehouse(ctx, warehouseId);
             const [{ setup, version }, instances, doc, m] = await Promise.all([getForecastSetup(ctx.orgId), journalInstances(ctx.orgId, materialId, warehouseId), getDoc(forecastPath(ctx.orgId, materialId, warehouseId))]).then(async ([a, b, c]) => [a, b, c, await materialInputs(ctx.orgId, materialId, warehouseId, a.setup)] as const);
             const f = doc?.data ?? {};
@@ -395,6 +410,7 @@ export const forecastingRoutes = {
     'POST /api/org/inventory/forecast/propose': [
         orgRoute('org.inventory.forecast.propose', 'INV.forecast.edit', async (ctx) => {
             const { materialId, warehouseId } = ids(ctx.body);
+            await requireActivated(ctx.orgId, materialId);
             await requireAt(ctx, [FC.edit], warehouseId, 'write', 'Forecast permission is required for this warehouse.');
             const [{ setup, version }, instances, doc, m] = await Promise.all([getForecastSetup(ctx.orgId), journalInstances(ctx.orgId, materialId, warehouseId), getDoc(forecastPath(ctx.orgId, materialId, warehouseId))]).then(async ([a, b, c]) => [a, b, c, await materialInputs(ctx.orgId, materialId, warehouseId, a.setup)] as const);
             const f = doc?.data ?? {};
@@ -518,10 +534,15 @@ export const forecastingRoutes = {
             const instances = await journalInstances(ctx.orgId, materialId, warehouseId);
             const src = effectiveSource(setup, info, p.simulated === true ? Number(p.historyMonths) || 0 : historyMonthsOf(instances, new Set(maskedIds(f)), now));
             if (p.simulated === true && !setup.allowSimulatedLevels) throw new HttpError(409, 'The forecasting setup no longer allows levels from simulated data; return the proposal.');
-            if (src.source !== 'forecast') throw new HttpError(409, `The levels of this material are manual now (${src.why}); return the proposal.`);
+            // A proposal from an accepted background recommendation was a deliberate decision on this material, so it
+            // applies whatever the level source; any other proposal applies only while the material is forecast-driven.
+            const fromRecommendation = !!str(p.fromRecommendation);
+            if (src.source !== 'forecast' && !fromRecommendation) throw new HttpError(409, `The levels of this material are manual now (${src.why}); return the proposal.`);
             const values = isObj(p.values) ? p.values : {};
             const patch: Obj = { forecastAppliedAt: now, forecastAppliedBy: ctx.uid, forecastMethod: str(p.method), forecastSimulated: p.simulated === true, updatedAt: now, updatedBy: ctx.uid };
             for (const k of LEVEL_FIELDS) if (Number.isFinite(Number(values[k]))) patch[k] = Number(values[k]);
+            if (fromRecommendation && str(p.recommendedStrategy) === 'RP01' && str(info.replenishmentStrategy) === 'RP07' && str(info.strategySource) !== 'criticality')
+                Object.assign(patch, { replenishmentStrategy: 'RP01', strategySource: 'forecast', strategyChangedAt: now, strategyChangedBy: ctx.uid });
             await writeDoc(infoPath(ctx.orgId, materialId, warehouseId), { ...info, ...patch } as never);
             // The accepted levels and their impact on stock holding are logged for the Audit tab.
             const { logLevelChange } = await import('./materialAudit');

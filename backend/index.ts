@@ -179,6 +179,7 @@ import { procurementRoutes } from './procurement';
 import { stockTakeRoutes } from './stockTake';
 import { criticalityRoutes } from './criticality';
 import { forecastingRoutes } from './forecasting';
+import { forecastRecommendationRoutes } from './forecastRecommendations';
 import { materialAuditRoutes } from './materialAudit';
 import { apRoutes } from './accountsPayable';
 import { storesReleaseRoutes } from './storesRelease';
@@ -1728,6 +1729,7 @@ export const handler = router(recordWiredRoutes({
     ...stockTakeRoutes,
     ...criticalityRoutes,
     ...forecastingRoutes,
+    ...forecastRecommendationRoutes,
     ...materialAuditRoutes,
     ...apRoutes,
     ...storesReleaseRoutes,

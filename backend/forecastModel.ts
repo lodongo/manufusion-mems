@@ -52,7 +52,7 @@ export function classify(type: string, qty: number): Kind | null {
 // ----- Setup -----
 
 export type LevelMode = 'forecast' | 'manual' | 'manual_unless_forced';
-export type Method = 'auto' | 'sma' | 'wma' | 'ses' | 'holt' | 'linear' | 'croston';
+export type Method = 'auto' | 'sma' | 'wma' | 'ses' | 'holt' | 'linear' | 'croston' | 'tsb';
 export const METHODS: Array<{ code: Exclude<Method, 'auto'>; name: string; note: string }> = [
     { code: 'sma', name: 'Moving average', note: 'Average of the last months; steady demand.' },
     { code: 'wma', name: 'Weighted moving average', note: 'Recent months weigh more; reacts faster.' },
@@ -60,6 +60,7 @@ export const METHODS: Array<{ code: Exclude<Method, 'auto'>; name: string; note:
     { code: 'holt', name: 'Holt damped trend', note: 'Level and trend; rising or falling demand.' },
     { code: 'linear', name: 'Linear regression', note: 'Straight-line trend over the history.' },
     { code: 'croston', name: 'Croston (SBA)', note: 'Intermittent spare-part demand with many zero months.' },
+    { code: 'tsb', name: 'TSB (Teunter–Syntetos–Babai)', note: 'Intermittent demand that may be dying out: the chance of demand decays in months without issues (obsolescence).' },
 ];
 export const LEVEL_FIELDS = ['minimumLevel', 'maximumLevel', 'reorderQuantity', 'safetyStock', 'reorderPoint'] as const;
 
@@ -86,6 +87,24 @@ export interface ForecastSetup {
     orderingCost: number;
     holdingPct: number;
     wholeUnits: boolean;
+    /** Which materials are analysed (forecasting and criticality): every category, or only those listed. */
+    activation: { mode: 'all' | 'selected'; categories: string[] };
+    /** Lead-time demand: auto uses Poisson / negative binomial for slow and intermittent spares, normal otherwise. */
+    distribution: 'auto' | 'normal';
+    /** No change when min and max move less than this % (and less than one unit). */
+    tolerancePct: number;
+    /** No issue for this many months with stock on hand: dead stock. */
+    deadStockMonths: number;
+    /** No issue for this many months: slow moving / ageing. */
+    slowMonths: number;
+    /** Insurance spares: classes that keep a minimum even with no forecast demand, and that minimum. */
+    insuranceClasses: string[];
+    insuranceMinQty: number;
+    /** Purchase on demand (PD, RP07): never for protected classes; only with few issue months and a short lead time. */
+    pd: { protectedClasses: string[]; maxIssueMonthsPerYear: number; maxLeadDays: number };
+    /** Background recommendations: weekly sweep and after every issue. */
+    autoWeekly: boolean;
+    autoOnIssue: boolean;
 }
 
 export function defaultForecastSetup(): ForecastSetup {
@@ -112,8 +131,21 @@ export function defaultForecastSetup(): ForecastSetup {
         orderingCost: 0,
         holdingPct: 20,
         wholeUnits: true,
+        activation: { mode: 'all', categories: [] },
+        distribution: 'auto',
+        tolerancePct: 10,
+        deadStockMonths: 24,
+        slowMonths: 12,
+        insuranceClasses: ['A'],
+        insuranceMinQty: 1,
+        pd: { protectedClasses: ['A', 'B'], maxIssueMonthsPerYear: 2, maxLeadDays: 30 },
+        autoWeekly: true,
+        autoOnIssue: true,
     };
 }
+/** Is a material category analysed (forecasting and criticality)? */
+export const isActivated = (setup: Pick<ForecastSetup, 'activation'>, categoryCode: string) =>
+    !setup.activation || setup.activation.mode !== 'selected' || setup.activation.categories.includes(String(categoryCode || '').toUpperCase());
 
 const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
 function num(v: unknown, label: string, min: number, max: number, integer = false): number {
@@ -166,6 +198,36 @@ export function readForecastSetup(v: unknown): ForecastSetup {
         orderingCost: num(v.orderingCost ?? d.orderingCost, 'Ordering cost', 0, 1e9),
         holdingPct: num(v.holdingPct ?? d.holdingPct, 'Holding cost', 1, 100),
         wholeUnits: v.wholeUnits !== false,
+        ...(() => {
+            const act = isObj(v.activation) ? v.activation : d.activation;
+            const mode = String((act as Record<string, unknown>).mode ?? 'all');
+            if (!['all', 'selected'].includes(mode)) throw new Error('Choose which material categories are forecast');
+            const cats = Array.isArray((act as Record<string, unknown>).categories) ? [...new Set(((act as Record<string, unknown>).categories as unknown[]).map((c) => String(c).trim().toUpperCase()).filter(Boolean))] : [];
+            if (cats.length > 200 || cats.some((c) => !/^[A-Z0-9_-]{1,30}$/.test(c))) throw new Error('Activated categories must be up to 200 valid category codes');
+            if (mode === 'selected' && !cats.length) throw new Error('Select at least one material category, or forecast every category');
+            const distribution = String(v.distribution ?? d.distribution);
+            if (!['auto', 'normal'].includes(distribution)) throw new Error('Choose the lead-time demand distribution');
+            const classes = (x: unknown, fallback: string[]) => (Array.isArray(x) ? [...new Set(x.map(String))].filter((c) => ['A', 'B', 'C', 'D'].includes(c)) : fallback);
+            const pd = isObj(v.pd) ? v.pd : d.pd;
+            const deadStockMonths = num(v.deadStockMonths ?? d.deadStockMonths, 'Dead stock after', 6, 60, true);
+            const slowMonths = num(v.slowMonths ?? d.slowMonths, 'Slow moving after', 3, 36, true);
+            if (slowMonths >= deadStockMonths) throw new Error('Slow moving must come before dead stock');
+            return {
+                activation: { mode: mode as 'all' | 'selected', categories: cats },
+                distribution: distribution as 'auto' | 'normal',
+                tolerancePct: num(v.tolerancePct ?? d.tolerancePct, 'No-change tolerance', 0, 50),
+                deadStockMonths, slowMonths,
+                insuranceClasses: classes(v.insuranceClasses, d.insuranceClasses),
+                insuranceMinQty: num(v.insuranceMinQty ?? d.insuranceMinQty, 'Insurance minimum', 0, 1000),
+                pd: {
+                    protectedClasses: classes((pd as Record<string, unknown>).protectedClasses, d.pd.protectedClasses),
+                    maxIssueMonthsPerYear: num((pd as Record<string, unknown>).maxIssueMonthsPerYear ?? d.pd.maxIssueMonthsPerYear, 'PD: issue months per year', 0, 12, true),
+                    maxLeadDays: num((pd as Record<string, unknown>).maxLeadDays ?? d.pd.maxLeadDays, 'PD: maximum lead time', 0, 365, true),
+                },
+                autoWeekly: v.autoWeekly !== false,
+                autoOnIssue: v.autoOnIssue !== false,
+            };
+        })(),
     };
     if (out.pastMonths < out.minHistoryMonths) throw new Error('The past horizon must cover at least the minimum history');
     return out;
@@ -384,6 +446,23 @@ function fitMethod(series: number[], method: Exclude<Method, 'auto'>, p: Pick<Fo
         const tr = trendOf(series);
         return { fitted, forecast: (h) => Math.max(0, tr.intercept + tr.slope * (n - 1 + h)) };
     }
+    if (method === 'tsb') {
+        // Teunter–Syntetos–Babai (2011): demand probability is updated every month (decays in months without issues),
+        // size only when there is demand. Unlike Croston, the forecast falls when a part stops being used.
+        const firstHit = series.findIndex((x) => x > 0);
+        if (firstHit < 0) return { fitted, forecast: () => 0 };
+        let prob = series.filter((x) => x > 0).length / n;
+        let size = series[firstHit];
+        for (let t = 0; t < n; t++) {
+            if (t > firstHit) fitted[t] = prob * size;
+            if (series[t] > 0) {
+                prob = prob + p.beta * (1 - prob);
+                size = size + p.alpha * (series[t] - size);
+            } else prob = prob + p.beta * (0 - prob);
+        }
+        const f = prob * size;
+        return { fitted, forecast: () => f };
+    }
     // Croston with the Syntetos–Boylan bias correction: size and interval smoothed separately.
     let size = 0;
     let interval = 0;
@@ -411,8 +490,14 @@ function fitMethod(series: number[], method: Exclude<Method, 'auto'>, p: Pick<Fo
 function accuracy(series: number[], fitted: Array<number | null>) {
     const e: number[] = [];
     for (let t = 2; t < series.length; t++) if (fitted[t] !== null) e.push(series[t] - (fitted[t] as number));
-    if (!e.length) return { mae: null as number | null, rmse: null as number | null, bias: null as number | null, points: 0 };
-    return { mae: r3(mean(e.map(Math.abs))), rmse: r3(Math.sqrt(mean(e.map((x) => x * x)))), bias: r3(mean(e)), points: e.length };
+    if (!e.length) return { mae: null as number | null, rmse: null as number | null, bias: null as number | null, mase: null as number | null, points: 0 };
+    // MASE (Hyndman & Koehler 2006): MAE scaled by the in-sample naive error. Scale-free and defined with zero months,
+    // so it is the standard yardstick for intermittent spare-part demand; below 1 beats the naive forecast.
+    const naive: number[] = [];
+    for (let t = 1; t < series.length; t++) naive.push(Math.abs(series[t] - series[t - 1]));
+    const scale = mean(naive);
+    const mae = mean(e.map(Math.abs));
+    return { mae: r3(mae), rmse: r3(Math.sqrt(mean(e.map((x) => x * x)))), bias: r3(mean(e)), mase: scale > 0 ? r3(mae / scale) : null, points: e.length };
 }
 
 /** Multiplicative month-of-year indices (normalized to an average of 1) from at least 24 months. */
@@ -595,7 +680,32 @@ function demandOver(future: FutureRow[], months: number) {
     return sum;
 }
 
-export function levelsFrom(future: FutureRow[], sigma: number, a: { setup: ForecastSetup; externalLeadDays: number; internalLeadDays: number; leadSigmaDays?: number | null; criticalityClass?: string; unitPrice?: number | null; moq?: number | null; orderMultiple?: number | null; onDemand?: string }): Levels {
+/** Smallest k with P(X ≤ k) ≥ p for Poisson (variance ≤ mean) or negative binomial (overdispersed) demand. */
+export function countQuantile(meanDemand: number, variance: number, p: number): number {
+    if (!(meanDemand > 0)) return 0;
+    let cdf = 0;
+    if (variance <= meanDemand * 1.0001) {
+        let pk = Math.exp(-meanDemand);
+        for (let k = 0; k < 100000; k++) {
+            cdf += pk;
+            if (cdf >= p) return k;
+            pk *= meanDemand / (k + 1);
+        }
+        return Math.ceil(meanDemand);
+    }
+    const r = (meanDemand * meanDemand) / (variance - meanDemand);
+    const q = meanDemand / variance;
+    let pk = Math.pow(q, r);
+    if (!(pk > 0)) return Math.ceil(meanDemand + inverseNormal(p) * Math.sqrt(variance));
+    for (let k = 0; k < 100000; k++) {
+        cdf += pk;
+        if (cdf >= p) return k;
+        pk *= ((k + r) / (k + 1)) * (1 - q);
+    }
+    return Math.ceil(meanDemand + inverseNormal(p) * Math.sqrt(variance));
+}
+
+export function levelsFrom(future: FutureRow[], sigma: number, a: { setup: ForecastSetup; externalLeadDays: number; internalLeadDays: number; leadSigmaDays?: number | null; criticalityClass?: string; unitPrice?: number | null; moq?: number | null; orderMultiple?: number | null; onDemand?: string; pattern?: string }): Levels {
     const s = a.setup;
     const cls = (['A', 'B', 'C', 'D'].includes(String(a.criticalityClass)) ? a.criticalityClass : 'none') as keyof ForecastSetup['serviceLevels'];
     const serviceLevel = s.serviceLevels[cls];
@@ -609,9 +719,18 @@ export function levelsFrom(future: FutureRow[], sigma: number, a: { setup: Forec
     const d = future.length ? mean(future.map((f) => f.total)) : 0;
     const actualSpread = a.leadSigmaDays !== null && a.leadSigmaDays !== undefined && Number.isFinite(a.leadSigmaDays);
     const sigmaL = actualSpread ? (a.leadSigmaDays as number) / 30.44 : L * (s.leadTimeVariabilityPct / 100);
-    const ss = z * Math.sqrt(L * sigma * sigma + d * d * sigmaL * sigmaL);
+    let ss = z * Math.sqrt(L * sigma * sigma + d * d * sigmaL * sigmaL);
     const dlt = demandOver(future, L);
-    const rop = dlt + ss;
+    let rop = dlt + ss;
+    // Slow and intermittent spares: the normal approximation misstates the tail of lead-time demand. Use the count
+    // distribution with the same mean and variance (Poisson, or negative binomial when demand is overdispersed).
+    const variance = L * sigma * sigma + d * d * sigmaL * sigmaL;
+    const countModel = s.distribution !== 'normal' && s.wholeUnits && dlt > 0 && (['intermittent', 'lumpy'].includes(String(a.pattern)) || dlt < 10);
+    if (countModel) {
+        rop = countQuantile(dlt, Math.max(variance, dlt), serviceLevel / 100);
+        ss = Math.max(0, rop - dlt);
+        notes.push(`Reorder point from the ${variance > dlt * 1.0001 ? 'negative binomial' : 'Poisson'} distribution of lead-time demand (slow or intermittent demand).`);
+    }
     let roq: number;
     let roqBasis: string;
     const annual = d * 12;
@@ -635,16 +754,20 @@ export function levelsFrom(future: FutureRow[], sigma: number, a: { setup: Forec
         if (Math.abs(up - roq) > 1e-9) roqBasis += `, rounded up to the order multiple ${mult}`;
         roq = up;
     }
-    const round = (x: number) => (s.wholeUnits ? Math.ceil(x - 1e-9) : Math.round(x * 100) / 100);
+    const round = (x: number) => (s.wholeUnits ? Math.ceil(x - 1e-9) : Math.round(x * 100) / 100) + 0; // + 0 turns -0 into 0
     const safetyStock = round(ss);
     const reorderPoint = round(rop);
     const reorderQuantity = Math.max(0, round(roq)) + 0;
     if (!d && !dlt) notes.push('No demand is forecast: the levels are zero. Consider buying on demand.');
+    // Insurance spares: critical classes keep a minimum even when no demand is forecast (a failure is rare but costly).
+    const insured = !a.onDemand && s.insuranceClasses?.includes(String(a.criticalityClass)) && s.insuranceMinQty > 0;
     const sigmaLeadDays = r3(sigmaL * 30.44);
     if (a.onDemand) {
         // Bought on demand: no stock is held, so no safety stock, reorder point, minimum or maximum.
         return { serviceLevel, z: Math.round(z * 1000) / 1000, externalLeadDays: external, internalLeadDays: internal, leadDays, leadMonths: r3(L), demandPerMonth: r3(d), sigma: r3(sigma), demandDuringLead: r3(dlt), safetyStock: 0, reorderPoint: 0, reorderQuantity: 0, minimumLevel: 0, maximumLevel: 0, roqBasis: 'Bought on demand: ordered for each need', sigmaLeadDays, onDemand: true, notes: [a.onDemand] };
     }
+    const insuranceMin = insured && reorderPoint < s.insuranceMinQty ? s.insuranceMinQty : 0;
+    if (insuranceMin) notes.push(`Insurance spare: class ${a.criticalityClass} keeps at least ${s.insuranceMinQty} in stock even with little or no forecast demand.`);
     return {
         serviceLevel,
         z: Math.round(z * 1000) / 1000,
@@ -655,11 +778,11 @@ export function levelsFrom(future: FutureRow[], sigma: number, a: { setup: Forec
         demandPerMonth: r3(d),
         sigma: r3(sigma),
         demandDuringLead: r3(dlt),
-        safetyStock,
-        reorderPoint,
-        reorderQuantity,
-        minimumLevel: reorderPoint,
-        maximumLevel: round(reorderPoint + reorderQuantity),
+        safetyStock: insuranceMin ? Math.max(safetyStock, insuranceMin) : safetyStock,
+        reorderPoint: insuranceMin || reorderPoint,
+        reorderQuantity: insuranceMin && !reorderQuantity ? insuranceMin : reorderQuantity,
+        minimumLevel: insuranceMin || reorderPoint,
+        maximumLevel: insuranceMin ? Math.max(insuranceMin, round(reorderPoint + reorderQuantity)) : round(reorderPoint + reorderQuantity),
         roqBasis,
         sigmaLeadDays,
         onDemand: false,
@@ -713,12 +836,13 @@ export function runForecast(input: ForecastInput) {
     const intermittent = pattern.pattern === 'intermittent' || pattern.pattern === 'lumpy';
     // Auto: trend methods only when the trend is statistically significant, Croston only for intermittent demand.
     const trended = trend.direction !== 'stable';
-    const candidates = (requested === 'auto' ? (intermittent ? ['croston', 'sma', 'ses'] : ['sma', 'wma', 'ses', ...(trended ? ['holt', 'linear'] : [])]) : [requested]) as Array<Exclude<Method, 'auto'>>;
+    const candidates = (requested === 'auto' ? (intermittent ? ['croston', 'tsb', 'sma', 'ses'] : ['sma', 'wma', 'ses', ...(trended ? ['holt', 'linear'] : [])]) : [requested]) as Array<Exclude<Method, 'auto'>>;
     const scored = candidates.map((code) => {
         const fit = fitMethod(work, code, s);
         return { code, fit, ...accuracy(work, fit.fitted) };
     });
-    const ranked = [...scored].sort((x, y) => (x.mae ?? Infinity) - (y.mae ?? Infinity) || (x.rmse ?? Infinity) - (y.rmse ?? Infinity));
+    // Rank by MASE where it exists (scale-free, robust with zero months), then MAE and RMSE.
+    const ranked = [...scored].sort((x, y) => (x.mase ?? x.mae ?? Infinity) - (y.mase ?? y.mae ?? Infinity) || (x.mae ?? Infinity) - (y.mae ?? Infinity) || (x.rmse ?? Infinity) - (y.rmse ?? Infinity));
     const best = ranked[0];
     const sigma = best.rmse !== null && best.points >= 3 ? best.rmse : stdev(series);
     const futureFrom = addMonths(nowMonth, 1);
@@ -744,6 +868,7 @@ export function runForecast(input: ForecastInput) {
         moq: input.moq,
         orderMultiple: input.orderMultiple,
         onDemand: input.onDemand,
+        pattern: pattern.pattern,
     });
     const projection = input.stock ? projectStock(future, input.stock, levels.onDemand ? 0 : levels.reorderPoint) : null;
     return {
@@ -759,8 +884,8 @@ export function runForecast(input: ForecastInput) {
         seasonal: !!indices,
         method: best.code,
         requested,
-        candidates: scored.map((c) => ({ code: c.code, mae: c.mae, rmse: c.rmse, bias: c.bias, points: c.points })),
-        accuracy: { mae: best.mae, rmse: best.rmse, bias: best.bias, points: best.points },
+        candidates: scored.map((c) => ({ code: c.code, mae: c.mae, rmse: c.rmse, bias: c.bias, mase: c.mase, points: c.points })),
+        accuracy: { mae: best.mae, rmse: best.rmse, bias: best.bias, mase: best.mase, points: best.points },
         sigma: r3(sigma),
         future,
         historyMonths,
@@ -869,4 +994,101 @@ export function simulate(o: SimOptions): Instance[] {
         out.push({ id: `SIM-G${String(i + 1).padStart(3, '0')}`, at: at((i + 0.2 + rnd() * 0.6) / receipts), kind: 'receipt', qty: Math.max(1, Math.round((total / receipts) * (0.8 + rnd() * 0.4))), type: 'GOODS_RECEIPT', reference: `SIM-GR-${3000 + i}`, simulated: true });
     }
     return out.sort((x, y) => x.at.localeCompare(y.at));
+}
+
+
+// ----- Ageing and recommendations (background forecasting) -----
+
+/** Months since the last issue, and whether held stock is ageing (slow) or dead. */
+export function ageingOf(instances: Instance[], now: string, onHand: number, setup: Pick<ForecastSetup, 'deadStockMonths' | 'slowMonths'>) {
+    const issues = instances.filter((i) => i.kind === 'issue');
+    const last = issues.length ? issues[issues.length - 1].at : '';
+    const months = last ? Math.max(0, Math.round(((Date.parse(now) - Date.parse(last)) / (30.44 * 86_400_000)) * 10) / 10) : null;
+    const yearAgo = Date.parse(now) - 365 * 86_400_000;
+    const issueMonths = new Set(issues.filter((i) => Date.parse(i.at) >= yearAgo).map((i) => i.at.slice(0, 7))).size;
+    const dead = onHand > 0 && (months === null || months >= setup.deadStockMonths);
+    const slow = !dead && onHand > 0 && (months === null || months >= setup.slowMonths);
+    return { lastIssueAt: last, monthsSinceIssue: months, issueMonthsLastYear: issueMonths, dead, slow };
+}
+
+export type LevelGroup = 'no_change' | 'increase' | 'decrease' | 'pd';
+export type StrategyGroup = 'none' | 'to_pd' | 'to_stock';
+export interface RecommendationInput {
+    setup: ForecastSetup;
+    criticalityClass: string;
+    strategy: string;
+    strategyLocked: string;
+    current: Record<string, number | null>;
+    levels: Levels;
+    leadDays: number;
+    ageing: ReturnType<typeof ageingOf>;
+    onHand: number;
+    unitCost: number;
+}
+
+/**
+ * Groups a background forecast into one recommendation:
+ *   levels   no_change | increase | decrease | pd (purchase on demand: hold no stock)
+ *   strategy none | to_pd (to RP07 Direct purchase) | to_stock (from RP07 to RP01 Min-Max)
+ * and its impact on stock capital: planned average stock (min + max) / 2 at moving average cost, stock above the
+ * recommended maximum (excess), and dead stock value.
+ */
+export function recommendFrom(r: RecommendationInput) {
+    const s = r.setup;
+    const cls = r.criticalityClass || '';
+    const protectedClass = s.pd.protectedClasses.includes(cls);
+    const reasons: string[] = [];
+    const pdCandidate = !protectedClass && r.strategy !== 'RP07' &&
+        ((r.ageing.issueMonthsLastYear <= s.pd.maxIssueMonthsPerYear && r.leadDays > 0 && r.leadDays <= s.pd.maxLeadDays) || r.ageing.dead);
+    const stockCandidate = r.strategy === 'RP07' && !r.strategyLocked && (protectedClass || r.ageing.issueMonthsLastYear > s.pd.maxIssueMonthsPerYear || (r.leadDays > s.pd.maxLeadDays && r.ageing.issueMonthsLastYear > 0));
+    let strategyGroup: StrategyGroup = 'none';
+    if (pdCandidate && !r.strategyLocked) {
+        strategyGroup = 'to_pd';
+        reasons.push(r.ageing.dead ? `No issue for ${r.ageing.monthsSinceIssue ?? 'over ' + s.deadStockMonths} months: buy on demand instead of holding stock.`
+            : `Issued in ${r.ageing.issueMonthsLastYear} month(s) of the last year with a ${r.leadDays}-day lead time${cls ? `, class ${cls}` : ''}: cheaper to buy on demand.`);
+    } else if (stockCandidate) {
+        strategyGroup = 'to_stock';
+        reasons.push(protectedClass ? `Class ${cls} is protected from purchase on demand: hold stock (RP01 Min-Max).` : `Used in ${r.ageing.issueMonthsLastYear} month(s) a year${r.leadDays > s.pd.maxLeadDays ? ` with a ${r.leadDays}-day lead time` : ''}: hold stock (RP01 Min-Max).`);
+    }
+    if (r.strategyLocked && pdCandidate) reasons.push(`Strategy is set by the criticality analysis (${r.strategyLocked}); it is not changed here.`);
+    const onDemandNow = (r.strategy === 'RP07' && strategyGroup !== 'to_stock') || strategyGroup === 'to_pd';
+    const rec: Record<string, number> = onDemandNow
+        ? { minimumLevel: 0, maximumLevel: 0, reorderQuantity: 0, safetyStock: 0, reorderPoint: 0 }
+        : { minimumLevel: r.levels.minimumLevel, maximumLevel: r.levels.maximumLevel, reorderQuantity: r.levels.reorderQuantity, safetyStock: r.levels.safetyStock, reorderPoint: r.levels.reorderPoint };
+    const cur = (k: string) => Number(r.current[k] ?? 0) || 0;
+    const moved = (k: 'minimumLevel' | 'maximumLevel') => {
+        const a = cur(k), b = rec[k];
+        const tol = Math.max(s.wholeUnits ? 1 : 0.001, (Math.abs(a) * s.tolerancePct) / 100);
+        return Math.abs(b - a) < tol ? 0 : Math.sign(b - a);
+    };
+    const dMin = moved('minimumLevel'), dMax = moved('maximumLevel');
+    let group: LevelGroup;
+    if (strategyGroup === 'to_pd') group = 'pd';
+    else if (!dMin && !dMax) group = 'no_change';
+    else if (dMin >= 0 && dMax >= 0) group = 'increase';
+    else if (dMin <= 0 && dMax <= 0) group = 'decrease';
+    else group = rec.maximumLevel - cur('maximumLevel') >= 0 ? 'increase' : 'decrease';
+    if (group === 'increase') reasons.push(`Forecast ${r.levels.demandPerMonth}/month over a ${r.leadDays}-day lead time at ${r.levels.serviceLevel}% service needs min ${rec.minimumLevel}, max ${rec.maximumLevel}.`);
+    if (group === 'decrease') reasons.push(`Forecast ${r.levels.demandPerMonth}/month needs only min ${rec.minimumLevel}, max ${rec.maximumLevel}: frees stock capital.`);
+    if (group === 'no_change') reasons.push('Current levels are within the tolerance of the forecast.');
+    if (r.ageing.dead && strategyGroup !== 'to_pd') reasons.push(`Dead stock: ${r.onHand} held with no issue for ${r.ageing.monthsSinceIssue ?? 'over ' + s.deadStockMonths} months.`);
+    else if (r.ageing.slow) reasons.push(`Ageing: no issue for ${r.ageing.monthsSinceIssue ?? 'over ' + s.slowMonths} months.`);
+    const c = r.unitCost || 0;
+    const plannedNow = ((cur('minimumLevel') + cur('maximumLevel')) / 2) * c;
+    const plannedRec = ((rec.minimumLevel + rec.maximumLevel) / 2) * c;
+    const excessQty = Math.max(0, r.onHand - rec.maximumLevel);
+    const money = (x: number) => Math.round(x * 100) / 100;
+    return {
+        group, strategyGroup, values: rec, reasons,
+        recommendedStrategy: strategyGroup === 'to_pd' ? 'RP07' : strategyGroup === 'to_stock' ? 'RP01' : r.strategy,
+        impact: {
+            onHandValue: money(r.onHand * c),
+            plannedValueNow: money(plannedNow),
+            plannedValueRecommended: money(plannedRec),
+            plannedValueChange: money(plannedRec - plannedNow),
+            excessQty, excessValue: money(excessQty * c),
+            deadStockValue: r.ageing.dead ? money(r.onHand * c) : 0,
+            maxChangeValue: money(Math.abs(rec.maximumLevel - cur('maximumLevel')) * c),
+        },
+    };
 }
