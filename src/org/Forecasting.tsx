@@ -1000,7 +1000,7 @@ interface SetupData {
     reason: string;
     canEdit: boolean;
     canEvaluate?: boolean;
-    categories?: Array<{ code: string; materials: number }>;
+    categories?: Array<{ code: string; name: string; materials: number; adopted: boolean }>;
 }
 
 export function ForecastSetupForm() {
@@ -1075,13 +1075,15 @@ export function ForecastSetupForm() {
                             const on = (form.activation?.categories ?? []).includes(c.code);
                             return (
                                 <label key={c.code} className='flex min-h-11 items-center gap-3 rounded-lg px-2 active:bg-page'>
-                                    <Toggle checked={on} onChange={(v) => edit && set({ activation: { mode: 'selected', categories: v ? [...(form.activation?.categories ?? []), c.code] : (form.activation?.categories ?? []).filter((x: string) => x !== c.code) } })} label={`Forecast ${c.code}`} />
-                                    <span className='flex-1 font-mono text-sm text-ink'>{c.code}</span>
-                                    <span className='text-xs text-muted'>{c.materials} material{c.materials === 1 ? '' : 's'}</span>
+                                    <Toggle checked={on} onChange={(v) => edit && set({ activation: { mode: 'selected', categories: v ? [...(form.activation?.categories ?? []), c.code] : (form.activation?.categories ?? []).filter((x: string) => x !== c.code) } })} label={`Forecast ${c.name}`} />
+                                    <span className='min-w-0 flex-1'>
+                                        <span className='block truncate text-sm font-medium text-ink'>{c.name}</span>
+                                        <span className='block text-xs text-muted'>{c.materials} approved material{c.materials === 1 ? '' : 's'}{c.adopted ? '' : ' · no longer adopted'}</span>
+                                    </span>
                                 </label>
                             );
                         })}
-                        {!data.categories?.length && <p className='p-2 text-sm text-muted'>No approved materials yet.</p>}
+                        {!data.categories?.length && <p className='p-2 text-sm text-muted'>No material categories are adopted yet. Adopt them in Procurement setup › Materials Master.</p>}
                     </div>
                 )}
             </Card>

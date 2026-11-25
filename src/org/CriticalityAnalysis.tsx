@@ -586,7 +586,7 @@ function CriticalitySetupForm() {
         ...(form.method === 'risk' && !enabled.some((f) => ROLE[f.code] === 'consequence') ? ['The risk method needs at least one consequence factor.'] : []),
         ...(matrixProblem(form.matrix) ? [matrixProblem(form.matrix)] : []),
         ...(!(form.pattern.y > form.pattern.x) ? ['The Y variability limit must be above the X limit.'] : []),
-        ...(form.scopeCategories.some((c) => !/^[A-Z0-9_-]{1,30}$/.test(c)) ? ['Scope holds an invalid category code.'] : []),
+        ...(form.scopeCategories.some((c) => !/^[A-Z0-9][A-Z0-9._ /-]{0,59}$/.test(c)) ? ['Scope holds an invalid category code.'] : []),
     ];
     const changed = JSON.stringify(form) !== JSON.stringify(data.setup);
     const maxScore = enabled.reduce((n, f) => n + 3 * form.factors[f.code].weight, 0);
@@ -701,7 +701,7 @@ function CriticalitySetupForm() {
                 </>}
                 <div>
                     <p className='text-sm text-ink'>Scope</p>
-                    <Field label='Material categories analysed' disabled={!edit} value={form.scopeCategories.join(', ')} onChange={(e) => set({ scopeCategories: e.target.value.toUpperCase().split(/[\s,;]+/).filter(Boolean) })} hint='Category codes separated by commas. Leave empty to analyse every category.' />
+                    <Field label='Material categories analysed' disabled={!edit} value={form.scopeCategories.join(', ')} onChange={(e) => set({ scopeCategories: e.target.value.toUpperCase().split(/[,;]+/).map((c) => c.trim()).filter(Boolean) })} hint='Category codes separated by commas. Leave empty to analyse every category.' />
                 </div>
             </Card>
 

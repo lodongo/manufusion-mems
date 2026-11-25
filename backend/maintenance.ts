@@ -670,7 +670,7 @@ function woOut(doc: Doc) {
         title: str(d.title),
         status,
         statusLabel: str(d.workflowLabel)||(isRequestClosureOrder(d)&&status==='in_progress'?'Work completed · awaiting feedback':WO_STATUS[status] ?? status),
-        workflowCode:str(d.workflowCode),workflowStatusCode:shortWorkOrderStatus(str(d.workflowCode)),workflowSince:str(d.workflowSince),workflowReason:str(d.workflowReason),
+        workflowCode:str(d.workflowCode),workflowStatusCode:shortWorkOrderStatus(str(d.workflowCode)),workflowSince:str(d.workflowSince),workflowReason:str(d.workflowReason),readinessPct:typeof object(d.readinessSnapshot).readinessPct==='number'?object(d.readinessSnapshot).readinessPct as number:null,readinessPhase:str(object(d.readinessSnapshot).phase),readinessDelays:Number(object(d.readinessSnapshot).delays)||0,
         executionMode:str(d.executionMode),
         origin: str(d.parentWoCode)?'break_in':str(d.wrCode) ? 'request' : 'direct',
         parentWoCode:str(d.parentWoCode),rootWoCode:str(d.rootWoCode),

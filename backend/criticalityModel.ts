@@ -202,7 +202,7 @@ export function readSetup(v: unknown): CriticalitySetup {
     const reviewMonths = whole(o.reviewMonths ?? 12, 'Review interval (months)', 3, 60);
     const reviewMonthsByClass = Object.fromEntries(CLASSES.map((c) => [c, whole(rb ? rb[c] : rb === null && o.factors ? reviewMonths : base.reviewMonthsByClass[c], `Review interval for class ${c} (months)`, 3, 60)])) as Record<ClassLetter, number>;
     const scope = Array.isArray(o.scopeCategories) ? [...new Set(o.scopeCategories.map((x: unknown) => String(x).trim().toUpperCase()).filter(Boolean))] as string[] : [];
-    if (scope.length > 100 || scope.some((c) => !/^[A-Z0-9_-]{1,30}$/.test(c))) throw new Error('Scope must list up to 100 valid material category codes');
+    if (scope.length > 100 || scope.some((c) => !/^[A-Z0-9][A-Z0-9._ /-]{0,59}$/.test(c))) throw new Error('Scope must list up to 100 valid material category codes');
     const pt = o.pattern && typeof o.pattern === 'object' ? o.pattern : base.pattern;
     const dec = (x: unknown, label: string, min: number, max: number) => {
         const n = Number(x);
