@@ -3,6 +3,7 @@ import { Alert, Field as MemsField, SelectField, TextArea } from '../components/
 import { Spinner } from '../admin/kit';
 import { SkuConfigurationFields, SkuSetupPanel, SkuIdentityGuide, UnitChoice, emptySkuSetup, type SkuSelections, type SkuSetup } from './MfgSkuSetup';
 import PlnDemand from './PlnDemand';
+import PlnPlanningWorkspace from './PlnPlanningWorkspace';
 import PlnSkuCostCenterRatings from './PlnSkuCostCenterRatings';
 import PlnSkuAuditLog from './PlnSkuAuditLog';
 import ManufacturingResources from './ManufacturingResources';
@@ -33,7 +34,7 @@ import { callBackend } from '../lib/backend';
 import { hasPerm } from '../types';
 
 type Kind='items'|'boms'|'resources'|'routings';
-type Tab=Kind|'skuSetup'|'materialPolicy'|'formDefaults'|'config'|'demand'|'capacityOverview'|'documentation';
+type Tab=Kind|'skuSetup'|'materialPolicy'|'formDefaults'|'config'|'sop'|'demand'|'capacityOverview'|'documentation';
 type Row=Record<string,unknown>&{id:string;name:string;revision?:number;type?:string};
 type Component={
  source?:'INTERMEDIATE'|'WAREHOUSE'|'PROCESS_SUPPLY';
@@ -86,6 +87,7 @@ const tabs:{key:Tab;label:string;shortLabel:string;phase:Phase;hint:string}[]=[
     {key:'resources',label:'Manufacturing Resources',shortLabel:'Manufacturing resources',phase:'masters',hint:'Register manufacturing resources used by routings'},
     {key:'routings',label:'Process Routings',shortLabel:'Process routings',phase:'capacity',hint:'Define operation sequences using configured resources and outputs'},
     {key:'capacityOverview',label:'Production Capacity Overview',shortLabel:'Capacity overview',phase:'capacity',hint:'Compare all authorized process flows, capacities and buffer constraints'},
+    {key:'sop',label:'S&OP Planning Cycle',shortLabel:'S&OP planning cycle',phase:'planning',hint:'Annual demand per SKU for the financial year, detailed SKU forecast, BOM unitisation, MRP, rough-cut capacity and Chart of Authority approval'},
     {key:'config',label:'Planning Configuration',shortLabel:'Planning rules',phase:'planning',hint:'Configure planning horizon, frozen period and lot-sizing defaults'},
     {key:'demand',label:'Demand & S&OP',shortLabel:'Demand & S&OP',phase:'planning',hint:'Maintain forecast and firm demand after the relevant masters are configured'},
     {key:'documentation',label:'Documentation & Setup Guide',shortLabel:'Documentation',phase:'guide',hint:'Search guided setup, topics, troubleshooting and fictional examples'},
@@ -991,7 +993,7 @@ function MasterEditor({tab,draft,onChange,items,boms,resources,refs,skuSetup,mat
 }
 
 export default function ProductionFoundation({module,permissions}:{module:'PLN'|'MFG';permissions:string[]}){
-    const [active,setActive]=useState<Tab>('materialPolicy');
+    const [active,setActive]=useState<Tab>(module==='PLN'?'sop':'materialPolicy');
     const [rows,setRows]=useState<Record<Kind,Row[]>>(emptyRows);
     const [skuSetup,setSkuSetup]=useState<SkuSetup>(emptySkuSetup);
     const [refs,setRefs]=useState<References>(emptyReferences);
@@ -1019,7 +1021,7 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
     const canViewMasters=hasPerm(permissions,'MFG.view');
     const canViewPlanning=hasPerm(permissions,'PLN.view');
     const visibleTabs=tabs.filter(t=>t.key==='documentation'?module==='PLN'&&canViewPlanning:
-        t.key==='formDefaults'||t.key==='config'||t.key==='demand'?canViewPlanning:canViewMasters);
+        t.key==='formDefaults'||t.key==='config'||t.key==='demand'||t.key==='sop'?canViewPlanning:canViewMasters);
     // Configuration progression depends on saved masters, not merely opening tabs.
     // Keep MFG master-data navigation and read-only PLN users usable.
     const enforceSetup=module==='PLN'&&canViewMasters&&canViewPlanning;
@@ -1279,7 +1281,7 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
         {active==='documentation'?<PlnDocumentation onNavigate={value=>changeTab(value as Tab)}/>:
         loading?<Spinner/>:active==='formDefaults'?<PlnFormDefaultsPanel initial={formDefaults} revision={formDefaultsRevision} sites={refs.sites} canEdit={canConfig} onSaved={(next,revision)=>{
             setConfig(previous=>({...previous,formDefaults:next}));setFormDefaultsRevision(revision);
-        }}/>:active==='demand'?<PlnDemand permissions={permissions} formDefaults={formDefaults}/>: active==='skuSetup'?<SkuSetupPanel setup={skuSetup} canEdit={canSkuConfig} onSaved={refreshSkuSetup}
+        }}/>:active==='sop'?<PlnPlanningWorkspace/>:active==='demand'?<PlnDemand permissions={permissions} formDefaults={formDefaults}/>: active==='skuSetup'?<SkuSetupPanel setup={skuSetup} canEdit={canSkuConfig} onSaved={refreshSkuSetup}
             onOpenSkus={()=>changeTab('items')}/>:active==='materialPolicy'?<Card className='space-y-4'>
             <h2 className='font-semibold'>Manufacturing material handling</h2>
             <p className='text-sm text-muted'>Configure material consumption and intermediate stock policies. The same material and BOM structure applies to every organization.</p>
