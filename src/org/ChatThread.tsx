@@ -1,7 +1,8 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactNode } from 'react';
 
 type PointerInfo = { pointerType: string; button: number; clientX: number; clientY: number };
-import { ArrowDown, BarChart3, Camera, ChevronDown, ChevronUp, ClipboardList, Copy, CornerUpLeft, Download, FileText, Image as ImageIcon, Info, Loader2, Paperclip, Plus, Search, Send, Smile, Trash2, X } from 'lucide-react';
+import { RecordCards, RecordPicker, useHashSuggestions, withRecordChips } from '../components/RecordRefs';
+import { ArrowDown, BarChart3, Camera, ChevronDown, ChevronUp, ClipboardList, Copy, CornerUpLeft, Download, FileSearch, FileText, Image as ImageIcon, Info, Loader2, Paperclip, Plus, Search, Send, Smile, Trash2, X } from 'lucide-react';
 import type { ChatAttachment, ChatMessage, ChatPerson, ChatRoom, ChatSettingsValue } from './chatTypes';
 import { EMOJI_PICKER, MEMBER_PALETTE, REACTIONS } from './chatTypes';
 import { useQuickLeave } from './quickNavigation';
@@ -22,6 +23,10 @@ export function ChatAvatar({ person, size = 34 }: { person?: ChatPerson; color?:
 }
 
 function TextLinks({ body, term }: { body: string; term?: string }) {
+    if (/\[\[[A-Z]{2,4}:/.test(body)) return <span className='whitespace-pre-wrap break-words'>{withRecordChips(body, (plain, key) => <PlainLinks key={key} body={plain} term={term} />)}</span>;
+    return <PlainLinks body={body} term={term} />;
+}
+function PlainLinks({ body, term }: { body: string; term?: string }) {
     const parts = body.split(/(https?:\/\/[^\s<>]+|#organization_(?:home|admin)\/[A-Za-z0-9_/-]+)/g);
     const mark = (text: string, key: string | number) => {
         if (!term) return <Fragment key={key}>{text}</Fragment>;
@@ -133,6 +138,14 @@ export default function ChatThread(props: Props) {
     const [reply, setReply] = useState<ChatMessage | null>(null);
     const [attachment, setAttachment] = useState<ChatAttachment | null>(null);
     const [panel, setPanel] = useState<'' | 'emoji' | 'attach'>('');
+    const [recordPicker, setRecordPicker] = useState(false);
+    const hash = useHashSuggestions(body);
+    // Links a record: replaces a "#term" being typed, otherwise appends at the end of the message.
+    const linkRecord = (token: string) => {
+        setBody((b) => (hash.term && /#[^#]*$/.test(b) ? b.replace(/#[^#]*$/, `${token} `) : `${b}${b && !/\s$/.test(b) ? ' ' : ''}${token} `));
+        setRecordPicker(false);
+        requestAnimationFrame(() => input.current?.focus());
+    };
     const [selected, setSelected] = useState<ChatMessage | null>(null);
     const [moreReactions, setMoreReactions] = useState(false);
     const [reactionInfo, setReactionInfo] = useState<ChatMessage[] | null>(null);
@@ -543,6 +556,9 @@ export default function ChatThread(props: Props) {
                             <span className='absolute bottom-[3px] right-[6px]'>{meta(m)}</span>
                         </p>
                     )}
+                    {m.text && m.text.includes('[[') && (
+                        <div className='px-[6px] pb-[6px]'><RecordCards text={m.text} compact max={3} /></div>
+                    )}
                 </div>
             ));
         }
@@ -564,11 +580,14 @@ export default function ChatThread(props: Props) {
                     </a>
                 )}
                 {m.text ? (
+                    <>
                     <p className='relative text-[1em] leading-[1.35] wa-ink'>
                         <TextLinks body={m.text} term={term} />
                         <span className={`inline-block ${mine ? 'w-[74px]' : 'w-[52px]'}`} aria-hidden='true' />
                         <span className='absolute -bottom-[3px] right-0'>{meta(m)}</span>
                     </p>
+                    {m.text.includes('[[') && <div className='min-w-[240px] max-w-[320px]'><RecordCards text={m.text} compact max={3} /></div>}
+                    </>
                 ) : (
                     <div className='flex justify-end'>
                         {meta(m)}
@@ -759,6 +778,7 @@ export default function ChatThread(props: Props) {
                         { label: 'Document', color: '#7f66ff', icon: <FileText className='h-6 w-6' />, act: () => docInput.current?.click() },
                         { label: 'Camera', color: '#ff2e74', icon: <Camera className='h-6 w-6' />, act: () => cameraInput.current?.click() },
                         { label: 'Gallery', color: '#c861fa', icon: <ImageIcon className='h-6 w-6' />, act: () => galleryInput.current?.click() },
+                        { label: 'MEMS record', color: '#0f6cbd', icon: <FileSearch className='h-6 w-6' />, act: () => setRecordPicker(true) },
                         { label: 'Assign action', color: '#02a698', icon: <ClipboardList className='h-6 w-6' />, act: () => onOpenTool?.('action', true) },
                         { label: 'Actions', color: '#009de2', icon: <ClipboardList className='h-6 w-6' />, act: () => onOpenTool?.('action', false) },
                         ...(room.kind === 'group'
@@ -781,6 +801,18 @@ export default function ChatThread(props: Props) {
             <input ref={galleryInput} type='file' multiple className='hidden' accept='image/jpeg,image/png,image/webp' onChange={pickImages} />
             <input ref={cameraInput} type='file' className='hidden' accept='image/*' capture='environment' onChange={pickImages} />
 
+            {recordPicker && <RecordPicker onClose={() => setRecordPicker(false)} onPick={(h) => linkRecord(h.token)} />}
+            {canSend && (hash.results.length > 0 || hash.busy) && (
+                <div role='listbox' aria-label='Matching MEMS records' className='wa-pop mx-2 mb-1 max-h-[45dvh] space-y-1 overflow-y-auto rounded-2xl p-2 shadow-2xl wa-panel'>
+                    <p className='px-1 text-[0.75em] wa-sub'>{hash.busy && !hash.results.length ? 'Searching MEMS records…' : `Records matching #${hash.term} · tap to link`}</p>
+                    {hash.results.map((r) => (
+                        <button key={r.token} type='button' role='option' aria-selected='false' onClick={() => linkRecord(r.token)} className='flex min-h-11 w-full items-center gap-2 rounded-xl px-2 text-left hover:bg-[#000000]/5'>
+                            <span className='flex h-8 w-10 shrink-0 items-center justify-center rounded-lg bg-[#0f6cbd]/15 text-[0.7em] font-bold text-[#0f6cbd]'>{r.type}</span>
+                            <span className='min-w-0 flex-1'><span className='block truncate text-[0.9em] font-semibold wa-ink'>{r.ref} · {r.status.replace(/_/g, ' ')}</span><span className='block truncate text-[0.78em] wa-sub'>{r.title}</span></span>
+                        </button>
+                    ))}
+                </div>
+            )}
             {canSend ? (
                 <div className={`shrink-0 px-1.5 pb-[max(6px,env(safe-area-inset-bottom))] pt-1 ${wall.className}`} style={wall.style}>
                     <div className='flex items-end gap-1.5'>
@@ -826,7 +858,7 @@ export default function ChatThread(props: Props) {
                                             void send();
                                         }
                                     }}
-                                    placeholder='Message'
+                                    placeholder='Message · type # to link a PR, PO, work order…'
                                     aria-label='Write message'
                                     className='max-h-40 min-h-12 min-w-0 flex-1 resize-none bg-transparent py-3 text-[1em] leading-6 outline-none wa-scroll'
                                 />

@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
-import { Archive, ArrowLeft, ArrowRight, AtSign, Check, CheckCheck, ChevronDown, ChevronLeft, ChevronRight, Clock3, Copy, Edit3, File, FileText, Filter, Flag, Folder, FolderClosed, FolderPlus, Forward, Inbox, Mail, MailOpen, Menu, MoreHorizontal, Paperclip, Plus, Printer, RefreshCw, Reply, ReplyAll, Save, Search, Send, Settings2, ShieldCheck, Star, Tag, Trash2, Undo2, Upload, UserRound, X } from 'lucide-react';
+import { Archive, ArrowLeft, ArrowRight, AtSign, Check, CheckCheck, ChevronDown, ChevronLeft, ChevronRight, Clock3, Copy, Edit3, File, FileSearch, FileText, Filter, Flag, Folder, FolderClosed, FolderPlus, Forward, Inbox, Mail, MailOpen, Menu, MoreHorizontal, Paperclip, Plus, Printer, RefreshCw, Reply, ReplyAll, Save, Search, Send, Settings2, ShieldCheck, Star, Tag, Trash2, Undo2, Upload, UserRound, X } from 'lucide-react';
 import { callBackend } from '../lib/backend';
 import { navigate } from '../lib/route';
-import MailRichEditor from './MailRichEditor';
+import MailRichEditor, { type RichEditorApi } from './MailRichEditor';
+import { RecordCards, RecordPicker, openRecord } from '../components/RecordRefs';
+import { isHit, resolveRecord } from '../lib/recordRefs';
 import ActionPhotoInput from './ActionPhotoInput';
 import MailSettings, { defaultMailPrefs, type MailPreferences } from './MailSettings';
 import MailWorkGroups, {type WorkGroup} from './MailWorkGroups';
@@ -51,6 +53,8 @@ type Person={uid:string;email:string;name:string};
 type Attachment={id:string;name:string;mime:string;size:number;url:string};
 type FolderItem={id:string;name:string};
 type MailItem={allowReply?:boolean;allowReplyAll?:boolean;allowDelete?:boolean;action?:MailAction;actionId?:string;id:string;threadId:string;inReplyTo:string;fromUid:string;fromName:string;fromEmail:string;to:string[];cc:string[];bcc:string[];subject:string;excerpt:string;html:string;sentAt:string;updatedAt:string;folder:string;read:boolean;starred:boolean;flagged:boolean;focus:boolean;category:string;priority:string;attachments:Attachment[];workflow?:{taskId:string;status:'open'|'closed';link:string;linkLabel:string;module:string;ref:string;stage:string;outcome:string;closedAt:string}|null};
+/** Record tokens in an already-sanitized body become tappable chips (type and id are restricted by the pattern). */
+const withRecordTokens=(html:string)=>html.replace(/\[\[([A-Z]{2,4}):([A-Za-z0-9_.-]{1,100})\]\]/g,(_m,type:string,id:string)=>`<span role="button" tabindex="0" data-mems-ref="${type}:${id}" style="display:inline-flex;gap:4px;align-items:center;padding:0 6px;border-radius:6px;background:rgba(15,108,189,.12);color:#0f6cbd;font-weight:600;cursor:pointer">${type} ${id}</span>`);
 type Listing={items:MailItem[];folders:FolderItem[];externalSendingEnabled:boolean};
 type MailAction={enabled:boolean;title:string;description:string;deadline:string;photoPath:string;recipientUids:string[]};
 type ComposeSeed={mode:'new'|'reply'|'replyall'|'forward'|'draft';original?:MailItem;group?:WorkGroup;withAction?:boolean};
@@ -149,6 +153,8 @@ function RecipientInput({label,value,people,exclude,onChange}:{label:string;valu
 }
 
 function Compose({people,groups,me,seed,prefs,dark,onDone,onCancel,onManageGroups}:{people:Person[];groups:WorkGroup[];me:string;seed:ComposeSeed;prefs:MailPreferences;dark:boolean;onDone:(result?:{actionWarning?:string;actionId?:string})=>void;onCancel:()=>void;onManageGroups:()=>void}){
+    const editorApi=useRef<RichEditorApi|null>(null);
+    const [recordPicker,setRecordPicker]=useState(false);
     const initial=useMemo(()=>{
         const base=Initial({...seed,me});
         if(seed.group){const emails=seed.group.memberUids.map(uid=>people.find(p=>p.uid===uid)?.email||'').filter(email=>email&&email.toLowerCase()!==me.toLowerCase());base.to=[...new Set([...base.to,...emails])];}
@@ -291,7 +297,10 @@ function Compose({people,groups,me,seed,prefs,dark,onDone,onCancel,onManageGroup
                     <button type='button' aria-label={'Remove '+a.name} onClick={()=>patch({attachments:data.attachments.filter(x=>x.id!==a.id)})}><X className='h-4 w-4'/></button>
                 </div>)}</div>}
                 <div className='mt-2 flex min-h-[180px] flex-col' title='Drag the lower edge to resize the writing area'>
-                    <MailRichEditor html={initial.html} onChange={html=>{if(html!==data.html)patch({html})}}/>
+                    <MailRichEditor html={initial.html} apiRef={editorApi} onChange={html=>{if(html!==data.html)patch({html})}}
+                        extraTools={<button type='button' title='Link a MEMS record (PR, PO, work order…)' aria-label='Link a MEMS record' onMouseDown={e=>e.preventDefault()} onClick={()=>{editorApi.current?.saveSelection();setRecordPicker(true);}} className='flex h-11 min-w-11 shrink-0 items-center justify-center gap-1 rounded-lg px-2 text-xs font-semibold text-ink hover:bg-brand/10'><FileSearch className='h-4 w-4'/> Record</button>}/>
+                    {recordPicker&&<RecordPicker onClose={()=>setRecordPicker(false)} onPick={h=>{editorApi.current?.insertHtml(h.token.replace(/[<>&"]/g,'')+'&nbsp;');editorApi.current?.sync();setRecordPicker(false);}}/>}
+                    {data.html.includes('[[')&&<RecordCards text={data.html} compact/>}
                 </div>
                 <div className='mt-3 rounded border ol-line'>
                     <button type='button' onClick={()=>setActionExpanded(v=>!v)} className='flex min-h-11 w-full items-center gap-2 px-3 text-left text-[13px] font-semibold ol-link'><ListChecks className='h-4 w-4'/> Monitored action {action.enabled?'· on':''}<ChevronDown className={'ml-auto h-4 w-4 transition-transform '+(actionExpanded?'rotate-180':'')}/></button>
@@ -631,8 +640,10 @@ export default function OrgMail({myEmail,initialId=''}:{myEmail:string;initialId
                             <FileText className='h-7 w-7 shrink-0 ol-link'/><span className='min-w-0 flex-1'><span className='block truncate ol-ink'>{a.name}</span><span className='block text-[11px] ol-sub'>{Math.ceil(a.size/1024)} KB</span></span>
                         </a>)}</div>}
                         <div role='document' aria-label='Email message body'
+                            onClick={e=>{const el=(e.target as HTMLElement).closest('[data-mems-ref]');if(!el)return;const [type,id]=String(el.getAttribute('data-mems-ref')).split(':');void resolveRecord(type,id).then(c=>{if(isHit(c))openRecord(c);});}}
                             className='mt-4 min-h-[140px] w-full overflow-x-auto break-words text-[14px] leading-relaxed [&_a]:text-[color:var(--ol-link)] [&_a]:underline [&_blockquote]:border-l-4 [&_blockquote]:pl-3 [&_blockquote]:[border-color:var(--ol-line)] [&_h1]:text-2xl [&_h1]:font-bold [&_h2]:text-xl [&_h2]:font-bold [&_h3]:text-lg [&_li]:ml-6 [&_ol]:list-decimal [&_td]:border [&_td]:p-2 [&_th]:border [&_th]:p-2 [&_ul]:list-disc'
-                            dangerouslySetInnerHTML={{__html:safeReadHtml(detail.html||detail.excerpt||'')||'<p>'+safeSeed(detail.excerpt||'No message body was provided.')+'</p>'}} />
+                            dangerouslySetInnerHTML={{__html:withRecordTokens(safeReadHtml(detail.html||detail.excerpt||'')||'<p>'+safeSeed(detail.excerpt||'No message body was provided.')+'</p>')}} />
+                        {(detail.html||'').includes('[[')&&<section aria-label='Linked MEMS records' className='mt-4'><h3 className='text-[13px] font-semibold ol-sub'>Linked MEMS records</h3><RecordCards text={detail.html||''}/></section>}
                         {!!thread.length&&<section className='mt-6'><h3 className='mb-2 text-[13px] font-semibold ol-sub'>Conversation · {thread.length+1} messages</h3>
                             {thread.map(t=><button type='button' key={t.id} onClick={()=>{void open(t.id)}} className='mb-1 flex min-h-12 w-full items-center gap-3 rounded border px-3 text-left text-[13px] ol-line ol-hover'>
                                 <Persona name={t.fromName} email={t.fromEmail} size={28}/><span className='min-w-0 flex-1'><span className='block truncate font-semibold'>{t.fromName}</span><span className='block truncate ol-sub'>{t.excerpt}</span></span><span className='shrink-0 ol-sub'>{fmt(t.sentAt)}</span>
