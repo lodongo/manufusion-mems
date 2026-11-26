@@ -273,13 +273,13 @@ test('production tabs follow configuration precedence and retain scoped availabi
  assert.ok(!page.includes("module==='PLN'&&t.key==='resources'?false"));
  assert.ok(page.includes("if(visibleTabs.length&&!visibleTabs.some(tab=>tab.key===active)){"),'an unavailable stage falls back to the first permitted one');
 });
-test('mobile has a single accessible stage selector and desktop has grouped tabs',()=>{
+test('stage navigation is a menu: one row of quick tabs for the current phase and a grouped menu of every stage',()=>{
  const page=read('src/org/ProductionFoundation.tsx');
- // One labelled, grouped selector serves phone and desktop (209877a).
+ // Menus instead of a dropdown (2026-11-26): phone and desktop share one compact row.
  assert.ok(page.includes("<nav aria-label='Production configuration menu'"));
- assert.ok(page.includes("<SelectField id='manufacturing-step-select' label='Configuration' value={active}"));
- assert.ok(page.includes('<optgroup'));
- assert.ok(page.includes('onChange={event=>changeTab(event.target.value as Tab)}'));
+ assert.ok(page.includes("aria-haspopup='menu'") && page.includes("role='menuitem'"));
+ assert.ok(page.includes("role='tablist'") && page.includes('onClick={()=>changeTab(tab.key)}'));
+ assert.ok(!page.includes("id='manufacturing-step-select'"));
  assert.ok(!page.includes("className='flex gap-2 overflow-x-auto pb-1'"));
  assert.ok(page.includes("<details className='rounded-xl border border-line p-3'>"));
 });

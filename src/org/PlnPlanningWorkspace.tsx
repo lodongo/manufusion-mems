@@ -1,5 +1,5 @@
 import { useEffect, useId, useMemo, useState, type ReactNode } from 'react';
-import { BarChart3, Boxes, CalendarRange, Check, ChevronRight, ClipboardCheck, Factory, Gauge, Layers, Plus, RefreshCw, Rocket, Send, Settings2, Trash2, Undo2, X } from 'lucide-react';
+import { BarChart3, Boxes, CalendarRange, Check, ChevronDown, ChevronRight, MapPin, ClipboardCheck, Factory, Gauge, Layers, Plus, RefreshCw, Rocket, Send, Settings2, Trash2, Undo2, X } from 'lucide-react';
 import { callBackend } from '../lib/backend';
 import { Alert, Field, SearchField, SelectField, TextArea } from '../components/ui';
 import { messageOf, useConfirm } from '../components/screen';
@@ -46,7 +46,7 @@ interface CapRow { routingId: string; name: string; skus: string[]; ratePerHour:
 interface Supply { mrp: { items: MrpItem[]; issues: string[]; truncated: boolean }; capacity: CapRow[]; units: UnitRow[]; sop: { families: Array<{ family: string; skus: number; buckets: Array<{ key: string; demand: number; production: number; inventory: number }> }>; kpis: Kpis; purchaseByBucket: number[] }; readiness: Array<{ skuId: string; bom: boolean; routing: boolean }> }
 interface Detail { plan: Plan; forecast: Forecast[]; supply: Supply | null; actions: Action[] }
 
-type View = 'overview' | 'demand' | 'forecast' | 'unit' | 'mrp' | 'capacity' | 'sop' | 'setup';
+type View = 'overview' | 'demand' | 'forecast' | 'unit' | 'mrp' | 'capacity' | 'sop';
 const VIEWS: Array<{ key: View; label: string; Icon: typeof Gauge }> = [
     { key: 'overview', label: 'Overview', Icon: Gauge },
     { key: 'demand', label: 'Annual demand', Icon: CalendarRange },
@@ -55,7 +55,6 @@ const VIEWS: Array<{ key: View; label: string; Icon: typeof Gauge }> = [
     { key: 'mrp', label: 'MRP', Icon: Layers },
     { key: 'capacity', label: 'Capacity', Icon: Factory },
     { key: 'sop', label: 'S&OP & approval', Icon: ClipboardCheck },
-    { key: 'setup', label: 'Setup', Icon: Settings2 },
 ];
 const STATUS_LABEL: Record<Status, string> = { draft: 'Demand planning', demand_review: 'Demand review', supply_planning: 'Supply planning', sop_review: 'S&OP review', approved: 'Approved', released: 'Released', superseded: 'Superseded', cancelled: 'Cancelled' };
 const BASIS_LABEL: Record<Basis, string> = { ANNUAL: 'Annual plan', STATISTICAL: 'Statistical', BLENDED: 'Blend' };
@@ -106,6 +105,39 @@ function Sheet({ title, onClose, children, footer }: { title: string; onClose: (
                 {footer && <div className='flex flex-wrap gap-2 border-t border-line p-4 pb-[max(1rem,env(safe-area-inset-bottom))]'>{footer}</div>}
             </div>
         </div>
+    );
+}
+
+/** A short list of options as one-tap choices (a menu) instead of a dropdown. */
+function Choice<T extends string>({ label, value, onChange, options, disabled }: { label: string; value: T; onChange: (v: T) => void; options: Array<[T, string]>; disabled?: boolean }) {
+    return (
+        <div role='radiogroup' aria-label={label} className='min-w-0'>
+            <p className='mb-1 text-sm text-soft'>{label}</p>
+            <div className='flex flex-wrap gap-1.5'>
+                {options.map(([k, l]) => (
+                    <button key={k} type='button' role='radio' aria-checked={value === k} disabled={disabled} onClick={() => onChange(k)} className={`min-h-11 rounded-xl px-3 text-sm font-medium disabled:opacity-60 ${value === k ? 'bg-brand text-onbrand' : 'border border-line text-ink hover:bg-page'}`}>{l}</button>
+                ))}
+            </div>
+        </div>
+    );
+}
+function MenuSection({ title, children }: { title: string; children: ReactNode }) {
+    return (
+        <section aria-label={title} className='space-y-1'>
+            <p className='px-1 text-xs font-semibold uppercase tracking-wide text-muted'>{title}</p>
+            <div role='menu' className='space-y-1'>{children}</div>
+        </section>
+    );
+}
+function MenuItem({ label, hint, selected, onClick }: { label: string; hint?: string; selected: boolean; onClick: () => void }) {
+    return (
+        <button type='button' role='menuitemradio' aria-checked={selected} onClick={onClick} className={`flex min-h-12 w-full items-center gap-3 rounded-xl px-3 py-2 text-left ${selected ? 'bg-brand/10 ring-1 ring-brand' : 'hover:bg-page'}`}>
+            <span className='min-w-0 flex-1'>
+                <span className='block truncate text-sm font-semibold text-ink'>{label}</span>
+                {hint && <span className='block text-xs text-muted'>{hint}</span>}
+            </span>
+            {selected && <Check className='h-4 w-4 shrink-0 text-brand' />}
+        </button>
     );
 }
 
@@ -160,7 +192,7 @@ function DemandChart({ rows, buckets }: { rows: FBucket[]; buckets: Bucket[] }) 
     );
 }
 
-export default function PlnPlanningWorkspace() {
+export default function PlnPlanningWorkspace({ onOpenSetup }: { onOpenSetup?: () => void } = {}) {
     const [ctx, setCtx] = useState<Context | null>(null);
     const [siteId, setSiteId] = useState('');
     const [fy, setFy] = useState<number>(0);
@@ -248,6 +280,14 @@ export default function PlnPlanningWorkspace() {
         );
 
     if (!ctx) return error ? <Alert tone='error'>{error}</Alert> : <p className='p-6 text-center text-sm text-muted'>Loading the planning workspace…</p>;
+    const newPlan = () =>
+        confirm.ask({ title: 'New S&OP plan', message: `${year?.label ?? ''} at ${ctx.sites.find((s) => s.id === siteId)?.name ?? ''}: ${year ? `${year.balance.open} of ${year.balance.periods} periods are open (${fmt(year.balance.share * 100)}% of the year).` : ''} The lines of the last released plan are copied.`, confirmLabel: 'Create' }, async () => {
+            const r = await post<{ plan: Plan }>('plan/create', { siteId, fy });
+            await loadPlans();
+            setPlanId(r.plan.id);
+            setView('demand');
+            setNotice(`Plan ${r.plan.id} created.`);
+        });
 
     const next = (() => {
         if (!plan) return null;
@@ -264,30 +304,36 @@ export default function PlnPlanningWorkspace() {
     return (
         <div className='flex h-[calc(100dvh-13rem)] min-h-[32rem] flex-col gap-2'>
             {confirm.sheet}
+            {picker && (
+                <Sheet title='Site, financial year and plan' onClose={() => setPicker(false)} footer={<Btn className='ml-auto' onClick={() => setPicker(false)}>Done</Btn>}>
+                    <MenuSection title='Site'>
+                        {ctx.sites.map((s) => <MenuItem key={s.id} selected={s.id === siteId} label={s.name} onClick={() => run('site', async () => { setPlanId(''); await loadContext(s.id); })} />)}
+                        {!ctx.sites.length && <p className='px-1 text-sm text-muted'>You have no planning access at any site.</p>}
+                    </MenuSection>
+                    <MenuSection title='Financial year'>
+                        {ctx.years.map((y) => <MenuItem key={y.fy} selected={y.fy === fy} label={y.label} hint={`${y.start} → ${y.end} · ${y.balance.open} of ${y.balance.periods} periods open · ${y.source === 'finance' ? 'Finance calendar' : y.source === 'settings' ? 'from Finance settings' : 'calendar year (no Finance calendar)'}`} onClick={() => setFy(y.fy)} />)}
+                    </MenuSection>
+                    <MenuSection title='Plan'>
+                        {sitePlans.map((p) => <MenuItem key={p.id} selected={p.id === planId} label={`${p.id} · ${STATUS_LABEL[p.status]}`} hint={`${p.lines} SKUs · updated ${p.updatedAt.slice(0, 10)}${p.createdByName ? ` · by ${p.createdByName}` : ''}`} onClick={() => { setPlanId(p.id); setPicker(false); }} />)}
+                        {!sitePlans.length && <p className='px-1 text-sm text-muted'>No plan for this site and year yet.</p>}
+                    </MenuSection>
+                </Sheet>
+            )}
             {/* Action bar: always on top; only the content below scrolls. */}
             <div className='sticky top-0 z-20 space-y-2 rounded-2xl border border-line bg-panel/95 p-2 backdrop-blur sm:p-3'>
-                {/* Phones: one summary line; the selectors open on demand so the content keeps the screen. */}
-                <button type='button' aria-expanded={picker} onClick={() => setPicker((x) => !x)} className={`flex min-h-11 w-full items-center gap-2 rounded-xl border border-line px-3 text-left sm:hidden ${!plan ? 'hidden' : ''}`}>
-                    <span className='min-w-0 flex-1 truncate text-sm text-ink'>{ctx.sites.find((s) => s.id === siteId)?.name ?? 'Site'} · {year?.label ?? ''} · <span className='font-mono text-xs'>{plan?.id}</span></span>
-                    <span className='shrink-0 text-xs text-muted'>{year ? `${year.balance.open}/${year.balance.periods} open` : ''}</span>
-                    <ChevronRight className={`h-4 w-4 shrink-0 text-muted transition-transform ${picker ? 'rotate-90' : ''}`} />
-                </button>
-                <div className={`grid-cols-2 gap-2 sm:grid sm:grid-cols-4 ${picker || !plan ? 'grid' : 'hidden'}`}>
-                    <Select label='Site' value={siteId} onChange={(v) => run('site', async () => { setPlanId(''); await loadContext(v); })} options={ctx.sites.map((s) => [s.id, s.name] as [string, string])} />
-                    <Select label='Financial year' value={String(fy)} onChange={(v) => setFy(Number(v))} options={ctx.years.map((y) => [String(y.fy), y.label] as [string, string])} />
-                    <Select label='Plan' value={planId} onChange={setPlanId} options={[['', sitePlans.length ? 'Choose a plan' : 'No plan yet'], ...sitePlans.map((p) => [p.id, `${p.id} · ${STATUS_LABEL[p.status]}`] as [string, string])]} />
-                    <div className='flex items-end gap-2'>
-                        {ctx.can['PLN.demand.plan'] && <Btn className='flex-1' busy={busy === 'create'} disabled={!siteId || !fy} onClick={() => confirm.ask({ title: 'New S&OP plan', message: `${year?.label ?? ''} at ${ctx.sites.find((s) => s.id === siteId)?.name ?? ''}: ${year ? `${year.balance.open} of ${year.balance.periods} periods are open (${fmt(year.balance.share * 100)}% of the year).` : ''} The lines of the last released plan are copied.`, confirmLabel: 'Create' }, async () => { const r = await post<{ plan: Plan }>('plan/create', { siteId, fy }); await loadPlans(); setPlanId(r.plan.id); setView('demand'); setNotice(`Plan ${r.plan.id} created.`); })}><Plus className='h-4 w-4' /> New plan</Btn>}
-                        <Btn variant='secondary' aria-label='Reload' title='Reload' busy={busy === 'reload'} onClick={() => run('reload', async () => { await loadContext(); await refresh(); })}><RefreshCw className='h-4 w-4' /></Btn>
-                    </div>
+                {/* One context button (site · year · plan) opens a menu; new plan and reload stay at hand. */}
+                <div className='flex items-center gap-2'>
+                    <button type='button' aria-haspopup='menu' aria-expanded={picker} onClick={() => setPicker(true)} className='flex min-h-12 min-w-0 flex-1 items-center gap-2 rounded-xl border border-line bg-page px-3 text-left'>
+                        <MapPin className='h-4 w-4 shrink-0 text-brand' />
+                        <span className='min-w-0 flex-1'>
+                            <span className='block truncate text-sm font-semibold text-ink'>{ctx.sites.find((s) => s.id === siteId)?.name ?? 'Choose a site'} · {year?.label ?? 'Financial year'}</span>
+                            <span className='block truncate text-xs text-muted'>{plan ? `${plan.id} · ${STATUS_LABEL[plan.status]}` : sitePlans.length ? 'Choose a plan' : 'No plan yet'}{year ? ` · ${year.balance.open} of ${year.balance.periods} periods open` : ''}</span>
+                        </span>
+                        <ChevronDown className='h-4 w-4 shrink-0 text-muted' />
+                    </button>
+                    {ctx.can['PLN.demand.plan'] && <Btn aria-label='New plan' title='New plan' className='px-3' busy={busy === 'create'} disabled={!siteId || !fy} onClick={newPlan}><Plus className='h-4 w-4' /><span className='hidden sm:inline'>New plan</span></Btn>}
+                    <Btn variant='secondary' aria-label='Reload' title='Reload' className='px-3' busy={busy === 'reload'} onClick={() => run('reload', async () => { await loadContext(); await refresh(); })}><RefreshCw className='h-4 w-4' /></Btn>
                 </div>
-                {year && (
-                    <p className={`flex-wrap items-center gap-2 text-xs text-soft sm:flex ${picker || !plan ? 'flex' : 'hidden'}`}>
-                        <Pill tone={year.source === 'finance' ? 'brand' : 'warn'}>{year.source === 'finance' ? 'Finance calendar' : year.source === 'settings' ? 'From finance settings' : 'Calendar year (no finance calendar)'}</Pill>
-                        <span>{year.leName || 'Legal entity'} · {year.start} → {year.end}</span>
-                        <span className='font-medium text-ink'>{year.balance.open} of {year.balance.periods} periods open · {fmt(year.balance.share * 100)}% of the year left</span>
-                    </p>
-                )}
                 {plan && (
                     <div className='flex items-center gap-2'>
                         <Pill tone={plan.status === 'released' ? 'brand' : plan.status === 'cancelled' ? 'danger' : 'warn'}>{STATUS_LABEL[plan.status]}</Pill>
@@ -296,7 +342,7 @@ export default function PlnPlanningWorkspace() {
                     </div>
                 )}
                 <nav aria-label='Planning views' className='flex gap-1 overflow-x-auto'>
-                    {VIEWS.filter((v) => v.key === 'setup' || v.key === 'overview' || plan).map(({ key, label, Icon }) => (
+                    {VIEWS.filter((v) => v.key === 'overview' || plan).map(({ key, label, Icon }) => (
                         <button key={key} type='button' aria-current={view === key ? 'page' : undefined} onClick={() => setView(key)} className={`inline-flex min-h-11 shrink-0 items-center gap-1.5 rounded-lg px-3 text-sm ${view === key ? 'bg-brand text-onbrand' : 'text-soft hover:bg-page'}`}><Icon className='h-4 w-4' />{label}</button>
                     ))}
                 </nav>
@@ -304,13 +350,12 @@ export default function PlnPlanningWorkspace() {
             <div className='min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain pb-6'>
                 {error && <Alert tone='error'>{error}</Alert>}
                 {notice && <Alert tone='success'>{notice}</Alert>}
-                {view === 'setup' ? (
-                    <SetupView ctx={ctx} onSaved={async (t) => { await loadContext(); setNotice(t); }} />
-                ) : !plan ? (
+                {!plan ? (
                     <Panel className='space-y-3'>
                         <Cycle steps={ctx.steps} status='draft' />
                         <p className='text-sm text-soft'>{ctx.sites.length ? 'No plan for this site and year yet.' : 'You have no planning access at any site.'} A plan takes the annual demand of every SKU for the financial year configured in Finance; part-way through the year only the balance periods are planned.</p>
                         {!ctx.can['PLN.demand.plan'] && <p className='text-xs text-muted'>A Demand Planner creates plans.</p>}
+                        {onOpenSetup && <button type='button' onClick={onOpenSetup} className='inline-flex min-h-11 items-center gap-1 text-sm font-semibold text-brand'><Settings2 className='h-4 w-4' /> Planning rules are in S&OP setup</button>}
                     </Panel>
                 ) : view === 'overview' ? (
                     <Overview ctx={ctx} detail={detail!} />
@@ -837,18 +882,30 @@ function SetupView({ ctx, onSaved }: { ctx: Context; onSaved: (t: string) => Pro
             await onSaved('Planning setup saved.');
         });
     };
+    const dirty = JSON.stringify({ ...s, discreteUoms: uoms.split(/[,\s]+/).map((u) => u.trim().toUpperCase()).filter(Boolean) }) !== JSON.stringify(ctx.setup);
     return (
-        <div className='space-y-3'>
+        <div className='flex h-[calc(100dvh-13rem)] min-h-[32rem] flex-col gap-2'>
             {confirm.sheet}
+            {/* Focus: the setup alone, its save always in reach; only the form scrolls. */}
+            <div className='sticky top-0 z-20 flex items-center gap-2 rounded-2xl border border-line bg-panel/95 p-2 backdrop-blur sm:p-3'>
+                <Settings2 className='h-5 w-5 shrink-0 text-brand' />
+                <div className='min-w-0 flex-1'>
+                    <p className='truncate text-sm font-semibold text-ink'>S&OP planning setup</p>
+                    <p className='truncate text-xs text-muted'>Version {ctx.version}{dirty ? ' · unsaved changes' : ''}{!editable ? ' · read only' : ''}</p>
+                </div>
+                {editable && <Btn disabled={!dirty} onClick={save}><Check className='h-4 w-4' /> Save</Btn>}
+            </div>
+            <div className='min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain pb-6'>
+            {error && <Alert tone='error'>{error}</Alert>}
             {!editable && <Alert tone='info'>Only a Planning Administrator (PLN.configure in their own role) changes the setup.</Alert>}
             <Panel className='space-y-3'>
                 <h3 className='text-sm font-semibold'>Demand and forecast</h3>
                 <Alert tone='info'>Planned demand comes from the annual demand plan per SKU. Commercial confirmed demand will replace it when Commercial is linked; approved firm orders already consume the forecast.</Alert>
                 <div className='grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3'>
-                    <Select label='Current period (part-way)' disabled={!editable} value={s.currentPeriodRule} onChange={(v) => setS({ ...s, currentPeriodRule: v })} options={[['prorate', 'Prorate the days left'], ['include', 'Plan the whole period'], ['exclude', 'Start from the next period']]} />
-                    <Select label='Annual quantity covers (default)' disabled={!editable} value={s.defaultAnnualBasis} onChange={(v) => setS({ ...s, defaultAnnualBasis: v })} options={[['FULL_YEAR', 'The full financial year'], ['BALANCE', 'Only the balance periods']]} />
-                    <Select label='Seasonality (default)' disabled={!editable} value={s.defaultProfile} onChange={(v) => setS({ ...s, defaultProfile: v })} options={(Object.keys(PROFILE_LABEL) as Profile[]).map((p) => [p, PROFILE_LABEL[p]])} />
-                    <Select label='Forecast basis (default)' disabled={!editable} value={s.defaultForecastBasis} onChange={(v) => setS({ ...s, defaultForecastBasis: v })} options={(Object.keys(BASIS_LABEL) as Basis[]).map((b) => [b, BASIS_LABEL[b]])} />
+                    <Choice label='Current period (part-way)' disabled={!editable} value={s.currentPeriodRule} onChange={(v) => setS({ ...s, currentPeriodRule: v })} options={[['prorate', 'Prorate the days left'], ['include', 'Plan the whole period'], ['exclude', 'Start from the next period']]} />
+                    <Choice label='Annual quantity covers (default)' disabled={!editable} value={s.defaultAnnualBasis} onChange={(v) => setS({ ...s, defaultAnnualBasis: v })} options={[['FULL_YEAR', 'The full financial year'], ['BALANCE', 'Only the balance periods']]} />
+                    <Choice label='Seasonality (default)' disabled={!editable} value={s.defaultProfile} onChange={(v) => setS({ ...s, defaultProfile: v })} options={(Object.keys(PROFILE_LABEL) as Profile[]).map((p) => [p, PROFILE_LABEL[p]])} />
+                    <Choice label='Forecast basis (default)' disabled={!editable} value={s.defaultForecastBasis} onChange={(v) => setS({ ...s, defaultForecastBasis: v })} options={(Object.keys(BASIS_LABEL) as Basis[]).map((b) => [b, BASIS_LABEL[b]])} />
                     <Num label='Statistical weight in a blend %' disabled={!editable} value={s.blendPct} onChange={n('blendPct')} />
                     <Num label='History months' step='1' disabled={!editable} value={s.historyMonths} onChange={n('historyMonths')} />
                 </div>
@@ -863,7 +920,7 @@ function SetupView({ ctx, onSaved }: { ctx: Context; onSaved: (t: string) => Pro
                 <TextArea id='pln-discrete-uoms' label='Units that can never be split' rows={2} disabled={!editable} value={uoms} onChange={(e) => setUoms(e.target.value)} hint='Comma separated, e.g. EA, BAG, DRUM' />
                 <div className='grid grid-cols-1 gap-2 sm:grid-cols-2'>
                     <Num label='Rounding tolerance % (0 = exact)' disabled={!editable} value={s.unitTolerancePct} onChange={n('unitTolerancePct')} />
-                    <Select label='Process batches (vessels)' disabled={!editable} value={s.processBatchRule} onChange={(v) => setS({ ...s, processBatchRule: v })} options={[['runs', 'Count runs only'], ['multiple', 'Plan full batches only']]} />
+                    <Choice label='Process batches (vessels)' disabled={!editable} value={s.processBatchRule} onChange={(v) => setS({ ...s, processBatchRule: v })} options={[['runs', 'Count runs only'], ['multiple', 'Plan full batches only']]} />
                 </div>
                 <div className='space-y-2'>
                     <p className='text-xs font-medium text-soft'>Components kept whole (optionally in packs)</p>
@@ -887,12 +944,27 @@ function SetupView({ ctx, onSaved }: { ctx: Context; onSaved: (t: string) => Pro
                     <Num label='Overload above %' disabled={!editable} value={s.overloadPct} onChange={n('overloadPct')} />
                 </div>
             </Panel>
-            {error && <Alert tone='error'>{error}</Alert>}
-            {editable && <div className='flex justify-end'><Btn onClick={save}><Check className='h-4 w-4' /> Save setup</Btn></div>}
             <Panel>
                 <h3 className='mb-2 text-sm font-semibold'>Setup history</h3>
                 {ctx.setupHistory.length ? <ul className='space-y-1 text-xs text-soft'>{ctx.setupHistory.map((h) => <li key={h.version}>v{h.version} · {new Date(h.at).toLocaleString()} · {h.byName} · {h.reason}</li>)}</ul> : <p className='text-xs text-muted'>Default setup, never changed.</p>}
             </Panel>
+            </div>
+        </div>
+    );
+}
+
+/** S&OP setup as its own tab: organization-wide rules, no site, year or plan in the way. */
+export function PlnPlanningSetup() {
+    const [ctx, setCtx] = useState<Context | null>(null);
+    const [error, setError] = useState('');
+    const [notice, setNotice] = useState('');
+    const load = async () => setCtx(await post<Context>('context'));
+    useEffect(() => { load().catch((e) => setError(messageOf(e))); }, []);
+    if (!ctx) return error ? <Alert tone='error'>{error}</Alert> : <p className='p-6 text-center text-sm text-muted'>Loading the planning setup…</p>;
+    return (
+        <div className='space-y-2'>
+            {notice && <Alert tone='success'>{notice}</Alert>}
+            <SetupView ctx={ctx} onSaved={async (m) => { await load(); setNotice(m); }} />
         </div>
     );
 }

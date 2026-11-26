@@ -30,8 +30,8 @@ test('all Production Planning and MRP selectors use the reusable confirmation te
   assert.doesNotMatch(ui,/<select\b/,path+' must not use native select');
  }
  const navigation=read(paths[0]);
- assert.ok(navigation.includes("<SelectField id='manufacturing-step-select' label='Configuration' value={active}"));
- assert.ok(navigation.includes('<optgroup'));
+ // Stage navigation is a menu (not a dropdown); every remaining selector still uses SelectField.
+ assert.ok(navigation.includes("aria-haspopup='menu'") && navigation.includes("role='menuitem'"));
  const product=read(paths[1]);
  const rating=read(paths[2]);
  assert.ok(product.includes('primary-container-rating-output-type'));
