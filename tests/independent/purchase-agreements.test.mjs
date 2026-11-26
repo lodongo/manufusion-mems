@@ -14,19 +14,23 @@ import { SOURCES } from '../../backend/recordSearch.ts';
 const read = (p) => readFileSync(new URL(`../../${p}`, import.meta.url), 'utf8');
 const material = { uom: 'EA', categoryCode: 'C1', subcategoryCode: 'S1' };
 const currencies = new Set(['KES', 'USD']);
-const good = { unitPrice: '1200', currency: 'KES', uom: 'EA', leadTimeDays: '14', minimumOrderQuantity: '10', orderMultiple: '5', vendorPartNumber: 'X-1', paymentTerms: '30 days', incoterms: 'DAP' };
+const lists = { paymentTerms: new Set(['NET30', 'COD']), incoterms: new Set(['DAP', 'EXW']) };
+const good = { unitPrice: '1200', currency: 'KES', uom: 'EA', leadTimeDays: '14', paymentTerms: 'NET30', incoterms: 'DAP' };
 
 test('quotes are checked against the material procurement setup', () => {
-    const ok = checkQuote(good, { info: {}, material, enabledCurrencies: currencies, label: 'Item 10' });
+    const ok = checkQuote(good, { info: {}, material, enabledCurrencies: currencies, lists, label: 'Item 10' });
     assert.deepEqual(ok.problems, []);
     assert.equal(ok.quote.unitPrice, 1200);
     assert.equal(ok.quote.uom, 'EA');
     // Purchase unit from Procurement Information wins over the registered unit, and must match.
-    const box = checkQuote({ ...good, uom: 'EA' }, { info: { purchaseUom: 'BOX' }, material, enabledCurrencies: currencies, label: 'Item 10' });
+    const box = checkQuote({ ...good, uom: 'EA' }, { info: { purchaseUom: 'BOX' }, material, enabledCurrencies: currencies, lists, label: 'Item 10' });
     assert.match(box.problems.join(' '), /purchase unit \(BOX\)/);
-    const bad = checkQuote({ unitPrice: '0', currency: 'XYZ', leadTimeDays: '2.5', minimumOrderQuantity: '7', orderMultiple: '5' }, { info: {}, material, enabledCurrencies: currencies, label: 'Item 10' });
+    const bad = checkQuote({ unitPrice: '0', currency: 'XYZ', leadTimeDays: '2.5', incoterms: 'FREE' }, { info: {}, material, enabledCurrencies: currencies, lists, label: 'Item 10' });
     const text = bad.problems.join(' ');
-    for (const w of ['unit price above zero', 'enabled currency', 'whole days', 'multiple of the order multiple']) assert.match(text, new RegExp(w));
+    for (const w of ['unit price above zero', 'enabled currency', 'whole days', 'choose the payment terms', 'incoterms from the list']) assert.match(text, new RegExp(w));
+    assert.match(checkQuote({ ...good, paymentTerms: '30 days' }, { info: {}, material, enabledCurrencies: currencies, lists, label: 'Item 10' }).problems.join(' '), /payment terms from the list/);
+    // Minimum order, order multiple and part number are not quoted: the material's own values are kept.
+    assert.deepEqual(Object.keys(ok.quote).sort(), ['currency', 'incoterms', 'leadTimeDays', 'paymentTerms', 'unitPrice', 'uom']);
 });
 
 test('period rules: dates, order, not past, at most five years', () => {
@@ -40,13 +44,16 @@ test('period rules: dates, order, not past, at most five years', () => {
 test('activation keeps the material own values and the standard price; ending restores them', () => {
     const info = { unitPrice: 1500, priceCurrency: 'KES', purchaseUom: 'EA', leadTimeDays: 30, minimumOrderQuantity: 1, orderMultiple: 1, vendorPartNumber: 'OLD', preferredVendor: 'VND000009', preferredVendorName: 'VND000009 · Old' };
     const pa = { number: 'PA00000001', vendorId: 'VND000001', vendorNumber: 'VND000001', vendorName: 'Acme', startDate: '2026-11-01', endDate: '2027-10-31' };
-    const item = { no: 10, quote: { unitPrice: 1200, currency: 'KES', uom: 'EA', leadTimeDays: 14, minimumOrderQuantity: 10, orderMultiple: 5, vendorPartNumber: 'X-1', paymentTerms: '', incoterms: 'DAP' } };
+    const item = { no: 10, quote: { unitPrice: 1200, currency: 'KES', uom: 'EA', leadTimeDays: 14, paymentTerms: '', incoterms: 'DAP' } };
     const on = applyToInfo(info, pa, 'PA00000001', item, 't', 'u');
     assert.equal(on.leadTimeDays, 14);
     assert.equal(on.preferredVendor, 'VND000001');
     assert.equal(on.unitPrice, 1500, 'standard price is never changed');
     assert.equal(on.priceCurrency, 'KES');
     assert.equal(on.paymentTerms, undefined, 'a blank quote field leaves the material value');
+    assert.equal(on.minimumOrderQuantity, 1, 'minimum order stays the material value');
+    assert.equal(on.vendorPartNumber, 'OLD', 'part number stays the material value');
+    assert.equal(on.incoterms, 'DAP');
     assert.equal(on.agreement.unitPrice, 1200);
     assert.equal(on.agreementBaseline.leadTimeDays, 30);
     // Re-applying never overwrites the kept values with agreement values.
@@ -56,7 +63,7 @@ test('activation keeps the material own values and the standard price; ending re
     assert.equal(applyToInfo(on, { ...pa, number: 'PA00000002' }, 'PA00000002', item, 't', 'u'), null);
     const off = restoreInfo(again, 'PA00000001');
     assert.equal(off.leadTimeDays, 30);
-    assert.equal(off.vendorPartNumber, 'OLD');
+    assert.equal(off.incoterms, '', 'back to the material (which had none)');
     assert.equal(off.preferredVendor, 'VND000009');
     assert.equal(off.agreement, undefined);
     assert.equal(off.agreementBaseline, undefined);
@@ -167,6 +174,10 @@ test('materials using an agreement show in blue and its fields are locked on the
     assert.match(screen, /rowClassName=\{\(i\) => \(i\.applied \? blueRow : ''\)\}/);
     assert.match(screen, /Savings vs standard price/);
     assert.match(screen, /Days remaining/);
+    // Lists are dropdowns; minimum order, multiple and part number are not asked for.
+    assert.match(screen, /<SelectField label='Payment terms'/);
+    assert.match(screen, /<SelectField label='Incoterms'/);
+    assert.doesNotMatch(screen, /label='Minimum order quantity'|label='Order multiple'|label='Supplier part number'/);
     assert.match(read('src/org/OrgHomePage.tsx'), /path: 'procurement_agreements', permission: 'PRC\.agreements\.view'/);
     assert.match(read('backend/automationEngine.ts'), /const PA_JOB_ID = 'prc\.agreements-daily';/);
 });

@@ -141,6 +141,21 @@ async function enabledCurrencies(): Promise<Set<string>> {
     const doc = await getDoc('reference/currencies');
     return new Set(objs(doc?.data.items).filter((c) => c.enabled !== false && /^[A-Z]{3}$/.test(str(c.code))).map((c) => str(c.code)));
 }
+// Payment terms and incoterms: the same PRC metadata lists Material › Procurement Information uses (codes), with the
+// shipped defaults when the organization has not saved its own.
+const DEFAULT_PAYMENT = [['NET0', 'Due on receipt'], ['NET7', 'Net 7 days'], ['NET14', 'Net 14 days'], ['NET15', 'Net 15 days'], ['NET30', 'Net 30 days'], ['NET45', 'Net 45 days'], ['NET60', 'Net 60 days'], ['NET90', 'Net 90 days'], ['PREPAID', 'Payment in advance'], ['COD', 'Cash on delivery'], ['MILESTONE', 'Milestone payment'], ['LC', 'Letter of credit']];
+const DEFAULT_INCOTERMS = [['EXW', 'Ex Works'], ['FCA', 'Free Carrier'], ['CPT', 'Carriage Paid To'], ['CIP', 'Carriage and Insurance Paid To'], ['DAP', 'Delivered at Place'], ['DPU', 'Delivered at Place Unloaded'], ['DDP', 'Delivered Duty Paid'], ['FAS', 'Free Alongside Ship'], ['FOB', 'Free on Board'], ['CFR', 'Cost and Freight'], ['CIF', 'Cost Insurance and Freight']];
+type Option = { code: string; label: string };
+async function listOf(key: string, fallback: string[][]): Promise<Option[]> {
+    const doc = await getDoc(`module_workspaces/PRC/metadata/${key}`);
+    const items = objs(doc?.data.items);
+    const src: Obj[] = items.length ? items : fallback.map(([code, description]) => ({ code, description }));
+    return src.filter((x) => x.enabled !== false && x.active !== false && str(x.code)).map((x) => ({ code: str(x.code), label: str(x.description) || str(x.label) || str(x.code) }));
+}
+async function quoteOptions() {
+    const [paymentTerms, incoterms] = await Promise.all([listOf('paymentTerms', DEFAULT_PAYMENT), listOf('incoterms', DEFAULT_INCOTERMS)]);
+    return { paymentTerms, incoterms, sets: { paymentTerms: new Set(paymentTerms.map((x) => x.code)), incoterms: new Set(incoterms.map((x) => x.code)) } };
+}
 const vendorName = (v: Doc) => str(v.data.tradeName) || str(v.data.legalName) || v.id;
 async function approvedVendor(ctx: OrgContext, id: string): Promise<Doc> {
     if (!/^VND\d{6}$/.test(id)) throw new HttpError(400, 'Choose an approved supplier.');
@@ -346,6 +361,7 @@ export const purchaseAgreementRoutes = {
                 },
                 can: flags(ctx, d),
                 currencies: [...(await enabledCurrencies())].sort(),
+                ...await (async () => { const q = await quoteOptions(); return { paymentTerms: q.paymentTerms, incoterms: q.incoterms }; })(),
                 dashboard: live || objs(d.items).some((i) => isObj(i.quote)) ? await dashboard(ctx, d) : null,
             };
         }),
@@ -535,7 +551,7 @@ export const purchaseAgreementRoutes = {
         orgRoute('org.procurement.agreements.items.quote', 'PRC.agreements.manage', async (ctx) => {
             const doc = await load(ctx, str(ctx.body.id));
             const no = Number(ctx.body.no);
-            const currencies = await enabledCurrencies();
+            const [currencies, options] = await Promise.all([enabledCurrencies(), quoteOptions()]);
             return mutate(ctx, doc.id, 'items.quote', async (d) => {
                 needOwner(ctx, d);
                 if (!QUOTING.includes(str(d.status))) throw new HttpError(409, 'Send the RFQ to the supplier first. Quotes are recorded until the agreement is submitted.');
@@ -544,12 +560,12 @@ export const purchaseAgreementRoutes = {
                 if (!it) throw new HttpError(404, 'Item not found.');
                 const [m, info] = await Promise.all([getDoc(`organizations/${ctx.orgId}/materials/${str(it.materialId)}`), getDoc(infoPath(ctx.orgId, str(it.materialId), str(it.warehouseId)))]);
                 if (!published(m)) throw new HttpError(409, `${str(it.materialNumber)} is no longer an approved material.`);
-                const { quote, problems } = checkQuote(o(ctx.body.quote), { info: info?.data ?? {}, material: m!.data, enabledCurrencies: currencies, label: `Item ${no} ${str(it.materialNumber)}` });
+                const { quote, problems } = checkQuote(o(ctx.body.quote), { info: info?.data ?? {}, material: m!.data, enabledCurrencies: currencies, lists: options.sets, label: `Item ${no} ${str(it.materialNumber)}` });
                 if (problems.length) throw new HttpError(400, problems.join(' '));
                 const at = nowIso();
                 const prev = o(it.quote);
                 const next = { ...it, quote: { ...quote, quotedAt: at, quotedBy: ctx.uid, quotedByName: nameOfUser(ctx.me) }, previousQuote: Object.keys(prev).length ? prev : it.previousQuote ?? null };
-                return { patch: { items: items.map((i) => (i === it ? next : i)) }, event: 'quote recorded', note: `Item ${no} ${str(it.materialNumber)}: ${quote.currency} ${quote.unitPrice} per ${quote.uom}, ${quote.leadTimeDays} days`, label: 'Quote recorded' };
+                return { patch: { items: items.map((i) => (i === it ? next : i)) }, event: 'quote recorded', note: `Item ${no} ${str(it.materialNumber)}: ${quote.currency} ${quote.unitPrice} per ${quote.uom}, ${quote.leadTimeDays} days, ${quote.paymentTerms}${quote.incoterms ? `, ${quote.incoterms}` : ''}`, label: 'Quote recorded' };
             });
         }),
     ],
@@ -579,7 +595,7 @@ export const purchaseAgreementRoutes = {
         orgRoute('org.procurement.agreements.submit', 'PRC.agreements.manage', async (ctx) => {
             const doc = await load(ctx, str(ctx.body.id));
             if (ctx.body.acknowledge !== true) throw new HttpError(400, 'Confirm that the quotes match the supplier\'s quote and the attached document.');
-            const currencies = await enabledCurrencies();
+            const [currencies, options] = await Promise.all([enabledCurrencies(), quoteOptions()]);
             return mutate(ctx, doc.id, 'submit', async (d) => {
                 needOwner(ctx, d);
                 if (!QUOTING.includes(str(d.status))) throw new HttpError(409, 'Only an agreement with the RFQ sent (or returned) can be submitted.');
@@ -589,7 +605,7 @@ export const purchaseAgreementRoutes = {
                 for (const i of items) {
                     const [m, info] = await Promise.all([getDoc(`organizations/${ctx.orgId}/materials/${str(i.materialId)}`), getDoc(infoPath(ctx.orgId, str(i.materialId), str(i.warehouseId)))]);
                     if (!published(m)) { problems.push(`${str(i.materialNumber)} is no longer an approved material.`); continue; }
-                    if (isObj(i.quote)) problems.push(...checkQuote(o(i.quote), { info: info?.data ?? {}, material: m!.data, enabledCurrencies: currencies, label: `Item ${Number(i.no)} ${str(i.materialNumber)}` }).problems);
+                    if (isObj(i.quote)) problems.push(...checkQuote(o(i.quote), { info: info?.data ?? {}, material: m!.data, enabledCurrencies: currencies, lists: options.sets, label: `Item ${Number(i.no)} ${str(i.materialNumber)}` }).problems);
                 }
                 const vendor = await approvedVendor(ctx, str(d.vendorId));
                 for (const i of items) if (!suppliersFor([vendor], { categoryCode: i.categoryCode, subcategoryCode: i.subcategoryCode }).length) problems.push(`${str(i.materialNumber)}: the supplier is no longer approved for its category.`);
@@ -822,7 +838,7 @@ async function emailRfq(ctx: OrgContext, d: Obj, dueDate: string, note: string) 
     if (!to) throw new HttpError(409, 'The supplier has no contact email on record. Print the RFQ instead.');
     const orgName = str(ctx.org.data.name) || str(ctx.org.data.legalName) || 'Our organization';
     const rows = objs(d.items).map((i) => `<tr><td>${esc(i.no)}</td><td>${esc(i.materialNumber)}</td><td>${esc(i.name)}</td><td style="text-align:right">${esc(i.expectedQty)}</td><td>${esc(i.purchaseUom)}</td></tr>`).join('');
-    const html = `<div style="font-family:Arial,sans-serif;font-size:14px;color:#111"><p>Dear ${esc(str(d.vendorName))},</p><p>${esc(orgName)} invites you to quote for a purchase agreement <strong>${esc(d.number)}</strong> (${esc(d.title)}) from ${esc(d.startDate)} to ${esc(d.endDate)}.</p><table cellpadding="6" cellspacing="0" border="1" style="border-collapse:collapse;border-color:#ccc"><thead><tr><th>Item</th><th>Material</th><th>Description</th><th>Expected quantity</th><th>Unit</th></tr></thead><tbody>${rows}</tbody></table><p>For each item please quote: unit price and currency per the unit shown, lead time in days, minimum order quantity, order multiple, your part number, payment terms and incoterms.</p><p><strong>Quote due by ${esc(dueDate)}</strong>, quoting ${esc(d.number)}.</p>${note ? `<p>${esc(note)}</p>` : ''}</div>`;
+    const html = `<div style="font-family:Arial,sans-serif;font-size:14px;color:#111"><p>Dear ${esc(str(d.vendorName))},</p><p>${esc(orgName)} invites you to quote for a purchase agreement <strong>${esc(d.number)}</strong> (${esc(d.title)}) from ${esc(d.startDate)} to ${esc(d.endDate)}.</p><table cellpadding="6" cellspacing="0" border="1" style="border-collapse:collapse;border-color:#ccc"><thead><tr><th>Item</th><th>Material</th><th>Description</th><th>Expected quantity</th><th>Unit</th></tr></thead><tbody>${rows}</tbody></table><p>For each item please quote: unit price and currency per the unit shown, lead time in days, payment terms and incoterms.</p><p><strong>Quote due by ${esc(dueDate)}</strong>, quoting ${esc(d.number)}.</p>${note ? `<p>${esc(note)}</p>` : ''}</div>`;
     const res = await fetch('https://api.resend.com/emails', {
         method: 'POST',
         headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
