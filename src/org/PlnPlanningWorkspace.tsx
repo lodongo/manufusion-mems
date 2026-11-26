@@ -17,10 +17,9 @@ interface Bucket { key: string; no: number; name: string; start: string; end: st
 interface Balance { periods: number; open: number; past: number; firstOpen: string; share: number }
 interface Year { fy: number; label: string; start: string; end: string; source: 'finance' | 'settings' | 'calendar'; leName: string; status: string; buckets: Bucket[]; balance: Balance }
 interface Sku { id: string; name: string; uom: string; category: string; processClassId: string; whole: boolean }
-interface Indivisible { key: string; packSize: number; note: string }
 interface Setup {
     demandSource: 'ANNUAL_PLAN'; currentPeriodRule: 'prorate' | 'include' | 'exclude'; defaultAnnualBasis: 'FULL_YEAR' | 'BALANCE'; defaultProfile: Profile; customProfile: number[];
-    defaultForecastBasis: Basis; blendPct: number; historyMonths: number; discreteUoms: string[]; indivisible: Indivisible[]; unitTolerancePct: number; processBatchRule: 'runs' | 'multiple';
+    defaultForecastBasis: Basis; blendPct: number; historyMonths: number; unitTolerancePct: number; processBatchRule: 'runs' | 'multiple';
     hoursPerDay: number; workingDaysPerWeek: number; oeePct: number; overloadPct: number;
 }
 type Profile = 'FLAT' | 'DAYS' | 'HISTORY' | 'CUSTOM';
@@ -666,7 +665,7 @@ function UnitView({ ctx, detail, siteId }: { ctx: Context; detail: Detail; siteI
             <details open={!detail.supply} className='group min-w-0 rounded-2xl border border-line bg-panel p-3 text-ink sm:p-4'>
                 <summary className='flex min-h-11 cursor-pointer items-center gap-2 text-sm font-semibold'><ChevronRight className='h-4 w-4 transition-transform group-open:rotate-90' /> What-if unitisation</summary>
                 <div className='mt-2 space-y-2'>
-                <p className='text-xs text-soft'>The smallest batch that keeps every indivisible component whole (pieces, bags, drums and the packs listed in Setup). Production is planned in multiples of it.</p>
+                <p className='text-xs text-soft'>The smallest batch that keeps every BOM line marked "cannot be split" whole, in its pack size (set on each BOM line). Production is planned in multiples of it.</p>
                 <div className='grid grid-cols-1 gap-2 sm:grid-cols-[1fr_10rem_auto]'>
                     <Select label='SKU' value={sku} onChange={setSku} options={[['', 'Choose a SKU'], ...ctx.skus.map((s) => [s.id, `${s.name} (${s.id})`] as [string, string])]} />
                     <Num label='Quantity to check' value={qty} onChange={setQty} />
@@ -848,29 +847,19 @@ function SopView({ detail, can, onDecide, onRelease, onReturnDemand, onCancel }:
 }
 
 /** Planning setup (organization-wide, PLN.configure in the person's own role, reason required, versioned). */
-function SetupView({ ctx, onSaved }: { ctx: Context; onSaved: (t: string) => Promise<void> }) {
+function SetupView({ ctx, onSaved, onOpenBoms }: { ctx: Context; onSaved: (t: string) => Promise<void>; onOpenBoms?: () => void }) {
     const editable = !!ctx.can['PLN.configure'];
     const [s, setS] = useState<Setup>(ctx.setup);
-    const [uoms, setUoms] = useState(ctx.setup.discreteUoms.join(', '));
-    const [materials, setMaterials] = useState<Array<{ id: string; name: string; materialNumber: string; uom: string }>>([]);
     const [error, setError] = useState('');
     const confirm = useConfirm();
     useEffect(() => {
         setS(ctx.setup);
-        setUoms(ctx.setup.discreteUoms.join(', '));
     }, [ctx.setup]);
-    useEffect(() => {
-        if (!editable) return;
-        callBackend<{ materials: typeof materials }>('/api/org/pln-mfg/foundation/references').then((r) => setMaterials(r.materials ?? [])).catch(() => setMaterials([]));
-    }, [editable]);
     const n = (k: keyof Setup) => (v: string) => setS((x) => ({ ...x, [k]: v === '' ? '' : Number(v) }) as Setup);
-    const keyOptions: Array<[string, string]> = [['', 'Choose a component'], ...ctx.skus.map((k) => [`SKU:${k.id}`, `SKU · ${k.name} (${k.id})`] as [string, string]), ...materials.map((m) => [`MAT:${m.id}`, `Material · ${m.materialNumber || m.id} ${m.name} (${m.uom})`] as [string, string])];
     const verify = (): string => {
         const nums: Array<[keyof Setup, number, number]> = [['blendPct', 0, 100], ['historyMonths', 6, 36], ['unitTolerancePct', 0, 10], ['hoursPerDay', 1, 24], ['workingDaysPerWeek', 1, 7], ['oeePct', 10, 100], ['overloadPct', 50, 200]];
         for (const [k, lo, hi] of nums) { const v = Number(s[k]); if (!Number.isFinite(v) || v < lo || v > hi) return `${k}: enter ${lo} to ${hi}.`; }
         if (s.defaultProfile === 'CUSTOM' && s.customProfile.reduce((a, b) => a + Number(b || 0), 0) <= 0) return 'The custom seasonality needs at least one month above zero.';
-        for (const [i, x] of s.indivisible.entries()) { if (!x.key) return `Indivisible line ${i + 1}: choose a component.`; if (!(Number(x.packSize) > 0)) return `Indivisible line ${i + 1}: the pack size must be above zero.`; }
-        if (new Set(s.indivisible.map((x) => x.key)).size !== s.indivisible.length) return 'A component is listed twice as indivisible.';
         return '';
     };
     const save = () => {
@@ -878,11 +867,11 @@ function SetupView({ ctx, onSaved }: { ctx: Context; onSaved: (t: string) => Pro
         if (why) return setError(why);
         setError('');
         confirm.ask({ title: 'Save the planning setup', message: 'Plans recalculate with the new rules the next time their forecast or supply planning runs. The change is versioned and audited.', confirmLabel: 'Save', reason: { label: 'Reason for the change', minLength: 10 } }, async (reason) => {
-            await post('setup/save', { expectedVersion: ctx.version, reason, setup: { ...s, discreteUoms: uoms.split(/[,\s]+/).map((u) => u.trim().toUpperCase()).filter(Boolean) } });
+            await post('setup/save', { expectedVersion: ctx.version, reason, setup: s });
             await onSaved('Planning setup saved.');
         });
     };
-    const dirty = JSON.stringify({ ...s, discreteUoms: uoms.split(/[,\s]+/).map((u) => u.trim().toUpperCase()).filter(Boolean) }) !== JSON.stringify(ctx.setup);
+    const dirty = JSON.stringify(s) !== JSON.stringify(ctx.setup);
     return (
         <div className='flex h-[calc(100dvh-13rem)] min-h-[32rem] flex-col gap-2'>
             {confirm.sheet}
@@ -917,22 +906,11 @@ function SetupView({ ctx, onSaved }: { ctx: Context; onSaved: (t: string) => Pro
             </Panel>
             <Panel className='space-y-3'>
                 <h3 className='text-sm font-semibold'>BOM unitisation</h3>
-                <TextArea id='pln-discrete-uoms' label='Units that can never be split' rows={2} disabled={!editable} value={uoms} onChange={(e) => setUoms(e.target.value)} hint='Comma separated, e.g. EA, BAG, DRUM' />
+                <Alert tone='info'>Whether an item can be split, and its pack size, is set on each line of the BOM (Bills of Materials → Materials) and approved with the BOM.</Alert>
+                {onOpenBoms && <Btn variant='secondary' onClick={onOpenBoms}><Boxes className='h-4 w-4' /> Open Bills of Materials</Btn>}
                 <div className='grid grid-cols-1 gap-2 sm:grid-cols-2'>
                     <Num label='Rounding tolerance % (0 = exact)' disabled={!editable} value={s.unitTolerancePct} onChange={n('unitTolerancePct')} />
                     <Choice label='Process batches (vessels)' disabled={!editable} value={s.processBatchRule} onChange={(v) => setS({ ...s, processBatchRule: v })} options={[['runs', 'Count runs only'], ['multiple', 'Plan full batches only']]} />
-                </div>
-                <div className='space-y-2'>
-                    <p className='text-xs font-medium text-soft'>Components kept whole (optionally in packs)</p>
-                    {s.indivisible.map((x, i) => (
-                        <div key={i} className='grid grid-cols-1 gap-2 rounded-xl border border-line p-2 sm:grid-cols-[1fr_8rem_1fr_auto]'>
-                            <Select label='Component' disabled={!editable} value={x.key} onChange={(v) => setS({ ...s, indivisible: s.indivisible.map((y, j) => (j === i ? { ...y, key: v } : y)) })} options={keyOptions.some(([k]) => k === x.key) ? keyOptions : [...keyOptions, [x.key, x.key]]} />
-                            <Num label='Pack size' disabled={!editable} value={x.packSize} onChange={(v) => setS({ ...s, indivisible: s.indivisible.map((y, j) => (j === i ? { ...y, packSize: v === '' ? 0 : Number(v) } : y)) })} />
-                            <Field id={`ind-note-${i}`} label='Note' disabled={!editable} value={x.note} onChange={(e) => setS({ ...s, indivisible: s.indivisible.map((y, j) => (j === i ? { ...y, note: e.target.value } : y)) })} />
-                            {editable && <div className='flex items-end'><button type='button' aria-label='Remove' onClick={() => setS({ ...s, indivisible: s.indivisible.filter((_, j) => j !== i) })} className='flex h-11 w-11 items-center justify-center rounded-xl border border-line text-soft'><Trash2 className='h-4 w-4' /></button></div>}
-                        </div>
-                    ))}
-                    {editable && <Btn variant='secondary' onClick={() => setS({ ...s, indivisible: [...s.indivisible, { key: '', packSize: 1, note: '' }] })}><Plus className='h-4 w-4' /> Add component</Btn>}
                 </div>
             </Panel>
             <Panel className='space-y-3'>
@@ -954,7 +932,7 @@ function SetupView({ ctx, onSaved }: { ctx: Context; onSaved: (t: string) => Pro
 }
 
 /** S&OP setup as its own tab: organization-wide rules, no site, year or plan in the way. */
-export function PlnPlanningSetup() {
+export function PlnPlanningSetup({ onOpenBoms }: { onOpenBoms?: () => void } = {}) {
     const [ctx, setCtx] = useState<Context | null>(null);
     const [error, setError] = useState('');
     const [notice, setNotice] = useState('');
@@ -964,7 +942,7 @@ export function PlnPlanningSetup() {
     return (
         <div className='space-y-2'>
             {notice && <Alert tone='success'>{notice}</Alert>}
-            <SetupView ctx={ctx} onSaved={async (m) => { await load(); setNotice(m); }} />
+            <SetupView ctx={ctx} onOpenBoms={onOpenBoms} onSaved={async (m) => { await load(); setNotice(m); }} />
         </div>
     );
 }

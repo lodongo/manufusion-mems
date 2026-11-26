@@ -78,15 +78,15 @@ test('SKU forecast: statistical engine, consensus basis, firm orders consume the
     assert.equal(o.buckets.find((x) => x.key === 'P07').override, 4321);
 });
 
-test('BOM unitisation: least common multiple keeps bags, pieces and listed packs whole; tolerance and vessels are optional', () => {
+test('BOM unitisation: least common multiple keeps whole-only BOM lines (bags, packs) whole; tolerance and vessels are optional', () => {
     assert.deepEqual(fraction(0.025), [1, 40]);
     const bom = { id: 'B1', outputQty: 100, outputUom: 'L', components: [
-        { line: 1, source: 'WAREHOUSE', materialId: 'M1', warehouseId: 'W1', quantity: 2.5, uom: 'BAG', scrapPct: 2 },
-        { line: 2, source: 'WAREHOUSE', materialId: 'M2', warehouseId: 'W1', quantity: 12.3, uom: 'KG' },
-        { line: 3, source: 'WAREHOUSE', materialId: 'M3', warehouseId: 'W1', quantity: 30, uom: 'KG' },
-        { line: 4, source: 'PROCESS_SUPPLY', processSupplyKind: 'UTILITY', supplyUtilityCode: 'STEAM', quantity: 0.7, uom: 'EA' },
+        { line: 1, source: 'WAREHOUSE', materialId: 'M1', warehouseId: 'W1', quantity: 2.5, uom: 'BAG', scrapPct: 2, splitRule: 'WHOLE', packSize: 1 },
+        { line: 2, source: 'WAREHOUSE', materialId: 'M2', warehouseId: 'W1', quantity: 12.3, uom: 'KG', splitRule: 'SPLIT' },
+        { line: 3, source: 'WAREHOUSE', materialId: 'M3', warehouseId: 'W1', quantity: 30, uom: 'KG', splitRule: 'WHOLE', packSize: 25 },
+        { line: 4, source: 'PROCESS_SUPPLY', processSupplyKind: 'UTILITY', supplyUtilityCode: 'STEAM', quantity: 0.7, uom: 'EA', splitRule: 'WHOLE' },
     ] };
-    const u = unitiseBom(bom, { ...setup, indivisible: [{ key: 'MAT:M3', packSize: 25, note: 'sack' }] });
+    const u = unitiseBom(bom, setup);
     // 2.5 bags per 100 L → 1 bag per 40 L; 30 kg in 25 kg sacks per 100 L → 1.2 sacks → whole at 500 L; lcm(40, 500) = 1000.
     assert.equal(u.exactBatch, 1000);
     assert.equal(u.minimalBatch, 1000);
@@ -94,12 +94,21 @@ test('BOM unitisation: least common multiple keeps bags, pieces and listed packs
     assert.equal(u.lines[2].packs, 12);
     assert.equal(u.lines[1].indivisible, false, 'kilograms divide');
     assert.equal(u.lines[3].indivisible, false, 'utilities are metered, even in a discrete unit');
-    const tol = unitiseBom(bom, { ...setup, unitTolerancePct: 5, indivisible: [{ key: 'MAT:M3', packSize: 25, note: '' }] });
+    const tol = unitiseBom(bom, { ...setup, unitTolerancePct: 5 });
     assert.ok(tol.minimalBatch < 1000 && tol.lines.every((l) => l.deviationPct <= 5));
     const plain = unitiseBom({ id: 'B2', outputQty: 1, outputUom: 'EA', components: [{ source: 'WAREHOUSE', materialId: 'X', warehouseId: 'W', quantity: 0.3, uom: 'KG' }] }, setup);
     assert.equal(plain.minimalBatch, 1, 'no indivisible component: one unit');
-    const vessel = unitiseBom(bom, { ...setup, processBatchRule: 'multiple', indivisible: [] }, 1500);
-    const vessel2 = unitiseBom(bom, { ...setup, processBatchRule: 'multiple', indivisible: [] }, 2000);
+    // The rule is on the BOM line: a bag marked "can be split" divides; a line without a rule is read from its unit and flagged.
+    const splitBag = unitiseBom({ id: 'B3', outputQty: 100, outputUom: 'L', components: [{ source: 'WAREHOUSE', materialId: 'M1', warehouseId: 'W1', quantity: 2.5, uom: 'BAG', splitRule: 'SPLIT' }] }, setup);
+    assert.equal(splitBag.minimalBatch, 1);
+    assert.equal(splitBag.lines[0].why, 'BOM: can be split');
+    const unset = unitiseBom({ id: 'B4', outputQty: 100, outputUom: 'L', components: [{ source: 'WAREHOUSE', materialId: 'M1', warehouseId: 'W1', quantity: 2.5, uom: 'BAG' }] }, setup);
+    assert.equal(unset.minimalBatch, 40);
+    assert.match(unset.lines[0].why, /Not set on the BOM/);
+    assert.ok(unset.notes.some((n) => /no split rule yet/.test(n)));
+    const ms = { ...bom, components: bom.components.map((c) => (c.line === 3 ? { ...c, splitRule: 'SPLIT', packSize: null } : c)) };
+    const vessel = unitiseBom(ms, { ...setup, processBatchRule: 'multiple' }, 1500);
+    const vessel2 = unitiseBom(ms, { ...setup, processBatchRule: 'multiple' }, 2000);
     assert.equal(vessel2.lot, 2000, 'a vessel that holds whole bags is its own lot');
     assert.equal(vessel.minimalBatch, 40);
     assert.equal(vessel.lot, 3000, 'full vessel batches only and whole bags: lcm(40, 1500)');
@@ -175,14 +184,14 @@ test('workflow: independent people at every gate; forecast and supply must run b
     assert.match(transitionCheck('released', 'edit_demand', 'p1', a), /cannot/);
 });
 
-test('setup validation: commercial demand is not linked yet; packs, tolerance and calendar are bounded', () => {
+test('setup validation: commercial demand is not linked yet; tolerance and calendar are bounded; split rules are not in setup', () => {
     assert.throws(() => readPlanningSetup({ demandSource: 'COMMERCIAL' }), /not linked yet/);
     assert.throws(() => readPlanningSetup({ unitTolerancePct: 50 }), /tolerance/);
-    assert.throws(() => readPlanningSetup({ indivisible: [{ key: 'MAT:A', packSize: 0 }] }), /pack size/);
-    assert.throws(() => readPlanningSetup({ indivisible: [{ key: 'MAT:A' }, { key: 'MAT:A' }] }), /twice/);
     assert.throws(() => readPlanningSetup({ customProfile: [1, 2, 3] }), /12/);
-    const ok = readPlanningSetup({ discreteUoms: ['ea', 'bag'], hoursPerDay: 8 });
-    assert.deepEqual(ok.discreteUoms, ['EA', 'BAG']);
+    // An older setup that still carries the unit list and component packs is read without them.
+    const ok = readPlanningSetup({ discreteUoms: ['ea', 'bag'], indivisible: [{ key: 'MAT:A', packSize: 0 }], hoursPerDay: 8 });
+    assert.equal('discreteUoms' in ok, false);
+    assert.equal('indivisible' in ok, false);
     assert.equal(ok.hoursPerDay, 8);
 });
 
@@ -229,8 +238,8 @@ test('S&OP setup is its own focused tab; site, year and plan are a menu, not dro
     const ui = read('src/org/PlnPlanningWorkspace.tsx');
     const pf = read('src/org/ProductionFoundation.tsx');
     assert.ok(pf.includes("{key:'sopSetup',label:'S&OP Setup'"));
-    assert.ok(pf.includes(":active==='sopSetup'?<PlnPlanningSetup/>"));
-    assert.ok(ui.includes('export function PlnPlanningSetup()'));
+    assert.ok(pf.includes(":active==='sopSetup'?<PlnPlanningSetup onOpenBoms={()=>changeTab('boms')}/>"));
+    assert.ok(ui.includes('export function PlnPlanningSetup({ onOpenBoms }'));
     assert.ok(!ui.includes("{ key: 'setup', label: 'Setup'"), 'setup is no longer a workspace view');
     assert.ok(!ui.includes("<Select label='Site'") && !ui.includes("<Select label='Plan'"), 'no site or plan dropdown');
     assert.ok(ui.includes("role='menuitemradio'") && ui.includes("title='Site, financial year and plan'"));

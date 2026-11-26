@@ -11,10 +11,10 @@
 //                               spare-part forecasting: SMA/WMA/SES/Holt/regression/Croston/TSB ranked by MASE). The
 //                               consensus is the annual plan, the statistical forecast or a blend; firm orders consume the
 //                               forecast (the larger of the two counts, never both).
-//   4  BOM unitisation          The smallest production quantity that keeps every indivisible component whole (bags,
-//                               drums, pieces, packs of a stated size): the least common multiple of the denominators of
-//                               the per-unit quantities, with an optional rounding tolerance. Without indivisible
-//                               components the unit is one output unit. Production is planned in multiples of it.
+//   4  BOM unitisation          The smallest production quantity that keeps every BOM line marked "cannot be split"
+//                               whole (in its pack size): the least common multiple of the denominators of the
+//                               per-unit quantities, with an optional rounding tolerance. Each BOM line carries its own
+//                               split rule, approved with the BOM. Production is planned in multiples of it.
 //   5  MRP                      Multi-level BOM explosion (intermediates are exploded in low-level-code order), scrap,
 //                               gross-to-net against available stock, safety stock and open supply, lot sizing (minimal
 //                               batch for made items, MOQ and order multiple for bought ones) and lead-time offset.
@@ -25,6 +25,7 @@
 //                               purchase value) → approved → released, with independent reviewers at every gate.
 // Nothing here reads or writes the database: the routes in plnPlanning.ts load the data and store the results.
 // ---------------------------------------------------------------------------
+import { lineSplit, suggestedSplitRule, type SplitRule } from '../src/shared/bomSplitRule';
 import { defaultForecastSetup, runForecast, type ForecastSetup, type Instance } from './forecastModel';
 
 type Obj = Record<string, unknown>;
@@ -38,12 +39,10 @@ const days = (a: string, b: string) => Math.round((Date.parse(`${b}T00:00:00Z`) 
 
 // ----- Setup -----
 
-export const DISCRETE_UOMS = ['EA', 'PC', 'PCS', 'UNIT', 'UNITS', 'NO', 'NOS', 'BOX', 'CTN', 'CARTON', 'CASE', 'PACK', 'PKT', 'BAG', 'SACK', 'ROLL', 'REEL', 'SET', 'PAIR', 'BTL', 'BOTTLE', 'CAN', 'TIN', 'DRUM', 'PAIL', 'JERRYCAN', 'PALLET', 'SHEET', 'TRAY', 'CYL', 'CYLINDER'];
 export type Profile = 'FLAT' | 'DAYS' | 'HISTORY' | 'CUSTOM';
 export type ForecastBasis = 'ANNUAL' | 'STATISTICAL' | 'BLENDED';
 export type CurrentPeriodRule = 'prorate' | 'include' | 'exclude';
 export type AnnualBasis = 'FULL_YEAR' | 'BALANCE';
-export interface Indivisible { key: string; packSize: number; note: string }
 export interface PlanningSetup {
     /** Where planned demand comes from. Commercial confirmed demand is a later integration. */
     demandSource: 'ANNUAL_PLAN';
@@ -56,11 +55,7 @@ export interface PlanningSetup {
     /** Weight of the statistical forecast in a blend, %. */
     blendPct: number;
     historyMonths: number;
-    /** Units that can never be split (pieces, bags, drums …). */
-    discreteUoms: string[];
-    /** Components that must stay whole, optionally in packs (MAT:{materialId} or SKU:{skuId}). */
-    indivisible: Indivisible[];
-    /** Accept a smaller batch when every indivisible component is within this % of a whole pack. 0 = exact. */
+    /** Accept a smaller batch when every whole-only BOM line is within this % of a whole pack. 0 = exact. */
     unitTolerancePct: number;
     /** Process batches (vessel sizes on BATCH_CYCLE stages): only count runs, or plan full batches only. */
     processBatchRule: 'runs' | 'multiple';
@@ -80,8 +75,6 @@ export function defaultPlanningSetup(): PlanningSetup {
         defaultForecastBasis: 'ANNUAL',
         blendPct: 50,
         historyMonths: 24,
-        discreteUoms: [...DISCRETE_UOMS],
-        indivisible: [],
         unitTolerancePct: 0,
         processBatchRule: 'runs',
         hoursPerDay: 16,
@@ -99,8 +92,6 @@ function pick<T extends string>(v: unknown, allowed: readonly T[], label: string
     if (!allowed.includes(v as T)) throw new Error(`Choose ${label}`);
     return v as T;
 }
-const UOM = /^[A-Z0-9][A-Z0-9._-]{0,19}$/;
-const KEY = /^(MAT|SKU):[A-Za-z0-9_-]{1,120}$/;
 /** Validates the planning setup (throws an Error with the message to show). */
 export function readPlanningSetup(v: unknown): PlanningSetup {
     if (!isObj(v)) throw new Error('Planning setup required');
@@ -109,19 +100,8 @@ export function readPlanningSetup(v: unknown): PlanningSetup {
     const custom = Array.isArray(v.customProfile) ? v.customProfile.map((x, i) => n(x, `Seasonality for month ${i + 1}`, 0, 100)) : d.customProfile;
     if (custom.length !== 12) throw new Error('The custom seasonality needs 12 monthly percentages');
     if (custom.reduce((a, b) => a + b, 0) <= 0) throw new Error('The custom seasonality must have at least one month above zero');
-    const uoms = Array.isArray(v.discreteUoms) ? [...new Set(v.discreteUoms.map((x) => s(x).trim().toUpperCase()).filter(Boolean))] : d.discreteUoms;
-    if (uoms.length > 80 || uoms.some((u) => !UOM.test(u))) throw new Error('Indivisible units: up to 80 valid unit codes');
-    const ind = Array.isArray(v.indivisible) ? v.indivisible : [];
-    if (ind.length > 500) throw new Error('At most 500 indivisible components');
-    const seen = new Set<string>();
-    const indivisible = ind.map((x, i) => {
-        if (!isObj(x)) throw new Error(`Indivisible component ${i + 1} is invalid`);
-        const key = s(x.key).trim();
-        if (!KEY.test(key)) throw new Error(`Indivisible component ${i + 1}: choose a material or SKU`);
-        if (seen.has(key)) throw new Error(`${key} is listed twice`);
-        seen.add(key);
-        return { key, packSize: n(x.packSize ?? 1, `${key}: pack size`, 0.000001, 1e7), note: s(x.note).trim().slice(0, 120) };
-    });
+    // Split rules moved to each BOM line (approved with the BOM); older setups that still carry the unit list or the
+    // indivisible component list are read without them.
     const hoursPerDay = n(v.hoursPerDay ?? d.hoursPerDay, 'Hours per day', 1, 24);
     return {
         demandSource: 'ANNUAL_PLAN',
@@ -132,8 +112,6 @@ export function readPlanningSetup(v: unknown): PlanningSetup {
         defaultForecastBasis: pick(v.defaultForecastBasis ?? d.defaultForecastBasis, ['ANNUAL', 'STATISTICAL', 'BLENDED'] as const, 'the forecast basis'),
         blendPct: n(v.blendPct ?? d.blendPct, 'Statistical weight in a blend', 0, 100),
         historyMonths: n(v.historyMonths ?? d.historyMonths, 'History months', 6, 36, true),
-        discreteUoms: uoms,
-        indivisible,
         unitTolerancePct: n(v.unitTolerancePct ?? d.unitTolerancePct, 'Unitisation tolerance', 0, 10),
         processBatchRule: pick(v.processBatchRule ?? d.processBatchRule, ['runs', 'multiple'] as const, 'how process batches are used'),
         hoursPerDay,
@@ -434,6 +412,9 @@ export interface BomLineIn {
     quantity: number;
     uom: string;
     scrapPct?: number;
+    /** Set on the BOM line: SPLIT any quantity, WHOLE whole units or whole packs of packSize. */
+    splitRule?: SplitRule;
+    packSize?: number | null;
 }
 export interface BomIn {
     id: string;
@@ -481,20 +462,23 @@ export interface Unitisation {
     notes: string[];
 }
 /** Smallest production batch that keeps indivisible components whole (see the header). */
-export function unitiseBom(bom: BomIn, setup: Pick<PlanningSetup, 'discreteUoms' | 'indivisible' | 'unitTolerancePct' | 'processBatchRule'>, processBatch: number | null = null): Unitisation {
+export function unitiseBom(bom: BomIn, setup: Pick<PlanningSetup, 'unitTolerancePct' | 'processBatchRule'>, processBatch: number | null = null): Unitisation {
     if (!(bom.outputQty > 0)) throw new Error(`${bom.id}: the output basis must be above zero`);
     const notes: string[] = [];
-    const discrete = new Set(setup.discreteUoms.map((u) => u.toUpperCase()));
-    const packs = new Map(setup.indivisible.map((i) => [i.key, i]));
-    const outputDiscrete = discrete.has(String(bom.outputUom).toUpperCase());
+    const outputDiscrete = suggestedSplitRule(bom.outputUom) === 'WHOLE';
+    let unset = 0;
     const lines = bom.components.map((c, i) => {
         const key = componentKey(c);
         const kind = componentKind(c);
-        const listed = packs.get(key);
-        const byUom = kind !== 'utility' && discrete.has(String(c.uom).toUpperCase());
-        const indivisible = kind !== 'utility' && (!!listed || byUom);
-        const packSize = listed?.packSize ?? 1;
-        const why = !indivisible ? (kind === 'utility' ? 'Utility: metered, always divisible' : 'Divisible unit') : listed ? `Listed as indivisible${packSize !== 1 ? ` in packs of ${packSize} ${c.uom}` : ''}${listed.note ? ` (${listed.note})` : ''}` : `${c.uom} cannot be split`;
+        const rule = lineSplit(c);
+        const indivisible = kind !== 'utility' && rule.rule === 'WHOLE';
+        const packSize = indivisible ? rule.packSize : 1;
+        if (kind !== 'utility' && !rule.explicit) unset++;
+        const why =
+            kind === 'utility' ? 'Utility: metered, always divisible'
+            : !rule.explicit ? `Not set on the BOM: ${c.uom} is read as ${indivisible ? 'cannot be split' : 'can be split'}`
+            : indivisible ? `BOM: cannot be split${packSize !== 1 ? `, packs of ${packSize} ${c.uom}` : ''}`
+            : 'BOM: can be split';
         return { line: c.line ?? i + 1, key, kind, uom: c.uom, perOutput: c.quantity / bom.outputQty, indivisible, packSize, why, raw: c.quantity / packSize };
     });
     // Per output unit, an indivisible component needs quantity / outputQty / packSize packs = a/b. The batch N (whole
@@ -532,6 +516,7 @@ export function unitiseBom(bom: BomIn, setup: Pick<PlanningSetup, 'discreteUoms'
         }
         if (minimal < exact) notes.push(`A rounding tolerance of ${setup.unitTolerancePct}% allows a batch of ${minimal} instead of ${exact}: indivisible components are rounded to whole packs.`);
     }
+    if (unset) notes.push(`${unset} BOM line${unset === 1 ? ' has' : 's have'} no split rule yet and ${unset === 1 ? 'is' : 'are'} read from the unit. Set "Can this item be split?" on each line of the BOM.`);
     if (!lines.some((l) => l.indivisible)) notes.push('No indivisible components: production can be planned one unit at a time.');
     let lot = minimal;
     if (processBatch && processBatch > 0 && setup.processBatchRule === 'multiple') {

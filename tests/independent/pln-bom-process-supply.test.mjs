@@ -15,7 +15,7 @@ test('Metered inline water can be a linked non-warehouse BOM input without inven
  assert.deepEqual(r.components[0],{
   line:1,source:'PROCESS_SUPPLY',processSupplyKind:'SKU',skuId:'SKU-WATER',
   materialId:'',warehouseId:'',utilityWorkCenterId:'',utilityCode:'',
-  quantity:1000,uom:'L',scrapPct:0,quantityMethod:'METERED',deliveryMode:'INLINE',
+  quantity:1000,uom:'L',scrapPct:0,splitRule:'SPLIT',packSize:null,quantityMethod:'METERED',deliveryMode:'INLINE',
   requiredFlowPerHour:30000,bufferCapacity:null,bufferUsable:null,
  });
  assert.equal(r.outputQty,1000);
@@ -53,7 +53,7 @@ test('Existing warehouse and intermediate lines remain unchanged',()=>{
   {source:'INTERMEDIATE',skuId:'SKU-SYRUP',quantity:40,uom:'L',scrapPct:2},
  ]);
  assert.deepEqual(r.components[0],{line:1,source:'WAREHOUSE',skuId:'',warehouseId:'WH-001',
-  materialId:'MAT-CAP',quantity:100,uom:'EA',scrapPct:1});
+  materialId:'MAT-CAP',quantity:100,uom:'EA',scrapPct:1,splitRule:'WHOLE',packSize:1});
  assert.equal(r.components[1].source,'INTERMEDIATE');
  assert.equal(r.components[1].skuId,'SKU-SYRUP');
 });
