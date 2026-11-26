@@ -6,7 +6,7 @@ import {readFileSync,readdirSync} from 'node:fs';
 const read=(p)=>readFileSync(new URL('../../'+p,import.meta.url),'utf8');
 const SCOPE=/^(Mnt|mnt|Pln|Mfg)\w*\.tsx$|^(ProductionFoundation|ManufacturingResources|WorkRequests|WorkOrders)\.tsx$/;
 // Procurement and MRP screens (requisitions, quotations, purchase orders, vendors, replenishment, forecasting).
-const PROCUREMENT=/^(AccountsPayable|BuyerGroups|CriticalityAnalysis|Forecasting|InventoryPendingPos|InventoryRequirements|MaterialsMaster|PoBudgetPilotPage|PoConsolidation|PoDeliveries|PoExtras|ProcurementCatalog|ProcurementDashboard|ProcurementPlaceholder|ProcurementRules|ProcurementSetup|PurchaseOrders|PurchaseRequirements|Quotations|ReplenishmentRequests|RequirementInsights|StoresIssueVouchers|Vendors|materialCreateUi)\.tsx$/;
+const PROCUREMENT=/^(AccountsPayable|BuyerGroups|CriticalityAnalysis|Forecasting|InventoryPendingPos|InventoryRequirements|MaterialsMaster|PoBudgetPilotPage|PoConsolidation|PoDeliveries|PoExtras|ProcurementCatalog|ProcurementDashboard|ProcurementPlaceholder|ProcurementRules|ProcurementSetup|PurchaseAgreements|PurchaseOrders|PurchaseRequirements|Quotations|ReplenishmentRequests|RequirementInsights|StoresIssueVouchers|Vendors|materialCreateUi)\.tsx$/;
 const screens=readdirSync(new URL('../../src/org/',import.meta.url)).filter(f=>SCOPE.test(f)||PROCUREMENT.test(f)).map(f=>['src/org/'+f,read('src/org/'+f)]);
 const NON_TEXT=/type=['"{](checkbox|radio|file|hidden|range|color)/;
 

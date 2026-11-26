@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { Check, HelpCircle, Link2, Link2Off, Lock, MoreVertical, PackagePlus, Pencil, RefreshCw, Save, Send, X } from 'lucide-react';
 import { callBackend } from '../lib/backend';
+import { navigate } from '../lib/route';
 import { Alert, Field, SelectField } from '../components/ui';
 import { InfoTip, Screen, Segmented, messageOf, useConfirm } from '../components/screen';
 import RichTable, { type Column } from '../components/RichTable';
@@ -483,20 +484,34 @@ function ScrollGrid({ children, gap = 'gap-2', dense = false }: { children: Reac
 }
 
 /** One value box in the grid: label, value, and a small help button that opens the explanation in a sheet (boxes stay the same height). */
-function FieldBox({ title, help, onHelp, className = '', warn = false, children }: { title: string; help?: string; onHelp: (h: { title: string; text: string }) => void; className?: string; warn?: boolean; children: ReactNode }) {
+function FieldBox({ title, help, onHelp, className = '', warn = false, agreement, children }: { title: string; help?: string; onHelp: (h: { title: string; text: string }) => void; className?: string; warn?: boolean; agreement?: { number: string; own: string }; children: ReactNode }) {
     return (
-        <div className={`min-w-0 rounded-xl border p-3 ${warn ? 'border-amber-500/60 bg-amber-500/10' : 'border-line bg-panel'} ${className}`}>
+        <div className={`min-w-0 rounded-xl border p-3 ${agreement ? 'border-blue-500/70 bg-blue-500/10' : warn ? 'border-amber-500/60 bg-amber-500/10' : 'border-line bg-panel'} ${className}`} data-agreement={agreement ? agreement.number : undefined}>
             <div className='flex items-start gap-1'>
-                <span className='min-w-0 flex-1 text-xs text-muted'>{title}</span>
+                <span className={`min-w-0 flex-1 text-xs ${agreement ? 'text-blue-300' : 'text-muted'}`}>{title}{agreement && <span className='ml-1 rounded-full bg-blue-500/20 px-1.5 font-mono text-xs text-blue-300'>{agreement.number}</span>}</span>
                 {help && (
                     <button type='button' aria-label={`Help: ${title}`} onClick={() => onHelp({ title, text: help })} className='-m-3 flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-muted active:bg-page'>
                         <HelpCircle className='h-4 w-4' />
                     </button>
                 )}
             </div>
-            <strong className='mt-1 block break-words text-sm font-semibold text-ink'>{children}</strong>
+            <strong className={`mt-1 block break-words text-sm font-semibold ${agreement ? 'text-blue-300' : 'text-ink'}`}>{children}</strong>
+            {agreement && <span className='mt-1 block text-xs text-muted'>Own value: {agreement.own || 'Not set'}</span>}
         </div>
     );
+}
+
+/** The purchase agreement that sets this material's procurement parameters today (active and in date), or null. */
+export function activeAgreement(procurement: Record<string, unknown> | undefined): { id: string; number: string; vendorName: string; unitPrice: number; currency: string; uom: string; startDate: string; endDate: string; fields: string[]; baseline: Record<string, unknown> } | null {
+    const a = procurement?.agreement as Record<string, unknown> | undefined;
+    if (!a || typeof a !== 'object' || !a.id) return null;
+    const day = new Date().toISOString().slice(0, 10);
+    if (!(String(a.startDate) <= day && day <= String(a.endDate))) return null;
+    return {
+        id: String(a.id), number: String(a.number || a.id), vendorName: String(a.vendorName || ''), unitPrice: Number(a.unitPrice) || 0, currency: String(a.currency || ''), uom: String(a.uom || ''),
+        startDate: String(a.startDate), endDate: String(a.endDate), fields: Array.isArray(a.fields) ? a.fields.map(String) : [],
+        baseline: (procurement?.agreementBaseline && typeof procurement.agreementBaseline === 'object' ? procurement.agreementBaseline : {}) as Record<string, unknown>,
+    };
 }
 
 /** Readable rendering of a material master value (names for people, structure nodes, units and catalogue codes). */
@@ -1302,6 +1317,10 @@ export default function InventoryMaterialDetail({ id, warehouseId, onBack }: { i
     // Where minimum, maximum, reorder quantity, safety stock and reorder point come from (forecasting setup).
     const { data: levelSource, reload: reloadLevelSource } = useLoad(() => callBackend<LevelSource>('/api/org/inventory/forecast/status', { materialId: id, warehouseId }).catch(() => null));
     const levelLock = levelSource?.source === 'forecast' ? 'From the approved forecast (Forecasting tab)' : '';
+    // An active purchase agreement sets some Procurement Information fields (shown in blue); they change through the agreement.
+    const pa = activeAgreement(data?.procurement as Record<string, unknown> | undefined);
+    const paFields = new Set(pa ? [...pa.fields, 'preferredVendor'] : []);
+    const paLock = (k: string) => (pa && tab === 'Procurement Information' && paFields.has(k) ? `Set by purchase agreement ${pa.number} until ${pa.endDate}` : undefined);
     // Change control (Inventory › Setup): manual changes to these tabs may be switched off; the server enforces it too.
     const { data: changeControl } = useLoad(() => callBackend<{ control: { manual: Record<'stockControl' | 'replenishment' | 'procurement', boolean> } }>('/api/org/inventory/controls/get', {}).catch(() => null));
     const { ask, sheet } = useConfirm();
@@ -1777,7 +1796,11 @@ export default function InventoryMaterialDetail({ id, warehouseId, onBack }: { i
                                 />
                             )}
                             {editing
-                                ? fields.map((k) => (
+                                ? fields.map((k) => paLock(k) ? (
+                                      <div key={k} className={`min-w-0 rounded-xl border border-blue-500/70 bg-blue-500/10 p-1 ${wide.has(k) ? 'col-span-2' : ''}`} data-agreement={pa?.number}>
+                                          <Field label={k === 'leadTimeDays' ? 'Lead time (days)' : label(k)} value={String((k === 'preferredVendor' ? data.procurement.preferredVendorName : data.procurement[k]) ?? '')} readOnly hint={paLock(k)} onChange={() => undefined} />
+                                      </div>
+                                  ) : (
                                       <div key={k} className={`min-w-0 ${wide.has(k) ? 'col-span-2' : ''}`}>
                                           <SettingInput
                                               field={k}
@@ -1800,8 +1823,26 @@ export default function InventoryMaterialDetail({ id, warehouseId, onBack }: { i
                                   ))
                                 : [
                                       ...levelBoxes,
+                                      ...(tab === 'Procurement Information' && pa
+                                          ? [
+                                                <button
+                                                    key='agreement'
+                                                    type='button'
+                                                    onClick={() => navigate(`organization_home/procurement_agreements/${pa.id}`)}
+                                                    className='col-span-2 min-h-[44px] rounded-xl border border-blue-500/70 bg-blue-500/10 p-3 text-left'
+                                                >
+                                                    <span className='block text-xs text-blue-300'>Purchase agreement {pa.number} · {pa.vendorName}</span>
+                                                    <strong className='mt-1 block text-sm font-semibold text-blue-300'>
+                                                        Agreement price {pa.currency} {pa.unitPrice.toLocaleString('en-US', { maximumFractionDigits: 4 })} per {pa.uom || 'unit'}
+                                                    </strong>
+                                                    <span className='mt-1 block text-xs text-muted'>
+                                                        {pa.startDate} to {pa.endDate}. Fields in blue come from the agreement; the standard price stays the material's own.
+                                                    </span>
+                                                </button>,
+                                            ]
+                                          : []),
                                       ...fields.map((k) => (
-                                          <FieldBox key={k} title={k === 'leadTimeDays' ? 'Lead time (days)' : label(k)} help={EXPLANATIONS[k]} onHelp={setHelp} className={k === 'remarks' ? 'col-span-2' : ''}>
+                                          <FieldBox key={k} title={k === 'leadTimeDays' ? 'Lead time (days)' : label(k)} help={EXPLANATIONS[k]} onHelp={setHelp} className={k === 'remarks' ? 'col-span-2' : ''} agreement={paLock(k) && pa ? { number: pa.number, own: String((k === 'preferredVendor' ? pa.baseline.preferredVendorName : pa.baseline[k]) ?? '') } : undefined}>
                                               <SettingValue section={section} field={k} data={data} metadata={metadata} base={base} displayCurrency={displayCurrency} />
                                           </FieldBox>
                                       )),

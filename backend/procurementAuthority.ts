@@ -330,6 +330,26 @@ export const PROCUREMENT_AUTHORITY: AuthorityRule[] = [
         separation: 'Cannot prepare purchase orders',
         limit: 'Up to 40 agreements per supplier, categories limited to those the supplier is approved for; every change audited',
     },
+    {
+        key: 'agreements.manage',
+        submodule: 'Purchase agreements',
+        action: 'Prepare a purchase agreement for spares with an approved supplier: RFQ, quotes checked against each material\'s procurement setup, PDF attachment, submit, activate, override items, terminate',
+        permission: 'PRC.agreements.manage',
+        who: 'Purchase agreement officers (buyers)',
+        approval: 'Approved level by level under the chart of authority on the agreement value (expected quantity x agreed price, organization currency)',
+        separation: 'Cannot approve agreements; only the owner changes an agreement',
+        limit: 'Up to 200 materials and 10 PDF attachments of 10 MB; one agreement per material and warehouse for overlapping dates; at most 5 years',
+    },
+    {
+        key: 'agreements.approve',
+        submodule: 'Purchase agreements',
+        action: 'Approve, return or reject a purchase agreement at the level of your job role',
+        permission: 'PRC.agreements.approve',
+        who: 'Holders of the job role mapped to the chart of authority level',
+        approval: 'Every level in the band must approve, in order',
+        separation: 'Not the preparer, submitter, anyone who recorded its quotes, or an earlier-level approver; cannot set authority limits',
+        limit: 'Reviewed with the quotes, the attachment and the value',
+    },
 ];
 
 /** Submodules that are on the roadmap but have no screen or action yet. Their permissions are withheld until they exist. */

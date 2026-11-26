@@ -92,6 +92,11 @@ export const SOURCES: Source[] = [
         visible: (h, id, d) => h.involved('VEN', id, d) || h.holds('PRC.vendors.view'),
     },
     {
+        type: 'PA', label: 'Purchase agreement', module: 'Procurement', coll: 'purchase_agreements', link: 'procurement_agreements', linkLabel: 'Purchase agreements', adapters: ['prc.agreement'],
+        ref: (id, d) => first(d.number, id), title: (id, d) => first(d.title, d.vendorName, 'Purchase agreement'), sub: (d) => [str(d.vendorName), str(d.startDate) && str(d.endDate) ? `${str(d.startDate)} to ${str(d.endDate)}` : ''].filter(Boolean).join(' · '), status: (d) => str(d.status), when: (d) => first(d.updatedAt, d.createdAt),
+        visible: (h, id, d) => h.involved('PA', id, d) || h.holds('PRC.agreements.view', 'PRC.agreements.manage', 'PRC.agreements.approve'),
+    },
+    {
         type: 'INV', label: 'Supplier invoice', module: 'Finance', coll: 'ap_invoices', link: 'fin_ap', linkLabel: 'Accounts payable', adapters: ['fin.ap_invoice'],
         ref: (id, d) => first(d.supplierInvoiceNo, id), title: (id, d) => first(d.vendorName, 'Supplier invoice'), sub: (d) => [str(d.currency), str(d.amount)].filter(Boolean).join(' '), status: (d) => str(d.status), when: (d) => first(d.updatedAt, d.createdAt),
         visible: (h, id, d) => h.involved('INV', id, d) || h.holds('FIN.ap.view'),

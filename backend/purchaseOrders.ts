@@ -102,7 +102,7 @@ const COMPETITION: Record<string, number> = { direct: 0, single_source: 0, rfq: 
 // ----- Rates, prices and items -----
 
 /** Latest conversion of each currency to the organization currency, from the platform currency list. */
-async function ratesOf(orgCurrency: string) {
+export async function ratesOf(orgCurrency: string) {
     const doc = await getDoc('reference/currencies');
     const per = new Map<string, number>([['USD', 1]]);
     for (const c of objs(doc?.data.items)) {
