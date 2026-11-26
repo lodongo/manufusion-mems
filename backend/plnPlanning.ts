@@ -23,6 +23,7 @@ import { bypass } from './testModeCore';
 import { selectEffectiveForSite } from './plnMfgRelease';
 import { routingForSku, routingSkuIds } from './mfgRoutingSkuMappings';
 import { mfgMaterialPolicyForOrg } from './mfgMaterialPolicy';
+import { suggestedSplitRule } from '../src/shared/bomSplitRule';
 import {
     ACTION_PERMISSION, NEXT_STATUS, PLAN_STEPS, balanceSummary, bucketsOf, defaultPlanningSetup, forecastSku, readLines, readPlanningSetup,
     roughCut, routingRate, runMrp, sopSummary, transitionCheck, unitiseBom,
@@ -198,7 +199,8 @@ async function savePlan(ctx: OrgContext, doc: Doc, plan: Plan, patch: Obj, actio
 
 // ----- Masters -----
 
-const isWhole = (setup: PlanningSetup, uom: string) => setup.discreteUoms.includes(String(uom).toUpperCase());
+// Whether a SKU is planned in whole units (forecast and demand quantities): from its unit.
+const isWhole = (_setup: PlanningSetup, uom: string) => suggestedSplitRule(uom) === 'WHOLE';
 async function skuMasters(orgId: string, setup: PlanningSetup) {
     const items = await listDocs(`${root(orgId)}/mfg_items`);
     const skus = new Map<string, SkuInfo>();

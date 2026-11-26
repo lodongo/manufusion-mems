@@ -18,6 +18,7 @@ import PlnFormDefaultsPanel from './PlnFormDefaultsPanel';
 import { bomUomName } from './plnBomUomDisplay';
 import {normalizedMaterialFlow} from '../shared/utilityDistributionCapacity';
 import {navigate} from '../lib/route';
+import {isUtilityLine,splitLabel,suggestedSplitRule,type SplitRule} from '../shared/bomSplitRule';
 function Card({children,className=''}:{children:ReactNode;className?:string}){
     return <section className={'min-w-0 rounded-2xl border border-line bg-panel p-3 text-ink sm:p-4 '+className}>{children}</section>;
 }
@@ -40,6 +41,8 @@ type Row=Record<string,unknown>&{id:string;name:string;revision?:number;type?:st
 type Component={
  source?:'INTERMEDIATE'|'WAREHOUSE'|'PROCESS_SUPPLY';
  skuId:string;warehouseId?:string;materialId?:string;quantity:number;uom:string;scrapPct:number;
+ /** Can this item be split? Approved with the BOM; drives S&OP unitisation. */
+ splitRule?:SplitRule;packSize?:number|null;
  processSupplyKind?:'SKU'|'UTILITY'|'PROCUREMENT';
  utilityWorkCenterId?:string;utilityCode?:string;
  supplyCostCenterId?:string;supplyUtilityCode?:string;
@@ -89,7 +92,7 @@ const tabs:{key:Tab;label:string;shortLabel:string;phase:Phase;hint:string}[]=[
     {key:'routings',label:'Process Routings',shortLabel:'Process routings',phase:'capacity',hint:'Define operation sequences using configured resources and outputs'},
     {key:'capacityOverview',label:'Production Capacity Overview',shortLabel:'Capacity overview',phase:'capacity',hint:'Compare all authorized process flows, capacities and buffer constraints'},
     {key:'sop',label:'S&OP Planning Cycle',shortLabel:'S&OP planning cycle',phase:'planning',hint:'Annual demand per SKU for the financial year, detailed SKU forecast, BOM unitisation, MRP, rough-cut capacity and Chart of Authority approval'},
-    {key:'sopSetup',label:'S&OP Setup',shortLabel:'S&OP setup',phase:'planning',hint:'Current-period rule, seasonality, forecast basis, indivisible units and packs, unitisation tolerance and capacity calendar'},
+    {key:'sopSetup',label:'S&OP Setup',shortLabel:'S&OP setup',phase:'planning',hint:'Current-period rule, seasonality, forecast basis, unitisation tolerance and capacity calendar'},
     {key:'config',label:'Planning Configuration',shortLabel:'Planning rules',phase:'planning',hint:'Configure planning horizon, frozen period and lot-sizing defaults'},
     {key:'demand',label:'Demand & S&OP',shortLabel:'Demand & S&OP',phase:'planning',hint:'Maintain forecast and firm demand after the relevant masters are configured'},
     {key:'documentation',label:'Documentation & Setup Guide',shortLabel:'Documentation',phase:'guide',hint:'Search guided setup, topics, troubleshooting and fictional examples'},
@@ -125,6 +128,30 @@ function Choice({title,value,options,onChange,disabled=false}:{title:string;valu
     return <SelectField id={id} label={title} value={value} disabled={disabled} onChange={e=>onChange(e.target.value)}>
         {options.map(([v,t])=><option key={v} value={v}>{t}</option>)}
     </SelectField>;
+}
+/** Can this BOM item be split? A menu of two choices, and the pack size when it must stay whole. */
+function BomSplitRule({component,unitName,onChange}:{component:Component;unitName:string;onChange:(patch:Partial<Component>)=>void}){
+    const rule=component.splitRule;
+    const options:Array<[SplitRule,string,string]>=[
+        ['SPLIT','Can be split','Any quantity can be issued, e.g. 2.35 '+unitName],
+        ['WHOLE','Cannot be split','Only whole '+unitName+' or whole packs'],
+    ];
+    return <div role='radiogroup' aria-label='Can this item be split?' className='space-y-2 rounded-lg border border-line bg-panel p-3'>
+        <p className='text-sm font-semibold'>Can this item be split?</p>
+        <div className='grid gap-2 sm:grid-cols-2'>
+            {options.map(([v,label,hint])=><button key={v} type='button' role='radio' aria-checked={rule===v}
+                onClick={()=>onChange({splitRule:v,packSize:v==='WHOLE'?(Number(component.packSize)>0?component.packSize:1):null})}
+                className={'flex min-h-11 items-start gap-2 rounded-xl border px-3 py-2 text-left '+(rule===v?'border-brand bg-brand/10':'border-line')}>
+                <span className={'mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border '+(rule===v?'border-brand bg-brand text-onbrand':'border-line')}>
+                    {rule===v&&<Check className='h-3 w-3'/>}
+                </span>
+                <span className='min-w-0'><span className='block text-sm font-semibold'>{label}</span><span className='block text-xs text-muted'>{hint}</span></span>
+            </button>)}
+        </div>
+        {rule==='WHOLE'&&<Field title={'Pack size ('+unitName+' per whole pack; 1 = single units)'} type='number'
+            value={component.packSize??''} onChange={v=>onChange({packSize:v===''?null:Number(v)})}/>}
+        {!rule&&<p className='text-xs text-amber-600'>Choose one. S&amp;OP keeps whole-only items whole when it sizes production batches.</p>}
+    </div>;
 }
 function TextField({title,value,onChange}:{title:string;value:string;onChange:(v:string)=>void}){
     return <TextArea label={title} rows={2} value={value} onChange={e=>onChange(e.target.value)}/>;
@@ -324,6 +351,16 @@ function BomEditor({draft,onChange,items,refs,skuSetup,materialPolicy}:{
         setMaterialEditorError('Select the required material or utility and enter a positive quantity and valid unit before adding it to the BOM.');
         return;
     }
+    if(!isUtilityLine(c)){
+        if(c.splitRule!=='SPLIT'&&c.splitRule!=='WHOLE'){
+            setMaterialEditorError('Choose whether this item can be split.');
+            return;
+        }
+        if(c.splitRule==='WHOLE'&&!(Number.isFinite(Number(c.packSize))&&Number(c.packSize)>0&&Number(c.packSize)<=1e7)){
+            setMaterialEditorError('Enter the pack size this item is issued in (1 for single whole units).');
+            return;
+        }
+    }
     if(source==='PROCESS_SUPPLY'&&kind==='UTILITY'&&
         !(c.supplyCostCenterId&&c.supplyUtilityCode)&&
         !(c.utilityWorkCenterId&&c.utilityCode)){
@@ -410,20 +447,24 @@ function BomEditor({draft,onChange,items,refs,skuSetup,materialPolicy}:{
  };
  const changeComponentUnit=(index:number,code:string)=>{
     const old=components[index];
+    // First unit on a line: suggest whether it can be split; the planner confirms it before the line is added.
+    const suggest:Partial<Component>=!old.splitRule&&!isUtilityLine(old)&&code?
+        {splitRule:suggestedSplitRule(code),packSize:suggestedSplitRule(code)==='WHOLE'?1:null}:{};
     const from=skuSetup.units.find(u=>u.code===old.uom||u.symbol===old.uom);
     const to=skuSetup.units.find(u=>u.code===code||u.symbol===code);
     // Converting material UOM must also convert its quantity and all
-    // associated rate/buffer values: do not silently change physical amounts.
+    // associated rate/buffer/pack values: do not silently change physical amounts.
     if(from&&to&&from.baseUnit===to.baseUnit&&from.categoryCode===to.categoryCode&&
         Number.isFinite(from.multiplier)&&Number.isFinite(to.multiplier)&&to.multiplier>0){
         const factor=from.multiplier/to.multiplier;
-        updateComponent(index,{uom:code,quantity:old.quantity*factor,
+        updateComponent(index,{uom:code,quantity:old.quantity*factor,...suggest,
+            ...(old.splitRule==='WHOLE'&&Number(old.packSize)>0?{packSize:Number(old.packSize)*factor}:{}),
             ...(old.source==='PROCESS_SUPPLY'?{
                 requiredFlowPerHour:old.requiredFlowPerHour==null?null:old.requiredFlowPerHour*factor,
                 bufferCapacity:old.bufferCapacity==null?null:old.bufferCapacity*factor,
                 bufferUsable:old.bufferUsable==null?null:old.bufferUsable*factor,
             }:{})});
-    }else if(!old.uom||old.uom===code)updateComponent(index,{uom:code});
+    }else if(!old.uom||old.uom===code)updateComponent(index,{uom:code,...suggest});
  };
  const sectionTabs=[
     {key:'settings',title:'1. Settings'},
@@ -501,6 +542,7 @@ function BomEditor({draft,onChange,items,refs,skuSetup,materialPolicy}:{
                                 {Number.isFinite(component.quantity)?component.quantity.toLocaleString():'—'}
                                 {' '}{bomUomName(component.uom,skuSetup.units)||'Unit not selected'}
                             </p>
+                            {component.uom&&<p className={'mt-1 text-xs '+(component.splitRule||isUtilityLine(component)?'text-soft':'text-amber-600')}>{splitLabel(component,bomUomName(component.uom,skuSetup.units))}</p>}
                         </div>
                         <div className='flex shrink-0 items-center gap-2'>
                             <Button type='button' variant='secondary' onClick={()=>beginEditMaterial(index)}>Edit</Button>
@@ -717,6 +759,8 @@ function BomEditor({draft,onChange,items,refs,skuSetup,materialPolicy}:{
                             setup={skuSetup} value={c.uom}
                             allowedUnitCodes={units(c.skuId,c.uom,unitBasis).map(([code])=>code).filter(Boolean)}
                             onChange={code=>changeComponentUnit(i,code)}/>
+                        {!isUtilityLine(c)&&c.uom&&<BomSplitRule component={c} unitName={bomUomName(c.uom,skuSetup.units)}
+                            onChange={patch=>updateComponent(i,patch)}/>}
                         {processSupply&&<div className='space-y-2 rounded-lg border border-line bg-panel p-3'>
                             <p className='text-xs font-semibold'>Continuous / on-demand quantity planning</p>
                             {demandRate!==null&&<div className='space-y-2 rounded-lg border border-line p-3'>
@@ -1316,7 +1360,7 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
         {active==='documentation'?<PlnDocumentation onNavigate={value=>changeTab(value as Tab)}/>:
         loading?<Spinner/>:active==='formDefaults'?<PlnFormDefaultsPanel initial={formDefaults} revision={formDefaultsRevision} sites={refs.sites} canEdit={canConfig} onSaved={(next,revision)=>{
             setConfig(previous=>({...previous,formDefaults:next}));setFormDefaultsRevision(revision);
-        }}/>:active==='sop'?<PlnPlanningWorkspace onOpenSetup={()=>changeTab('sopSetup')}/>:active==='sopSetup'?<PlnPlanningSetup/>:active==='demand'?<PlnDemand permissions={permissions} formDefaults={formDefaults}/>: active==='skuSetup'?<SkuSetupPanel setup={skuSetup} canEdit={canSkuConfig} onSaved={refreshSkuSetup}
+        }}/>:active==='sop'?<PlnPlanningWorkspace onOpenSetup={()=>changeTab('sopSetup')}/>:active==='sopSetup'?<PlnPlanningSetup onOpenBoms={()=>changeTab('boms')}/>:active==='demand'?<PlnDemand permissions={permissions} formDefaults={formDefaults}/>: active==='skuSetup'?<SkuSetupPanel setup={skuSetup} canEdit={canSkuConfig} onSaved={refreshSkuSetup}
             onOpenSkus={()=>changeTab('items')}/>:active==='materialPolicy'?<Card className='space-y-4'>
             <h2 className='font-semibold'>Manufacturing material handling</h2>
             <p className='text-sm text-muted'>Configure material consumption and intermediate stock policies. The same material and BOM structure applies to every organization.</p>

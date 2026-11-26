@@ -13,6 +13,7 @@ import { calculateSkuConversion, composeConfiguredSkuName, composeSkuNameWithSeq
 import { commitGeneratedCode, skuParametersForOrg, namingSequenceForOrg } from './mfgSkuConfiguration';
 import { mfgMaterialPolicyForOrg, mfgMaterialPolicyPath, normalizeMfgMaterialPolicy, bomClassificationCode } from './mfgMaterialPolicy';
 import {eligibleManufacturingHierarchy,routingManufacturingCostCenter,routingCommissionedCapacity,isManufacturingCostType} from './plnCostCenterCapacity';
+import {suggestedSplitRule} from '../src/shared/bomSplitRule';
 import {costCenterSubcategories,selectedCostCenterSubcategories} from '../src/shared/costCenterTaxonomy';
 import {allowedAt,PERMS} from './scopeGuard';
 import {physicalRatingUnits} from './plnPhysicalCapacity';
@@ -192,13 +193,23 @@ export function normalizeMaster(kind:MasterKind, raw:unknown): Obj {
             // An optional hourly flow does not replace the recipe/MRP requirement.
             const quantity=POSITIVE(c.quantity,'Component planned consumption'),uom=UOM(c.uom);
             const scrapPct=NONNEGATIVE(c.scrapPct??0,'Scrap percentage',100);
+            // Can this item be split? Set per BOM line and approved with the BOM (drives BOM unitisation in S&OP).
+            // A metered utility is always divisible; a line saved without a rule takes the suggestion from its unit.
+            const utilityLine=source==='PROCESS_SUPPLY'&&!['SKU','PROCUREMENT'].includes(str(c.processSupplyKind));
+            const splitRule=utilityLine?'SPLIT':c.splitRule===undefined||c.splitRule===null||c.splitRule===''?
+                suggestedSplitRule(uom):ENUM(c.splitRule,['SPLIT','WHOLE'] as const,'whether component '+(i+1)+' can be split');
+            if(utilityLine&&c.splitRule==='WHOLE')throw new HttpError(400,'Component '+(i+1)+': a metered utility is always divisible.');
+            const hasPack=c.packSize!==undefined&&c.packSize!==null&&c.packSize!=='';
+            const packSize=splitRule==='WHOLE'?(hasPack?POSITIVE(c.packSize,'Component '+(i+1)+' pack size'):1):null;
+            if(packSize!==null&&packSize>1e7)throw new HttpError(400,'Component '+(i+1)+': pack size is too large.');
+            const split={splitRule,packSize};
             if(source==='WAREHOUSE'){
                 const warehouseId=VALID_ID(c.warehouseId,'Warehouse');
                 const materialId=VALID_ID(c.materialId,'Procurement material');
                 const key='WAREHOUSE:'+warehouseId+':'+materialId;
                 if(seen.has(key))throw new HttpError(400,'Duplicate material in the same warehouse. Combine its quantities.');
                 seen.add(key);
-                return {line:i+1,source:'WAREHOUSE',skuId:'',warehouseId,materialId,quantity,uom,scrapPct};
+                return {line:i+1,source:'WAREHOUSE',skuId:'',warehouseId,materialId,quantity,uom,scrapPct,...split};
             }
             if(source==='PROCESS_SUPPLY'){
                 const processSupplyKind=ENUM(c.processSupplyKind,['SKU','UTILITY','PROCUREMENT'] as const,'process supply reference');
@@ -244,7 +255,7 @@ export function normalizeMaster(kind:MasterKind, raw:unknown): Obj {
                 return {line:i+1,source:'PROCESS_SUPPLY',processSupplyKind,
                     skuId,materialId,warehouseId:'',utilityWorkCenterId,utilityCode,
                     ...(supplyCostCenterId?{supplyCostCenterId,supplyUtilityCode}:{}),
-                    quantity,uom,scrapPct,quantityMethod,deliveryMode,
+                    quantity,uom,scrapPct,...split,quantityMethod,deliveryMode,
                     requiredFlowPerHour,bufferCapacity,bufferUsable};
             }
             const skuId=VALID_ID(c.skuId,'Component SKU');
@@ -252,7 +263,7 @@ export function normalizeMaster(kind:MasterKind, raw:unknown): Obj {
             const key='SKU:'+skuId;
             if(seen.has(key))throw new HttpError(400,'Duplicate component SKU '+skuId+'. Combine quantities in one line.');
             seen.add(key);
-            return {line:i+1,...(source?{source:'INTERMEDIATE'}:{}),skuId,quantity,uom,scrapPct};
+            return {line:i+1,...(source?{source:'INTERMEDIATE'}:{}),skuId,quantity,uom,scrapPct,...split};
         });
         return {...base,classificationCode,productVariantId,alternativeCode,routingId,applicability,processClassId,parentSkuId,outputQty:POSITIVE(raw.outputQty??1,'Output basis'),outputUom:UOM(raw.outputUom),components:lines as unknown as Plain,effectiveFrom:effectiveDate(raw.effectiveFrom),versionNote:str(raw.versionNote).slice(0,300)};
     }

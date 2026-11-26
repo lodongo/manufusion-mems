@@ -16,7 +16,7 @@ test('BOM preserves explicit warehouse/material identity without inventing manuf
         {source:'INTERMEDIATE',skuId:'SKU_PREMIX',quantity:1,uom:'UOM-04-001',scrapPct:1}]});
     assert.deepEqual(bom.components[0],{
         line:1,source:'WAREHOUSE',skuId:'',warehouseId:'WH_100',materialId:'MAT_100',
-        quantity:12,uom:'UOM-01-002',scrapPct:0,
+        quantity:12,uom:'UOM-01-002',scrapPct:0,splitRule:'SPLIT',packSize:null,
     });
     assert.equal(bom.components[1].source,'INTERMEDIATE');
     assert.equal(bom.components[1].skuId,'SKU_PREMIX');
@@ -65,4 +65,28 @@ test('BOM picker requires source, warehouse, procurement material and keeps inve
     assert.ok(api.includes("allowedNodeIds(ctx.orgId,ctx.me,true)"));
     assert.ok(api.includes("mappedProcurementMaterialToWarehouse(materialId,material.data,warehouseId,extensions)"));
     assert.ok(api.includes("The Procurement material is not approved and mapped to the selected warehouse."));
+});
+
+test('Each BOM line says whether it can be split; whole-only lines carry a pack size; utilities always divide',()=>{
+    const bom=normalizeMaster('boms',{...base,components:[
+        input({splitRule:'WHOLE',packSize:25}),
+        input({warehouseId:'WH_200',splitRule:'SPLIT',packSize:99}),
+        input({warehouseId:'WH_300',uom:'UOM-20-001'}),
+    ]});
+    assert.equal(bom.components[0].splitRule,'WHOLE');
+    assert.equal(bom.components[0].packSize,25);
+    assert.equal(bom.components[1].splitRule,'SPLIT');
+    assert.equal(bom.components[1].packSize,null,'a divisible line has no pack size');
+    assert.equal(bom.components[2].splitRule,'WHOLE','a line saved without a rule takes the suggestion from a count unit');
+    assert.equal(bom.components[2].packSize,1);
+    assert.throws(()=>normalizeMaster('boms',{...base,components:[input({splitRule:'MAYBE'})]}),/can be split/);
+    assert.throws(()=>normalizeMaster('boms',{...base,components:[input({splitRule:'WHOLE',packSize:0})]}),/pack size/);
+    assert.throws(()=>normalizeMaster('boms',{...base,components:[{source:'PROCESS_SUPPLY',processSupplyKind:'UTILITY',
+        supplyCostCenterId:'CC_1',supplyUtilityCode:'STEAM',quantity:1,uom:'UOM-01-002',splitRule:'WHOLE'}]}),/always divisible/);
+    const ui=read('src/org/ProductionFoundation.tsx');
+    assert.ok(ui.includes("aria-label='Can this item be split?'"));
+    assert.ok(ui.includes("setMaterialEditorError('Choose whether this item can be split.')"));
+    const setup=read('src/org/PlnPlanningWorkspace.tsx');
+    assert.ok(!setup.includes('Units that can never be split'),'the unit list left the S&OP setup');
+    assert.ok(!setup.includes('Components kept whole'),'the component pack list left the S&OP setup');
 });
