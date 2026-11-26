@@ -223,13 +223,18 @@ interface TaskDoc extends Obj {
 }
 const view = (t: TaskDoc, env: Env): TaskView => ({ module: t.module, label: t.label, ref: t.ref, title: t.title, stageLabel: t.stageLabel, link: t.link, linkLabel: t.linkLabel, createdAt: t.createdAt, testMode: t.testMode, intendedNames: t.intended.map((u) => env.byUid.get(u)?.name ?? u).slice(0, 5), details: t.details });
 
+/** Record type of each workflow adapter, for the live record reference (see recordSearch.ts). */
+const RECORD_TYPE: Record<string, string> = { 'prc.requirement': 'PR', 'prc.order': 'PO', 'prc.requisition': 'PRQ', 'prc.vendor': 'VEN', 'fin.ap_invoice': 'INV', 'mnt.wr': 'WR', 'mnt.wo': 'WO', 'inv.material_creation': 'MAT', 'inv.stock_take': 'PI', 'inv.stock_adjustment': 'ADJ', 'ast.asset': 'AST', 'pln.plan': 'SOP' };
+export const recordTokenFor = (adapter: string, refId: string) => (RECORD_TYPE[adapter] && /^[A-Za-z0-9_.-]{1,100}$/.test(refId) ? `[[${RECORD_TYPE[adapter]}:${refId}]]` : '');
 async function deliver(env: Env, id: string, t: TaskDoc, uids: string[]) {
     const now = nowIso();
     const v = view(t, env);
     // To-do / action tracker: one action with an assignment per recipient (accepted; it cannot be declined or closed by hand).
     const actionPath = `${ACTIONS(env.orgId)}/${actionIdOf(id)}`;
     const action = await getDoc(actionPath);
-    const description = `${t.module} · ${t.label}\nReference ${t.ref}\nYour step: ${t.stageLabel}\nComplete it in ${t.linkLabel}; this closes automatically when the step is done.`;
+    // The record itself as a live reference: email, To-do and chat show its current status with an Open button.
+    const token = recordTokenFor(t.adapter, t.refId);
+    const description = `${t.module} · ${t.label}\nReference ${t.ref}${token ? ` ${token}` : ''}\nYour step: ${t.stageLabel}\nComplete it in ${t.linkLabel}; this closes automatically when the step is done.`;
     if (!action) {
         await writeDoc(actionPath, { kind: 'monitored_action', source: 'workflow', sourceId: id, header: t.title, body: description, title: t.title, description, requesterUid: SYSTEM_UID, recipientUids: t.recipients, deadline: '', photoPath: '', mailThreadId: '', mailSubject: '', referenceId: t.ref, roomId: '', createdAt: now, updatedAt: now, canceled: false, workflowTaskId: id, workflowStatus: 'open', workflowLink: t.link, workflowLinkLabel: t.linkLabel, workflowModule: t.module, workflowStage: t.stageLabel, workflowOutcome: '' }, { exists: false });
     } else await updateFields(actionPath, { recipientUids: [...new Set([...(Array.isArray(action.data.recipientUids) ? action.data.recipientUids.map(str) : []), ...uids])], updatedAt: now });
@@ -240,12 +245,12 @@ async function deliver(env: Env, id: string, t: TaskDoc, uids: string[]) {
         // Internal email: stays unread and cannot be deleted while the action is open.
         await writeDoc(`${MAIL(env.orgId, uid)}/${mailIdOf(id, uid)}`, {
             fromUid: SYSTEM_UID, fromName: SYSTEM_NAME, fromEmail: 'workflow@mems.local', to: [p.email], cc: [], bcc: [],
-            subject: `Action required: ${t.title}`.slice(0, 200), html: mailHtml(v), excerpt: `${t.module} · ${t.ref} · ${t.stageLabel}`.slice(0, 250), attachments: [], priority: 'high',
+            subject: `Action required: ${t.title}`.slice(0, 200), html: mailHtml(v) + (token ? `<p>Record: ${token}</p>` : ''), excerpt: `${t.module} · ${t.ref} · ${t.stageLabel}`.slice(0, 250), attachments: [], priority: 'high',
             threadId: id, inReplyTo: '', actionId: actionIdOf(id), sentAt: now, updatedAt: now, starred: false, flagged: true, focus: true, category: 'Action',
             allowReply: false, allowReplyAll: false, allowDelete: false, folder: 'inbox', read: false,
             workflowTaskId: id, workflowStatus: 'open', workflowLink: t.link, workflowLinkLabel: t.linkLabel, workflowModule: t.module, workflowRef: t.ref, workflowStage: t.stageLabel, workflowOutcome: '',
         }, { exists: false }).catch(() => undefined);
-        await chatPost(env, uid, chatMessageIdOf(id, uid, 'open'), chatOpenText(v), id, 'open', +1);
+        await chatPost(env, uid, chatMessageIdOf(id, uid, 'open'), chatOpenText(v) + (token ? `\n${token}` : ''), id, 'open', +1);
     }
 }
 

@@ -56,9 +56,9 @@ export default function UserChip({ session, roleLabel, compact, onClick }: { ses
                         } catch { /* Quick links remains accessible. */ }
                         navigate('organization_home/quick');
                     }}
-                    className={'relative flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-transparent text-brand transition-transform hover:scale-110 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand '+(quickCount?.total?'animate-pulse':'')}>
-                    <Zap className={'h-7 w-7 fill-current '+(quickCount?.total?'drop-shadow-[0_0_12px_rgba(244,114,182,0.95)]':'')} strokeWidth={1.7} />
-                    {!!quickCount?.total&&<span aria-label={quickCount.total+' quick items'} className='absolute -right-1 -top-0.5 flex min-h-5 min-w-5 items-center justify-center rounded-full bg-brand px-1 text-[11px] font-extrabold leading-none text-onbrand shadow-[0_0_11px_rgba(244,114,182,0.9)]'>{quickCount.total>99?'99+':quickCount.total}</span>}
+                    className='relative flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-brand transition-colors hover:bg-brand/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand'>
+                    <Zap className='h-5 w-5' strokeWidth={2} />
+                    {!!quickCount?.total&&<span aria-label={quickCount.total+' quick items'} className='absolute right-1 top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-brand px-1 text-[10px] font-bold leading-none text-onbrand ring-2 ring-page'>{quickCount.total>99?'99+':quickCount.total}</span>}
                 </button>
             )}
             <button type='button' onClick={onClick} aria-label='My details' className='flex min-w-0 items-center gap-2 text-left'>

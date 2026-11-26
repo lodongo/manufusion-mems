@@ -115,7 +115,7 @@ async function mailView(ctx: OrgContext, doc: {id:string;data:Record<string,unkn
         id:doc.id, threadId:str(d.threadId), inReplyTo:str(d.inReplyTo),
         fromUid:str(d.fromUid),fromName:str(d.fromName),fromEmail:str(d.fromEmail),
         to:asArray(d.to),cc:asArray(d.cc),bcc:asArray(d.bcc),
-        subject:str(d.subject),excerpt:str(d.excerpt),html:detail?str(d.html):'',
+        subject:str(d.subject),excerpt:str(d.excerpt).replace(/\[\[([A-Z]{2,4}):([A-Za-z0-9_.-]{1,100})\]\]/g,'$1 $2'),html:detail?str(d.html):'',
         sentAt:str(d.sentAt),updatedAt:str(d.updatedAt),folder:str(d.folder),
         read:d.read===true,starred:d.starred===true,flagged:d.flagged===true,
         action:isObj(d.action)?d.action:{},actionId:str(d.actionId),

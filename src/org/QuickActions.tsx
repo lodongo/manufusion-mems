@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useState, type ChangeEvent } from 'rea
 import { Camera, FileImage, Plus, Save, Trash2, X, RefreshCw } from 'lucide-react';
 import { callBackend } from '../lib/backend';
 import { navigate } from '../lib/route';
+import { RecordCards } from '../components/RecordRefs';
+import { plainRefs } from '../lib/recordRefs';
 import { Alert } from '../components/ui';
 import { Button, Spinner } from '../admin/kit';
 import RichTable, { type Column } from '../components/RichTable';
@@ -268,7 +270,7 @@ export default function QuickActions({uid}:{uid:string}){
             <header className='flex items-center justify-between gap-2'><div><h3 className='font-semibold text-ink'>{picked.title}</h3>
                 <p className='text-xs text-muted'>Due {picked.deadline||'—'} · {picked.status}</p></div>
                 <button aria-label='Close action detail' onClick={()=>setSelected('')}><X className='h-5 w-5 text-muted'/></button></header>
-            <p className='whitespace-pre-wrap text-sm text-ink'>{picked.description}</p>
+            <p className='whitespace-pre-wrap text-sm text-ink'>{plainRefs(picked.description)}</p>
             {picked.photoUrl&&<img src={picked.photoUrl} alt='Action attachment' className='max-h-44 w-full rounded-xl object-contain'/>}
             {picked.personal&&<div className='flex flex-wrap gap-2'>
                 <Button onClick={()=>editTask(picked.personal!)}>Edit action</Button>
@@ -280,6 +282,7 @@ export default function QuickActions({uid}:{uid:string}){
                         void callBackend('/api/org/quick/todo/delete',{id:picked.id}).then(()=>{setSelected('');void reload()}).catch(e=>setError(problem(e)))}}>
                     <Trash2 className='h-4 w-4'/> Delete</button>
             </div>}
+            {picked.description.includes('[[')&&<RecordCards text={picked.description} compact/>}
             {picked.monitored&&picked.monitored.source==='workflow'&&<div className='space-y-2 rounded-xl border border-line bg-page p-3 text-xs'>
                 <p className='font-semibold text-brand'>{assignment?.acknowledgedAt?'Closed · '+(assignment.acknowledgementNote||'step completed'):'Open · it closes when the step is completed in '+(String((picked.monitored as unknown as Record<string,unknown>).workflowLinkLabel||'')||'its module')}</p>
                 <p className='text-muted'>Workflow actions cannot be accepted, declined or closed by hand.</p>

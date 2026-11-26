@@ -10,6 +10,7 @@ import type { ChatAttachment, ChatLiveState, ChatMessage, ChatPerson, ChatRoom, 
 import { useChatLive } from './useChatLive';
 import { Ticks, WaAvatar, WaSheet, WaShell, inboxTime, lastSeenText, playTone, useChatSettings } from './chatUi';
 import { appConfirm } from '../components/dialogs';
+import { plainRefs } from '../lib/recordRefs';
 
 // ---------------------------------------------------------------------------
 // Chat, presented like WhatsApp: the chat list with filters and unread badges, live conversations,
@@ -625,7 +626,7 @@ export default function QuickChat({ uid, roomId = '' }: Props) {
                         const person = contactFor(r, people, uid);
                         const mineLast = r.lastSenderUid === uid;
                         const sender = r.kind === 'group' && r.lastSenderUid && !mineLast ? people.find((p) => p.uid === r.lastSenderUid)?.name.split(' ')[0] : '';
-                        const preview = settings.showPreviews ? r.lastMessage || (r.kind === 'group' ? r.members.length + ' participants' : 'Tap to chat') : r.lastMessage ? 'New message' : 'Tap to chat';
+                        const preview = settings.showPreviews ? plainRefs(r.lastMessage || '') || (r.kind === 'group' ? r.members.length + ' participants' : 'Tap to chat') : r.lastMessage ? 'New message' : 'Tap to chat';
                         let press: ReturnType<typeof setTimeout> | null = null;
                         return (
                             <div key={r.id} className='relative'>

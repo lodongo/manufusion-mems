@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AlertCircle, ArrowRight, CalendarDays, Check, CheckCheck, ChevronDown, ChevronUp, Clock3, MessageSquareText, RefreshCw, Users } from 'lucide-react';
 import { callBackend } from '../lib/backend';
+import { RecordCards } from '../components/RecordRefs';
+import { plainRefs } from '../lib/recordRefs';
 import { navigate } from '../lib/route';
 import { appPrompt } from '../components/dialogs';
 
@@ -72,14 +74,15 @@ export default function UnifiedActions({uid,mode='mine',sourceFilter=''}:{uid:st
                 <button type='button' onClick={()=>{setOpen(expanded?'':a.id);setNote('');setStatusDraft(s=>({...s,[a.id]:mine?.status==='closed'?'closed':'open'}))}} className='flex min-h-20 w-full items-center gap-3 p-3 text-left'>
                     <span className='flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand/10 text-brand'><CheckCheck className='h-5 w-5'/></span>
                     <span className='min-w-0 flex-1'><span className='block truncate text-sm font-semibold text-ink'>{a.header||a.title}</span>
-                        <span className='mt-1 block line-clamp-2 whitespace-pre-wrap text-xs text-soft'>{a.body||a.description||'No description recorded'}</span>
+                        <span className='mt-1 block line-clamp-2 whitespace-pre-wrap text-xs text-soft'>{plainRefs(a.body||a.description||'')||'No description recorded'}</span>
                         <span className='mt-1.5 flex flex-wrap items-center gap-2 text-[11px] text-muted'><span className='font-semibold text-brand'>{actionLabel(a,uid,mode)}</span><span>·</span><CalendarDays className='h-3.5 w-3.5'/>{a.deadline?'Due '+a.deadline:'No due date'}</span></span>
                     {overdue&&<span className='rounded-full bg-red-600/10 px-2 py-1 text-[11px] font-bold text-red-500'>Overdue</span>}
                     {expanded?<ChevronUp className='h-4 w-4 text-brand'/>:<ChevronDown className='h-4 w-4 text-brand'/>}
                 </button>
                 {expanded&&<div className='space-y-3 border-t border-line p-3 text-xs'>
-                    {(a.body||a.description)&&<p className='whitespace-pre-wrap text-sm text-ink'>{a.body||a.description}</p>}
+                    {(a.body||a.description)&&<p className='whitespace-pre-wrap text-sm text-ink'>{plainRefs(a.body||a.description||'')}</p>}
                     <p className='flex items-center gap-2 text-muted'><CalendarDays className='h-4 w-4'/> Deadline: {a.deadline||'Not specified'}</p>
+                    {(a.description||a.body||'').includes('[[')&&<RecordCards text={a.description||a.body||''} compact/>}
                     {a.source==='workflow'?<div className='space-y-2'>
                         <p className='font-semibold text-brand'>{actionLabel(a,uid,mode)}</p>
                         {a.workflowStage&&<p className='text-ink'>Your step: {a.workflowStage}</p>}
