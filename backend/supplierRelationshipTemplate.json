@@ -1,0 +1,3110 @@
+{
+  "template_id": "SRM-RELATIONSHIP-EVALUATION",
+  "schema_version": "1.0.0",
+  "title": "Supplier Relationship and Performance Evaluation",
+  "status": "PROPOSED_CONFIGURABLE_TEMPLATE",
+  "language": "en",
+  "purpose": "Assess supplier performance, buying-organization performance and shared relationship outcomes fairly using one 100-point profile per engagement type.",
+  "source_reference": {
+    "file_name": "SRM template - MRO CAPEX And SERVICE.xlsx",
+    "worksheets": [
+      "SRM CCBA Supplier PerfScorecard",
+      "Meeting Minutes and Actions"
+    ],
+    "retained_principles": [
+      "Quality/technical, service, commercial and innovation performance areas",
+      "Five-level rating conversion: 5=100%, 4=75%, 3=50%, 2=25%, 1=0%",
+      "Ordinary SLA target rating 4; rating 5 for exceeding expectations",
+      "Separate organization and supplier ratings followed by an agreed rating",
+      "At least 70% hard measurable criteria and less than 30% subjective criteria",
+      "Both parties agree measures, weights, scores and corrective actions; bilateral sign-off",
+      "Previous three review scores and action meeting records",
+      "Evaluate actual performance against agreed requirements rather than negotiating commercial contract terms in the scorecard"
+    ],
+    "extensions": "Three distinct profiles, ten expanded categories, proposed weights, measurable definitions, evidence requirements, strict critical-control rules, coverage and applicability rules, accountability dashboards and action workflow. These extensions are proposed, not existing CCBA policy."
+  },
+  "accountability_types": {
+    "SUPPLIER": "Supplier is accountable for the measured outcome. Both parties may rate it.",
+    "ORGANIZATION": "Buying organization is accountable for the measured outcome. Both parties may rate it.",
+    "BOTH": "Jointly accountable outcome; score once using common evidence; assign actions separately as needed."
+  },
+  "configuration": {
+    "profile_selection": "Select one profile for each separately managed scope. For mixed engagements create linked evaluations, or approve a composite with explicit scope weights totaling 100; do not simply sum the three scores.",
+    "configurable_fields": [
+      "category and question weights",
+      "question applicability",
+      "measurement counting basis and evidence sources",
+      "review frequency",
+      "operational SLA and rating thresholds",
+      "minimum coverage",
+      "performance bands",
+      "approval roles"
+    ],
+    "approval_rule": "Agree and version configuration before the evaluation period begins. Any change to weights, scope or thresholds requires both parties to approve; keep historical versions unchanged.",
+    "weight_constraints": {
+      "each_profile_category_weights_total": 100,
+      "each_profile_question_weights_total": 100,
+      "each_category_question_weights_equal_category_weight": true,
+      "minimum_quantitative_weight_percent": 70,
+      "maximum_qualitative_weight_percent_exclusive": 30,
+      "minimum_weight_per_active_question": 1
+    },
+    "threshold_rules": "Default PASS/SLA thresholds are proposed starting points. Set per-question thresholds and SLA commitments to actual contractual/operational expectations; rating 4 should correspond to agreed target and rating 5 to a stretch target when feasible. For mandatory controls retain the binary compliance rubric. Thresholds must be monotonic, exhaustive and non-overlapping after precedence; higher/lower rates are evaluated without rounding."
+  },
+  "rating_scale": [
+    {
+      "rating": 5,
+      "label": "Exceeds expectations / full binary compliance",
+      "score_multiplier": 1.0
+    },
+    {
+      "rating": 4,
+      "label": "Meets expectations",
+      "score_multiplier": 0.75
+    },
+    {
+      "rating": 3,
+      "label": "Partially meets expectations",
+      "score_multiplier": 0.5
+    },
+    {
+      "rating": 2,
+      "label": "Below expectations",
+      "score_multiplier": 0.25
+    },
+    {
+      "rating": 1,
+      "label": "Unacceptable",
+      "score_multiplier": 0.0
+    }
+  ],
+  "rating_rubrics": {
+    "PASS": {
+      "name": "First-pass or checkpoint compliance",
+      "unit": "percent",
+      "direction": "HIGHER_IS_BETTER",
+      "rules": [
+        {
+          "rating": 5,
+          "operator": ">=",
+          "threshold": 100
+        },
+        {
+          "rating": 4,
+          "operator": ">=",
+          "threshold": 95
+        },
+        {
+          "rating": 3,
+          "operator": ">=",
+          "threshold": 90
+        },
+        {
+          "rating": 2,
+          "operator": ">=",
+          "threshold": 80
+        },
+        {
+          "rating": 1,
+          "operator": ">=",
+          "threshold": 0
+        }
+      ]
+    },
+    "SLA": {
+      "name": "Timeliness or SLA attainment",
+      "unit": "percent",
+      "direction": "HIGHER_IS_BETTER",
+      "rules": [
+        {
+          "rating": 5,
+          "operator": ">=",
+          "threshold": 100
+        },
+        {
+          "rating": 4,
+          "operator": ">=",
+          "threshold": 95
+        },
+        {
+          "rating": 3,
+          "operator": ">=",
+          "threshold": 90
+        },
+        {
+          "rating": 2,
+          "operator": ">=",
+          "threshold": 80
+        },
+        {
+          "rating": 1,
+          "operator": ">=",
+          "threshold": 0
+        }
+      ]
+    },
+    "LOW": {
+      "name": "Repeat defect rate",
+      "unit": "events_per_100_receipts",
+      "direction": "LOWER_IS_BETTER",
+      "rules": [
+        {
+          "rating": 5,
+          "operator": "<=",
+          "threshold": 0
+        },
+        {
+          "rating": 4,
+          "operator": "<=",
+          "threshold": 1
+        },
+        {
+          "rating": 3,
+          "operator": "<=",
+          "threshold": 3
+        },
+        {
+          "rating": 2,
+          "operator": "<=",
+          "threshold": 5
+        },
+        {
+          "rating": 1,
+          "operator": ">",
+          "threshold": 5
+        }
+      ]
+    },
+    "CRITICAL": {
+      "name": "Mandatory control compliance",
+      "unit": "percent",
+      "direction": "HIGHER_IS_BETTER",
+      "rules": [
+        {
+          "rating": 5,
+          "operator": "==",
+          "threshold": 100
+        },
+        {
+          "rating": 1,
+          "operator": "<",
+          "threshold": 100
+        }
+      ],
+      "note": "Binary mandatory control: full compliance earns all allocated points (rating 5 for scoring purposes only, not a claim of exceeding legal obligations); any verified breach earns zero points and triggers independent escalation. Target rating 5. No partial credit."
+    },
+    "QUAL": {
+      "name": "Evidence-based qualitative assessment",
+      "unit": "rating",
+      "direction": "HIGHER_IS_BETTER",
+      "rules": [
+        {
+          "rating": 5,
+          "description": "Consistently exceeds agreed expectations; proactive improvements and verifiable positive outcomes."
+        },
+        {
+          "rating": 4,
+          "description": "Meets agreed expectations consistently; reliable evidence and timely actions."
+        },
+        {
+          "rating": 3,
+          "description": "Partially meets expectations; recurring minor gaps or occasional intervention needed."
+        },
+        {
+          "rating": 2,
+          "description": "Frequently misses expectations; significant gaps or repeated intervention required."
+        },
+        {
+          "rating": 1,
+          "description": "Fails expectations; major unresolved gaps or demonstrated breakdown of the process."
+        }
+      ]
+    }
+  },
+  "scoring_policy": {
+    "maximum_score": 100,
+    "target_rating": 4,
+    "ordinary_target_score_percent": 75,
+    "critical_control_target_rating": 5,
+    "target_score_formula": "Sum of effective question weights multiplied by the multiplier for each question target rating; may exceed 75 when critical controls apply.",
+    "weight_basis": "Question weights are percentage points of the entire profile, not percentages within categories. A category with weight 20 must contain questions totaling 20 points.",
+    "question_score_formula": "effective_question_weight_percent * multiplier(agreed_rating)",
+    "category_score_formula": "sum(question scores for category)",
+    "overall_score_formula": "sum(category scores)",
+    "rating_calculation": "Use first matching rubric rule on measured value; quantitative agreed ratings must match verified evidence and approved thresholds. Do not average supplier and organization ratings automatically. Qualitative ratings require documented evidence and bilateral agreement.",
+    "data_rules": [
+      "Use the same review period, counting unit, baseline and attribution rules for both parties.",
+      "Record numerator and denominator for percentage and rate metrics. Do not treat missing evidence or denominator zero as full compliance.",
+      "For HIGHER_IS_BETTER percent measures require values 0 through 100; for event rates require nonnegative values (may exceed 100).",
+      "Separate supplier-controlled and organization-controlled delays using documented exceptions; do not silently remove failures or change baseline dates retrospectively.",
+      "For an event-triggered metric with no relevant events, record NOT_APPLICABLE with rationale only after confirming no activity was due; missing data is NOT_EVALUATED.",
+      "A verified mandatory-control breach must be evaluated and escalated even when other observations are unavailable."
+    ],
+    "applicability_statuses": [
+      "APPLICABLE",
+      "NOT_APPLICABLE",
+      "NOT_EVALUATED"
+    ],
+    "na_policy": {
+      "approval_required": true,
+      "formula": "For approved N/A questions redistribute their weight proportionally among applicable questions in the same category: effective weight = original question weight * original category weight / sum(original weights of applicable questions in that category).",
+      "whole_category_na": "If all questions in a category are legitimately N/A, no final score until both parties approve a revised active category weighting totaling 100 and redistribution within those categories. Preserve the original baseline and audit trail.",
+      "missing_or_disputed": "NOT_EVALUATED, missing or disputed applicable questions retain weight. Show a provisional weighted-points earned and evidence coverage, not a final normalized score. Finalization requires all applicable items resolved.",
+      "minimum_coverage_percent": 80,
+      "coverage_formula": "100 * sum(original weights of applicable questions with verified agreed ratings) / sum(original weights of applicable questions). Also report applicable original weight out of 100 and excluded weight separately. Minimum coverage applies to publishing a provisional score; final coverage must be 100%.",
+      "measurability_check": "After approved N/A redistribution or reweighting, check active quantitative weight remains at least 70% and active qualitative weight below 30%; otherwise approve a revised configuration before finalization."
+    },
+    "critical_gate": {
+      "trigger": "Any verified critical-control failure or credible unresolved serious compliance allegation.",
+      "outcome": "CRITICAL_REVIEW_REQUIRED; immediate appropriate containment, notification and management/compliance escalation. Do not issue an unconditional satisfactory status or renew/qualify a supplier solely on the numeric score. Attribute the finding to responsible party or parties.",
+      "closure": "Record responsible owner, due date, verified corrective action and authorized risk/compliance disposition. Preserve original score and critical finding history."
+    },
+    "accountability_subscores": {
+      "formula": "For each of SUPPLIER, ORGANIZATION and BOTH, sum agreed weighted points for questions in that group / sum effective weights of those questions * 100. Report null for zero applicable group weight.",
+      "note": "Shared questions contribute once to overall score; separate group scores are diagnostic, not additive. A low organization score is not automatically a supplier failure."
+    },
+    "rounding": "Keep full precision in computation; display scores to two decimals.",
+    "performance_bands": [
+      {
+        "min_inclusive": 90,
+        "max_exclusive": null,
+        "label": "EXCELLENT"
+      },
+      {
+        "min_inclusive": 75,
+        "max_exclusive": 90,
+        "label": "MEETS_GENERAL_EXPECTATIONS"
+      },
+      {
+        "min_inclusive": 60,
+        "max_exclusive": 75,
+        "label": "IMPROVEMENT_REQUIRED"
+      },
+      {
+        "min_inclusive": 40,
+        "max_exclusive": 60,
+        "label": "POOR"
+      },
+      {
+        "min_inclusive": 0,
+        "max_exclusive": 40,
+        "label": "UNACCEPTABLE"
+      }
+    ],
+    "band_note": "Bands are proposed general indicators, separate from the engagement-specific weighted target and critical gate."
+  },
+  "evaluation_profiles": [
+    {
+      "profile_id": "PRJ",
+      "name": "Projects and capital expenditure",
+      "scope": "Capital projects, equipment supply and installation, upgrades, construction, engineering and turnkey delivery.",
+      "default_review_frequency": "MONTHLY_DURING_EXECUTION_AND_AT_STAGE_GATES",
+      "categories": [
+        {
+          "category_id": "QT",
+          "name": "Quality, technical performance and acceptance",
+          "weight_percent": 18,
+          "questions": [
+            {
+              "question_id": "PRJ-QT-01",
+              "question": "Does the delivered design and equipment conform to approved technical specifications?",
+              "accountability": "SUPPLIER",
+              "weight_percent": 4,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "PASS",
+              "measurement": "First-pass compliant technical verification items / due verification items × 100.",
+              "evidence_sources": [
+                "Approved specifications",
+                "design review records",
+                "inspection reports"
+              ],
+              "frequency": "EACH_RELEVANT_EVENT_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            },
+            {
+              "question_id": "PRJ-QT-02",
+              "question": "Are factory and site acceptance tests passed at first submission?",
+              "accountability": "SUPPLIER",
+              "weight_percent": 4,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "PASS",
+              "measurement": "First-pass accepted FAT/SAT test items / executed test items × 100.",
+              "evidence_sources": [
+                "FAT/SAT protocols",
+                "signed test results"
+              ],
+              "frequency": "EACH_RELEVANT_EVENT_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            },
+            {
+              "question_id": "PRJ-QT-03",
+              "question": "Are contractual performance guarantees demonstrated under agreed operating conditions?",
+              "accountability": "SUPPLIER",
+              "weight_percent": 3,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "PASS",
+              "measurement": "Performance guarantees demonstrated / guarantees due for verification × 100.",
+              "evidence_sources": [
+                "Performance test records",
+                "throughput, efficiency and quality validation"
+              ],
+              "frequency": "EACH_RELEVANT_EVENT_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            },
+            {
+              "question_id": "PRJ-QT-04",
+              "question": "Are technical defects and nonconformances responded to and corrected within agreed deadlines?",
+              "accountability": "SUPPLIER",
+              "weight_percent": 3,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "SLA",
+              "measurement": "Supplier-owned NCR response and correction obligations completed by deadline / obligations due × 100.",
+              "evidence_sources": [
+                "NCR register",
+                "root cause analysis",
+                "corrective action records"
+              ],
+              "frequency": "EACH_RELEVANT_EVENT_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            },
+            {
+              "question_id": "PRJ-QT-05",
+              "question": "Does the organization review technical submittals and acceptance evidence on time?",
+              "accountability": "ORGANIZATION",
+              "weight_percent": 2,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "SLA",
+              "measurement": "Organization-owned technical review decisions issued by agreed due date / decisions due × 100.",
+              "evidence_sources": [
+                "Submittal register",
+                "approval workflow"
+              ],
+              "frequency": "EACH_RELEVANT_EVENT_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            },
+            {
+              "question_id": "PRJ-QT-06",
+              "question": "Are commissioning checks, punch-list verification and acceptance criteria jointly completed?",
+              "accountability": "BOTH",
+              "weight_percent": 2,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "PASS",
+              "measurement": "Joint commissioning and acceptance checkpoints verified / checkpoints due × 100.",
+              "evidence_sources": [
+                "Commissioning checklist",
+                "joint punch list",
+                "signed acceptance records"
+              ],
+              "frequency": "EACH_RELEVANT_EVENT_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            }
+          ]
+        },
+        {
+          "category_id": "DL",
+          "name": "Schedule, delivery and execution",
+          "weight_percent": 16,
+          "questions": [
+            {
+              "question_id": "PRJ-DL-01",
+              "question": "Are supplier-controlled project milestones achieved on time?",
+              "accountability": "SUPPLIER",
+              "weight_percent": 4,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "SLA",
+              "measurement": "Supplier-owned milestones achieved by approved baseline dates / supplier milestones due × 100.",
+              "evidence_sources": [
+                "Baseline programme",
+                "progress reports"
+              ],
+              "frequency": "EACH_RELEVANT_EVENT_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            },
+            {
+              "question_id": "PRJ-DL-02",
+              "question": "Are equipment and installation resources mobilized when committed?",
+              "accountability": "SUPPLIER",
+              "weight_percent": 3,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "SLA",
+              "measurement": "Supplier mobilization and delivery commitments met on time / commitments due × 100.",
+              "evidence_sources": [
+                "Mobilization plan",
+                "delivery records"
+              ],
+              "frequency": "EACH_RELEVANT_EVENT_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            },
+            {
+              "question_id": "PRJ-DL-03",
+              "question": "Are site readiness, access, utilities and organization-provided interfaces available on time?",
+              "accountability": "ORGANIZATION",
+              "weight_percent": 3,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "SLA",
+              "measurement": "Organization readiness commitments met by due date / commitments due × 100.",
+              "evidence_sources": [
+                "Site readiness checklist",
+                "interface register"
+              ],
+              "frequency": "EACH_RELEVANT_EVENT_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            },
+            {
+              "question_id": "PRJ-DL-04",
+              "question": "Are shutdown windows and internal production releases provided as agreed?",
+              "accountability": "ORGANIZATION",
+              "weight_percent": 2,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "SLA",
+              "measurement": "Agreed shutdown/access commitments fulfilled on time / commitments due × 100.",
+              "evidence_sources": [
+                "Shutdown plan",
+                "production release records"
+              ],
+              "frequency": "EACH_RELEVANT_EVENT_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            },
+            {
+              "question_id": "PRJ-DL-05",
+              "question": "Are interface dependencies and recovery actions resolved by agreed dates?",
+              "accountability": "BOTH",
+              "weight_percent": 2,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "SLA",
+              "measurement": "Joint dependency and recovery actions closed on time / actions due × 100.",
+              "evidence_sources": [
+                "Integrated project plan",
+                "interface action log"
+              ],
+              "frequency": "EACH_RELEVANT_EVENT_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            },
+            {
+              "question_id": "PRJ-DL-06",
+              "question": "Are progress forecasts and look-ahead schedules submitted on time?",
+              "accountability": "SUPPLIER",
+              "weight_percent": 2,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "SLA",
+              "measurement": "Required forecasts submitted by due date / forecasts due × 100.",
+              "evidence_sources": [
+                "Weekly progress reports",
+                "look-ahead schedules"
+              ],
+              "frequency": "EACH_RELEVANT_EVENT_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            }
+          ]
+        },
+        {
+          "category_id": "CM",
+          "name": "Commercial performance and financial discipline",
+          "weight_percent": 12,
+          "questions": [
+            {
+              "question_id": "PRJ-CM-01",
+              "question": "Are invoices accurate, supported and aligned with certified milestones?",
+              "accountability": "SUPPLIER",
+              "weight_percent": 3,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "PASS",
+              "measurement": "First-pass correct invoices / invoices submitted × 100.",
+              "evidence_sources": [
+                "Invoice register",
+                "milestone certificates",
+                "purchase orders"
+              ],
+              "frequency": "EACH_RELEVANT_EVENT_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            },
+            {
+              "question_id": "PRJ-CM-02",
+              "question": "Are undisputed certified invoices paid within agreed terms?",
+              "accountability": "ORGANIZATION",
+              "weight_percent": 2,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "SLA",
+              "measurement": "Undisputed invoices paid by contractual due date / undisputed invoices due × 100.",
+              "evidence_sources": [
+                "Accounts payable ledger",
+                "payment records"
+              ],
+              "frequency": "EACH_RELEVANT_EVENT_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            },
+            {
+              "question_id": "PRJ-CM-03",
+              "question": "Are scope and cost variations approved before commitment or execution, except under documented emergency authority?",
+              "accountability": "BOTH",
+              "weight_percent": 3,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "CRITICAL",
+              "measurement": "Approved or valid emergency-authorized variations / variations implemented × 100.",
+              "evidence_sources": [
+                "Change orders",
+                "approval register",
+                "contract correspondence"
+              ],
+              "frequency": "EACH_RELEVANT_EVENT_AND_AT_REVIEW",
+              "critical_control": true,
+              "target_rating": 5,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            },
+            {
+              "question_id": "PRJ-CM-04",
+              "question": "Are cost-impact notices and claims submitted with substantiation within agreed time limits?",
+              "accountability": "SUPPLIER",
+              "weight_percent": 2,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "SLA",
+              "measurement": "Complete supplier notices submitted on time / notices due × 100.",
+              "evidence_sources": [
+                "Claims register",
+                "cost breakdowns"
+              ],
+              "frequency": "EACH_RELEVANT_EVENT_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            },
+            {
+              "question_id": "PRJ-CM-05",
+              "question": "Are variation decisions and milestone certifications issued on time?",
+              "accountability": "ORGANIZATION",
+              "weight_percent": 2,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "SLA",
+              "measurement": "Organization decisions issued by agreed date / decisions due × 100.",
+              "evidence_sources": [
+                "Change register",
+                "payment certification log"
+              ],
+              "frequency": "EACH_RELEVANT_EVENT_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            }
+          ]
+        },
+        {
+          "category_id": "HS",
+          "name": "Safety, environment, legal and ethical compliance",
+          "weight_percent": 12,
+          "questions": [
+            {
+              "question_id": "PRJ-HS-01",
+              "question": "Does the supplier comply with applicable safety permits, isolation and critical risk controls during execution?",
+              "accountability": "SUPPLIER",
+              "weight_percent": 4,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "CRITICAL",
+              "measurement": "Compliant critical supplier control observations / required or sampled observations × 100.",
+              "evidence_sources": [
+                "Permit records",
+                "safety inspections",
+                "isolation audits"
+              ],
+              "frequency": "EACH_RELEVANT_EVENT_AND_AT_REVIEW",
+              "critical_control": true,
+              "target_rating": 5,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            },
+            {
+              "question_id": "PRJ-HS-02",
+              "question": "Does the organization provide safe site conditions, required inductions and site-controlled isolation arrangements?",
+              "accountability": "ORGANIZATION",
+              "weight_percent": 3,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "CRITICAL",
+              "measurement": "Compliant organization critical control checks / required checks × 100.",
+              "evidence_sources": [
+                "Site safety checks",
+                "induction and isolation records"
+              ],
+              "frequency": "EACH_RELEVANT_EVENT_AND_AT_REVIEW",
+              "critical_control": true,
+              "target_rating": 5,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            },
+            {
+              "question_id": "PRJ-HS-03",
+              "question": "Are incidents, serious near misses and environmental breaches reported and controlled as required?",
+              "accountability": "BOTH",
+              "weight_percent": 3,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "CRITICAL",
+              "measurement": "Compliant mandatory notification and immediate control obligations / obligations triggered × 100.",
+              "evidence_sources": [
+                "Incident register",
+                "statutory reporting evidence"
+              ],
+              "frequency": "EACH_RELEVANT_EVENT_AND_AT_REVIEW",
+              "critical_control": true,
+              "target_rating": 5,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            },
+            {
+              "question_id": "PRJ-HS-04",
+              "question": "Are mandatory licenses, insurance, competence certificates and ethical declarations valid?",
+              "accountability": "SUPPLIER",
+              "weight_percent": 2,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "CRITICAL",
+              "measurement": "Valid mandatory compliance documents / required documents × 100.",
+              "evidence_sources": [
+                "License register",
+                "insurance",
+                "due diligence records"
+              ],
+              "frequency": "EACH_RELEVANT_EVENT_AND_AT_REVIEW",
+              "critical_control": true,
+              "target_rating": 5,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            }
+          ]
+        },
+        {
+          "category_id": "PL",
+          "name": "Scope definition, planning and change readiness",
+          "weight_percent": 10,
+          "questions": [
+            {
+              "question_id": "PRJ-PL-01",
+              "question": "Are user requirements, design inputs and operating constraints complete and issued on time?",
+              "accountability": "ORGANIZATION",
+              "weight_percent": 3,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "SLA",
+              "measurement": "Complete organization inputs issued by agreed date / inputs due × 100.",
+              "evidence_sources": [
+                "User requirement specification",
+                "design input register"
+              ],
+              "frequency": "EACH_RELEVANT_EVENT_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            },
+            {
+              "question_id": "PRJ-PL-02",
+              "question": "Are supplier design and execution plans complete at first formal review?",
+              "accountability": "SUPPLIER",
+              "weight_percent": 2,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "PASS",
+              "measurement": "First-pass accepted planning deliverables / planning deliverables submitted × 100.",
+              "evidence_sources": [
+                "Method statements",
+                "design plans",
+                "quality plan"
+              ],
+              "frequency": "EACH_RELEVANT_EVENT_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            },
+            {
+              "question_id": "PRJ-PL-03",
+              "question": "Are scope boundaries, responsibilities and interface requirements jointly confirmed before work starts?",
+              "accountability": "BOTH",
+              "weight_percent": 2,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "PASS",
+              "measurement": "Verified joint scope and interface checkpoints / checkpoints required × 100.",
+              "evidence_sources": [
+                "Scope matrix",
+                "responsibility matrix",
+                "kickoff minutes"
+              ],
+              "frequency": "EACH_RELEVANT_EVENT_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            },
+            {
+              "question_id": "PRJ-PL-04",
+              "question": "Are risks and impacts of proposed changes assessed before decisions are due?",
+              "accountability": "BOTH",
+              "weight_percent": 3,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "SLA",
+              "measurement": "Complete joint impact assessments issued on time / assessments due × 100.",
+              "evidence_sources": [
+                "Change log",
+                "risk register",
+                "impact assessments"
+              ],
+              "frequency": "EACH_RELEVANT_EVENT_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            }
+          ]
+        },
+        {
+          "category_id": "GV",
+          "name": "Communication, governance and relationship",
+          "weight_percent": 8,
+          "questions": [
+            {
+              "question_id": "PRJ-GV-01",
+              "question": "Does the supplier escalate blockers and material deviations within agreed notification windows?",
+              "accountability": "SUPPLIER",
+              "weight_percent": 2,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "SLA",
+              "measurement": "Supplier escalation notices issued on time / notices required × 100.",
+              "evidence_sources": [
+                "Issue log",
+                "escalation records"
+              ],
+              "frequency": "EACH_RELEVANT_EVENT_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            },
+            {
+              "question_id": "PRJ-GV-02",
+              "question": "Does the organization provide timely decisions and escalation support?",
+              "accountability": "ORGANIZATION",
+              "weight_percent": 2,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "SLA",
+              "measurement": "Organization escalation decisions issued on time / decisions due × 100.",
+              "evidence_sources": [
+                "Decision log",
+                "steering committee minutes"
+              ],
+              "frequency": "EACH_RELEVANT_EVENT_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            },
+            {
+              "question_id": "PRJ-GV-03",
+              "question": "Are joint review meetings held and agreed actions closed on time?",
+              "accountability": "BOTH",
+              "weight_percent": 2,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "SLA",
+              "measurement": "Due joint governance commitments completed on time / commitments due × 100.",
+              "evidence_sources": [
+                "Meeting calendar",
+                "minutes",
+                "action tracker"
+              ],
+              "frequency": "EACH_RELEVANT_EVENT_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            },
+            {
+              "question_id": "PRJ-GV-04",
+              "question": "Do both parties communicate transparently and resolve disagreements constructively?",
+              "accountability": "BOTH",
+              "weight_percent": 2,
+              "measurement_type": "QUALITATIVE",
+              "rating_rubric_id": "QUAL",
+              "measurement": "Use documented examples of openness, escalation, respect and problem resolution.",
+              "evidence_sources": [
+                "Joint meeting feedback",
+                "dispute records"
+              ],
+              "frequency": "EACH_RELEVANT_EVENT_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            }
+          ]
+        },
+        {
+          "category_id": "CP",
+          "name": "Capability, resources and subcontractor management",
+          "weight_percent": 7,
+          "questions": [
+            {
+              "question_id": "PRJ-CP-01",
+              "question": "Are personnel assigned to critical tasks demonstrably competent and authorized?",
+              "accountability": "SUPPLIER",
+              "weight_percent": 2,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "PASS",
+              "measurement": "Verified competent and authorized assignments / critical task assignments checked × 100.",
+              "evidence_sources": [
+                "Competency matrix",
+                "authorization records"
+              ],
+              "frequency": "EACH_RELEVANT_EVENT_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            },
+            {
+              "question_id": "PRJ-CP-02",
+              "question": "Are subcontractor deliverables controlled to the same approved quality and execution requirements?",
+              "accountability": "SUPPLIER",
+              "weight_percent": 2,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "PASS",
+              "measurement": "Compliant subcontractor oversight checkpoints / checkpoints due × 100.",
+              "evidence_sources": [
+                "Subcontractor audits",
+                "quality records"
+              ],
+              "frequency": "EACH_RELEVANT_EVENT_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            },
+            {
+              "question_id": "PRJ-CP-03",
+              "question": "Are organization technical representatives and operators available for planned reviews and tests?",
+              "accountability": "ORGANIZATION",
+              "weight_percent": 2,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "SLA",
+              "measurement": "Organization attendance commitments met / commitments due × 100.",
+              "evidence_sources": [
+                "Resource plan",
+                "attendance sheets"
+              ],
+              "frequency": "EACH_RELEVANT_EVENT_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            },
+            {
+              "question_id": "PRJ-CP-04",
+              "question": "Does the supplier demonstrate effective project leadership and technical problem-solving capability?",
+              "accountability": "SUPPLIER",
+              "weight_percent": 1,
+              "measurement_type": "QUALITATIVE",
+              "rating_rubric_id": "QUAL",
+              "measurement": "Use evidenced decisions, issue resolution and oversight effectiveness.",
+              "evidence_sources": [
+                "Project review feedback",
+                "issue log"
+              ],
+              "frequency": "EACH_RELEVANT_EVENT_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            }
+          ]
+        },
+        {
+          "category_id": "RK",
+          "name": "Risk, continuity and supply assurance",
+          "weight_percent": 6,
+          "questions": [
+            {
+              "question_id": "PRJ-RK-01",
+              "question": "Are long-lead procurement and supplier-controlled risks mitigated by agreed deadlines?",
+              "accountability": "SUPPLIER",
+              "weight_percent": 2,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "SLA",
+              "measurement": "Supplier risk mitigation actions completed on time / actions due × 100.",
+              "evidence_sources": [
+                "Long-lead register",
+                "risk register"
+              ],
+              "frequency": "EACH_RELEVANT_EVENT_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            },
+            {
+              "question_id": "PRJ-RK-02",
+              "question": "Are internal funding, access and operational risks addressed by the organization on time?",
+              "accountability": "ORGANIZATION",
+              "weight_percent": 2,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "SLA",
+              "measurement": "Organization risk actions completed on time / actions due × 100.",
+              "evidence_sources": [
+                "Risk register",
+                "internal action tracker"
+              ],
+              "frequency": "EACH_RELEVANT_EVENT_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            },
+            {
+              "question_id": "PRJ-RK-03",
+              "question": "Are contingency and recovery plans jointly maintained and tested or reviewed as agreed?",
+              "accountability": "BOTH",
+              "weight_percent": 2,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "PASS",
+              "measurement": "Joint contingency verification checkpoints completed / checkpoints due × 100.",
+              "evidence_sources": [
+                "Contingency plans",
+                "scenario review records"
+              ],
+              "frequency": "EACH_RELEVANT_EVENT_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            }
+          ]
+        },
+        {
+          "category_id": "IN",
+          "name": "Innovation, value and sustainability",
+          "weight_percent": 5,
+          "questions": [
+            {
+              "question_id": "PRJ-IN-01",
+              "question": "Are agreed engineering optimization and value-improvement proposals delivered on time?",
+              "accountability": "SUPPLIER",
+              "weight_percent": 2,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "SLA",
+              "measurement": "Agreed supplier improvement proposal commitments fulfilled / commitments due × 100.",
+              "evidence_sources": [
+                "Value engineering register",
+                "proposal records"
+              ],
+              "frequency": "EACH_RELEVANT_EVENT_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            },
+            {
+              "question_id": "PRJ-IN-02",
+              "question": "Are agreed energy, water, waste or lifecycle improvement milestones verified?",
+              "accountability": "BOTH",
+              "weight_percent": 1,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "PASS",
+              "measurement": "Joint sustainability milestones verified / milestones due × 100.",
+              "evidence_sources": [
+                "Baseline studies",
+                "measurement and verification reports"
+              ],
+              "frequency": "EACH_RELEVANT_EVENT_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            },
+            {
+              "question_id": "PRJ-IN-03",
+              "question": "Does the organization evaluate improvement proposals and communicate decisions on time?",
+              "accountability": "ORGANIZATION",
+              "weight_percent": 2,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "SLA",
+              "measurement": "Improvement decisions issued by due date / decisions due × 100.",
+              "evidence_sources": [
+                "Proposal register",
+                "decision log"
+              ],
+              "frequency": "EACH_RELEVANT_EVENT_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            }
+          ]
+        },
+        {
+          "category_id": "CL",
+          "name": "Handover, warranty and lifecycle support",
+          "weight_percent": 6,
+          "questions": [
+            {
+              "question_id": "PRJ-CL-01",
+              "question": "Are as-built drawings, manuals, software backups where applicable and spare parts lists accepted at handover?",
+              "accountability": "SUPPLIER",
+              "weight_percent": 2,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "PASS",
+              "measurement": "First-pass accepted handover deliverables / handover deliverables due × 100.",
+              "evidence_sources": [
+                "Handover dossier",
+                "document acceptance register"
+              ],
+              "frequency": "EACH_RELEVANT_EVENT_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            },
+            {
+              "question_id": "PRJ-CL-02",
+              "question": "Are warranty defects and agreed post-startup support requests addressed within SLA?",
+              "accountability": "SUPPLIER",
+              "weight_percent": 1,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "SLA",
+              "measurement": "Warranty/support obligations met by deadline / obligations due × 100.",
+              "evidence_sources": [
+                "Warranty log",
+                "support tickets"
+              ],
+              "frequency": "EACH_RELEVANT_EVENT_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            },
+            {
+              "question_id": "PRJ-CL-03",
+              "question": "Are organization personnel nominated and made available for training and handover?",
+              "accountability": "ORGANIZATION",
+              "weight_percent": 1,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "SLA",
+              "measurement": "Organization training/handover commitments fulfilled / commitments due × 100.",
+              "evidence_sources": [
+                "Training plan",
+                "attendance records"
+              ],
+              "frequency": "EACH_RELEVANT_EVENT_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            },
+            {
+              "question_id": "PRJ-CL-04",
+              "question": "Are final acceptance, training effectiveness and outstanding obligations jointly verified?",
+              "accountability": "BOTH",
+              "weight_percent": 2,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "PASS",
+              "measurement": "Joint closeout checkpoints verified / checkpoints due × 100.",
+              "evidence_sources": [
+                "Final acceptance checklist",
+                "competency verification",
+                "closeout minutes"
+              ],
+              "frequency": "EACH_RELEVANT_EVENT_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            }
+          ]
+        }
+      ],
+      "validation_summary": {
+        "profile_id": "PRJ",
+        "category_count": 10,
+        "question_count": 43,
+        "total_category_weight_percent": 100,
+        "total_question_weight_percent": 100,
+        "accountability_weight_percent": {
+          "SUPPLIER": 50,
+          "ORGANIZATION": 26,
+          "BOTH": 24
+        },
+        "quantitative_weight_percent": 97,
+        "qualitative_weight_percent": 3
+      }
+    },
+    {
+      "profile_id": "MAT",
+      "name": "Materials and goods",
+      "scope": "MRO spares, consumables, raw materials, packaging, components, stock and non-stock goods.",
+      "default_review_frequency": "QUARTERLY_WITH_MONTHLY_KPI_TRACKING",
+      "categories": [
+        {
+          "category_id": "QT",
+          "name": "Quality, technical conformity and traceability",
+          "weight_percent": 22,
+          "questions": [
+            {
+              "question_id": "MAT-QT-01",
+              "question": "Are received materials compliant with approved specifications and purchase requirements at first inspection?",
+              "accountability": "SUPPLIER",
+              "weight_percent": 5,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "PASS",
+              "measurement": "Accepted receipt lots or lines at first inspection / inspected receipt lots or lines × 100; fix counting basis before review.",
+              "evidence_sources": [
+                "Goods receipt",
+                "inspection records",
+                "NCR register"
+              ],
+              "frequency": "MONTHLY_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            },
+            {
+              "question_id": "MAT-QT-02",
+              "question": "Does the supplier respond to quality nonconformances within the agreed response time?",
+              "accountability": "SUPPLIER",
+              "weight_percent": 4,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "SLA",
+              "measurement": "Supplier NCR responses within SLA / supplier NCR responses due × 100.",
+              "evidence_sources": [
+                "NCR register",
+                "correspondence"
+              ],
+              "frequency": "MONTHLY_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            },
+            {
+              "question_id": "MAT-QT-03",
+              "question": "Are corrective actions and replacement or rectification obligations completed within agreed time?",
+              "accountability": "SUPPLIER",
+              "weight_percent": 4,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "SLA",
+              "measurement": "Supplier-owned NCR closure obligations completed by due date / obligations due × 100.",
+              "evidence_sources": [
+                "CAPA register",
+                "replacement records"
+              ],
+              "frequency": "MONTHLY_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            },
+            {
+              "question_id": "MAT-QT-04",
+              "question": "How frequently do previously corrected defects recur?",
+              "accountability": "SUPPLIER",
+              "weight_percent": 3,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "LOW",
+              "measurement": "Repeat verified defect cases within agreed lookback / inspected receipt lots or lines in the period × 100; lower is better.",
+              "evidence_sources": [
+                "NCR history",
+                "inspection records"
+              ],
+              "frequency": "MONTHLY_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            },
+            {
+              "question_id": "MAT-QT-05",
+              "question": "Does the organization inspect receipts and communicate acceptance or rejection decisions promptly?",
+              "accountability": "ORGANIZATION",
+              "weight_percent": 2,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "SLA",
+              "measurement": "Organization inspection/disposition decisions completed by SLA / decisions due × 100.",
+              "evidence_sources": [
+                "Inspection queue",
+                "goods receipt records"
+              ],
+              "frequency": "MONTHLY_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            },
+            {
+              "question_id": "MAT-QT-06",
+              "question": "Are item specification revisions and quality acceptance criteria jointly aligned before supply?",
+              "accountability": "BOTH",
+              "weight_percent": 2,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "PASS",
+              "measurement": "Joint specification and acceptance checkpoints verified / checkpoints due × 100.",
+              "evidence_sources": [
+                "Approved material specification",
+                "revision register"
+              ],
+              "frequency": "MONTHLY_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            },
+            {
+              "question_id": "MAT-QT-07",
+              "question": "Are batch, serial, certificate and authenticity records complete where required?",
+              "accountability": "SUPPLIER",
+              "weight_percent": 2,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "PASS",
+              "measurement": "Receipt lines with complete required traceability documentation / applicable receipt lines × 100.",
+              "evidence_sources": [
+                "Certificates of analysis/conformity",
+                "serial records"
+              ],
+              "frequency": "MONTHLY_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            }
+          ]
+        },
+        {
+          "category_id": "DL",
+          "name": "Availability, delivery and fulfilment",
+          "weight_percent": 20,
+          "questions": [
+            {
+              "question_id": "MAT-DL-01",
+              "question": "Are deliveries made on the agreed delivery date?",
+              "accountability": "SUPPLIER",
+              "weight_percent": 6,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "SLA",
+              "measurement": "Supplier-attributable delivery lines delivered within agreed window / supplier-attributable delivery lines due × 100; approved organization-caused exceptions separately logged.",
+              "evidence_sources": [
+                "ERP purchase order schedule",
+                "delivery notes"
+              ],
+              "frequency": "MONTHLY_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            },
+            {
+              "question_id": "MAT-DL-02",
+              "question": "Are orders delivered in full by the agreed date?",
+              "accountability": "SUPPLIER",
+              "weight_percent": 4,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "PASS",
+              "measurement": "Supplier-attributable order lines fulfilled in full by due date / supplier-attributable order lines due × 100.",
+              "evidence_sources": [
+                "ERP receipt and order records"
+              ],
+              "frequency": "MONTHLY_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            },
+            {
+              "question_id": "MAT-DL-03",
+              "question": "Are delivery documents and packaging complete and correct at receipt?",
+              "accountability": "SUPPLIER",
+              "weight_percent": 3,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "PASS",
+              "measurement": "First-pass compliant delivery documentation and packaging checks / checks performed × 100.",
+              "evidence_sources": [
+                "Delivery notes",
+                "receiving checklist"
+              ],
+              "frequency": "MONTHLY_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            },
+            {
+              "question_id": "MAT-DL-04",
+              "question": "Are urgent order commitments and stock availability confirmations fulfilled on time?",
+              "accountability": "SUPPLIER",
+              "weight_percent": 2,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "SLA",
+              "measurement": "Agreed urgent order and availability commitments met / commitments due × 100.",
+              "evidence_sources": [
+                "Expediting log",
+                "order confirmations"
+              ],
+              "frequency": "MONTHLY_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            },
+            {
+              "question_id": "MAT-DL-05",
+              "question": "Are receipt appointments, unloading resources and goods receipt posting provided on time?",
+              "accountability": "ORGANIZATION",
+              "weight_percent": 3,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "SLA",
+              "measurement": "Organization receiving commitments fulfilled on time / commitments due × 100.",
+              "evidence_sources": [
+                "Warehouse appointment log",
+                "ERP posting timestamps"
+              ],
+              "frequency": "MONTHLY_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            },
+            {
+              "question_id": "MAT-DL-06",
+              "question": "Are delivery exceptions and recovery plans jointly agreed within the required time?",
+              "accountability": "BOTH",
+              "weight_percent": 2,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "SLA",
+              "measurement": "Joint delivery exception plans agreed by deadline / plans due × 100.",
+              "evidence_sources": [
+                "Expediting and exception register"
+              ],
+              "frequency": "MONTHLY_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            }
+          ]
+        },
+        {
+          "category_id": "CM",
+          "name": "Commercial accuracy and payment performance",
+          "weight_percent": 12,
+          "questions": [
+            {
+              "question_id": "MAT-CM-01",
+              "question": "Are supplier invoices and credit notes accurate on first submission?",
+              "accountability": "SUPPLIER",
+              "weight_percent": 3,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "PASS",
+              "measurement": "First-pass correct invoices and credit notes / documents submitted × 100.",
+              "evidence_sources": [
+                "Accounts payable discrepancy log",
+                "invoices"
+              ],
+              "frequency": "MONTHLY_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            },
+            {
+              "question_id": "MAT-CM-02",
+              "question": "Are undisputed supplier invoices paid within agreed terms?",
+              "accountability": "ORGANIZATION",
+              "weight_percent": 3,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "SLA",
+              "measurement": "Undisputed invoices paid by contractual due date / undisputed invoices due × 100.",
+              "evidence_sources": [
+                "ERP accounts payable ledger"
+              ],
+              "frequency": "MONTHLY_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            },
+            {
+              "question_id": "MAT-CM-03",
+              "question": "Are quotations and price-change notifications provided within agreed response times?",
+              "accountability": "SUPPLIER",
+              "weight_percent": 2,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "SLA",
+              "measurement": "Complete quotations and required notices submitted on time / submissions due × 100.",
+              "evidence_sources": [
+                "RFQ log",
+                "price notice register"
+              ],
+              "frequency": "MONTHLY_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            },
+            {
+              "question_id": "MAT-CM-04",
+              "question": "Are price discrepancies and invoice queries resolved within the organization's agreed turnaround?",
+              "accountability": "ORGANIZATION",
+              "weight_percent": 2,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "SLA",
+              "measurement": "Organization-owned commercial queries resolved by SLA / queries due × 100.",
+              "evidence_sources": [
+                "Invoice query log",
+                "approval workflow"
+              ],
+              "frequency": "MONTHLY_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            },
+            {
+              "question_id": "MAT-CM-05",
+              "question": "Are actual charges, authorized price changes and reconciliation records consistent with approved commitments?",
+              "accountability": "BOTH",
+              "weight_percent": 2,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "PASS",
+              "measurement": "Jointly reconciled commercial transactions without unresolved deviations / transactions reviewed × 100.",
+              "evidence_sources": [
+                "Purchase orders",
+                "price agreements",
+                "reconciliation log"
+              ],
+              "frequency": "MONTHLY_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            }
+          ]
+        },
+        {
+          "category_id": "PL",
+          "name": "Demand planning, ordering and specification readiness",
+          "weight_percent": 10,
+          "questions": [
+            {
+              "question_id": "MAT-PL-01",
+              "question": "Are forecasts, unusual demand and special events communicated with agreed notice?",
+              "accountability": "ORGANIZATION",
+              "weight_percent": 3,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "SLA",
+              "measurement": "Organization forecast and exceptional demand notices issued on time / notices due × 100.",
+              "evidence_sources": [
+                "Demand plan",
+                "special-event notices"
+              ],
+              "frequency": "MONTHLY_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            },
+            {
+              "question_id": "MAT-PL-02",
+              "question": "Are purchase orders complete with correct item, specification, quantity and delivery information?",
+              "accountability": "ORGANIZATION",
+              "weight_percent": 3,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "PASS",
+              "measurement": "First-pass correct purchase order lines / order lines issued × 100.",
+              "evidence_sources": [
+                "ERP purchase orders",
+                "amendment records"
+              ],
+              "frequency": "MONTHLY_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            },
+            {
+              "question_id": "MAT-PL-03",
+              "question": "Are orders acknowledged with realistic lead times within SLA?",
+              "accountability": "SUPPLIER",
+              "weight_percent": 2,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "SLA",
+              "measurement": "Complete order acknowledgements issued by SLA / acknowledgements due × 100.",
+              "evidence_sources": [
+                "Order confirmation records"
+              ],
+              "frequency": "MONTHLY_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            },
+            {
+              "question_id": "MAT-PL-04",
+              "question": "Are replenishment parameters, lead times and stock commitments jointly reviewed as agreed?",
+              "accountability": "BOTH",
+              "weight_percent": 2,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "PASS",
+              "measurement": "Joint planning checkpoints completed / checkpoints due × 100.",
+              "evidence_sources": [
+                "Inventory review minutes",
+                "replenishment parameters"
+              ],
+              "frequency": "MONTHLY_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            }
+          ]
+        },
+        {
+          "category_id": "HS",
+          "name": "Safety, regulatory and ethical compliance",
+          "weight_percent": 9,
+          "questions": [
+            {
+              "question_id": "MAT-HS-01",
+              "question": "Are mandatory material safety data, regulatory approvals and certificates valid and supplied?",
+              "accountability": "SUPPLIER",
+              "weight_percent": 3,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "CRITICAL",
+              "measurement": "Compliant mandatory documents / required documents × 100.",
+              "evidence_sources": [
+                "Safety data sheets",
+                "regulatory certificates"
+              ],
+              "frequency": "EACH_RELEVANT_EVENT_AND_AT_REVIEW",
+              "critical_control": true,
+              "target_rating": 5,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            },
+            {
+              "question_id": "MAT-HS-02",
+              "question": "Are hazardous goods handling, labelling and transport controls compliant where applicable?",
+              "accountability": "SUPPLIER",
+              "weight_percent": 2,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "CRITICAL",
+              "measurement": "Compliant mandatory hazard control checks / required checks × 100.",
+              "evidence_sources": [
+                "Transport audits",
+                "receiving inspection"
+              ],
+              "frequency": "EACH_RELEVANT_EVENT_AND_AT_REVIEW",
+              "critical_control": true,
+              "target_rating": 5,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            },
+            {
+              "question_id": "MAT-HS-03",
+              "question": "Does the organization provide required safe receiving, storage and handling controls?",
+              "accountability": "ORGANIZATION",
+              "weight_percent": 2,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "CRITICAL",
+              "measurement": "Compliant organization mandatory control checks / required checks × 100.",
+              "evidence_sources": [
+                "Warehouse safety audit",
+                "storage inspection"
+              ],
+              "frequency": "EACH_RELEVANT_EVENT_AND_AT_REVIEW",
+              "critical_control": true,
+              "target_rating": 5,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            },
+            {
+              "question_id": "MAT-HS-04",
+              "question": "Are suspected counterfeit, unsafe or prohibited goods contained and escalated as required?",
+              "accountability": "BOTH",
+              "weight_percent": 2,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "CRITICAL",
+              "measurement": "Compliant mandatory containment and escalation obligations / obligations triggered × 100.",
+              "evidence_sources": [
+                "Quarantine records",
+                "incident log"
+              ],
+              "frequency": "EACH_RELEVANT_EVENT_AND_AT_REVIEW",
+              "critical_control": true,
+              "target_rating": 5,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            }
+          ]
+        },
+        {
+          "category_id": "GV",
+          "name": "Communication, governance and relationship",
+          "weight_percent": 7,
+          "questions": [
+            {
+              "question_id": "MAT-GV-01",
+              "question": "Are supply constraints and expected delivery deviations communicated proactively?",
+              "accountability": "SUPPLIER",
+              "weight_percent": 2,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "SLA",
+              "measurement": "Required supplier exception notices issued within agreed lead time / notices required × 100.",
+              "evidence_sources": [
+                "Supplier alerts",
+                "exception log"
+              ],
+              "frequency": "MONTHLY_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            },
+            {
+              "question_id": "MAT-GV-02",
+              "question": "Does the organization provide timely feedback and decisions on supplier queries?",
+              "accountability": "ORGANIZATION",
+              "weight_percent": 2,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "SLA",
+              "measurement": "Organization responses within SLA / responses due × 100.",
+              "evidence_sources": [
+                "Query register",
+                "communication records"
+              ],
+              "frequency": "MONTHLY_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            },
+            {
+              "question_id": "MAT-GV-03",
+              "question": "Are joint reviews conducted and action commitments completed on time?",
+              "accountability": "BOTH",
+              "weight_percent": 2,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "SLA",
+              "measurement": "Joint governance commitments met on time / commitments due × 100.",
+              "evidence_sources": [
+                "SRM minutes",
+                "action tracker"
+              ],
+              "frequency": "MONTHLY_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            },
+            {
+              "question_id": "MAT-GV-04",
+              "question": "Do both parties demonstrate transparency and constructive problem resolution?",
+              "accountability": "BOTH",
+              "weight_percent": 1,
+              "measurement_type": "QUALITATIVE",
+              "rating_rubric_id": "QUAL",
+              "measurement": "Assess evidenced communication, escalation and collaboration practices.",
+              "evidence_sources": [
+                "Joint review feedback",
+                "issue records"
+              ],
+              "frequency": "AT_EACH_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            }
+          ]
+        },
+        {
+          "category_id": "CP",
+          "name": "Technical support and organizational capability",
+          "weight_percent": 5,
+          "questions": [
+            {
+              "question_id": "MAT-CP-01",
+              "question": "Are technical enquiries and application-support requests answered within SLA?",
+              "accountability": "SUPPLIER",
+              "weight_percent": 2,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "SLA",
+              "measurement": "Supplier technical responses completed on time / responses due × 100.",
+              "evidence_sources": [
+                "Technical support log",
+                "RFQ correspondence"
+              ],
+              "frequency": "MONTHLY_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            },
+            {
+              "question_id": "MAT-CP-02",
+              "question": "Does the supplier demonstrate sufficient product and technical expertise?",
+              "accountability": "SUPPLIER",
+              "weight_percent": 1,
+              "measurement_type": "QUALITATIVE",
+              "rating_rubric_id": "QUAL",
+              "measurement": "Assess verified expertise, responsiveness and advice quality.",
+              "evidence_sources": [
+                "Technical team feedback",
+                "competency evidence"
+              ],
+              "frequency": "AT_EACH_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            },
+            {
+              "question_id": "MAT-CP-03",
+              "question": "Does the organization provide competent material specification and purchasing support?",
+              "accountability": "ORGANIZATION",
+              "weight_percent": 1,
+              "measurement_type": "QUALITATIVE",
+              "rating_rubric_id": "QUAL",
+              "measurement": "Assess accuracy, technical expertise and ownership of decisions.",
+              "evidence_sources": [
+                "Supplier feedback",
+                "internal review records"
+              ],
+              "frequency": "AT_EACH_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            },
+            {
+              "question_id": "MAT-CP-04",
+              "question": "Are manufacturer or authorized distribution credentials current where required?",
+              "accountability": "SUPPLIER",
+              "weight_percent": 1,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "PASS",
+              "measurement": "Valid credentials / applicable credentials required × 100.",
+              "evidence_sources": [
+                "Authorization letters",
+                "supplier qualification records"
+              ],
+              "frequency": "MONTHLY_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            }
+          ]
+        },
+        {
+          "category_id": "RK",
+          "name": "Supply continuity, risk and resilience",
+          "weight_percent": 7,
+          "questions": [
+            {
+              "question_id": "MAT-RK-01",
+              "question": "Are supply disruption, obsolescence and end-of-life notices issued within agreed notice periods?",
+              "accountability": "SUPPLIER",
+              "weight_percent": 2,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "SLA",
+              "measurement": "Required risk notices issued on time / notices required × 100.",
+              "evidence_sources": [
+                "Obsolescence notices",
+                "risk register"
+              ],
+              "frequency": "MONTHLY_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            },
+            {
+              "question_id": "MAT-RK-02",
+              "question": "Are agreed buffer stock and continuity commitments maintained?",
+              "accountability": "SUPPLIER",
+              "weight_percent": 2,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "PASS",
+              "measurement": "Compliant buffer/continuity checkpoints / checkpoints due × 100.",
+              "evidence_sources": [
+                "Stock reports",
+                "continuity plan"
+              ],
+              "frequency": "MONTHLY_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            },
+            {
+              "question_id": "MAT-RK-03",
+              "question": "Are internal supply risks and alternative-source decisions addressed on time?",
+              "accountability": "ORGANIZATION",
+              "weight_percent": 1,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "SLA",
+              "measurement": "Organization risk actions completed by due date / actions due × 100.",
+              "evidence_sources": [
+                "Risk register",
+                "sourcing approvals"
+              ],
+              "frequency": "MONTHLY_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            },
+            {
+              "question_id": "MAT-RK-04",
+              "question": "Are critical material alternatives and continuity arrangements jointly verified?",
+              "accountability": "BOTH",
+              "weight_percent": 2,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "PASS",
+              "measurement": "Joint continuity verification checkpoints completed / checkpoints due × 100.",
+              "evidence_sources": [
+                "Approved alternatives",
+                "contingency review"
+              ],
+              "frequency": "MONTHLY_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            }
+          ]
+        },
+        {
+          "category_id": "IN",
+          "name": "Innovation, cost improvement and sustainability",
+          "weight_percent": 5,
+          "questions": [
+            {
+              "question_id": "MAT-IN-01",
+              "question": "Are agreed material optimization and cost-reduction proposals submitted by deadline?",
+              "accountability": "SUPPLIER",
+              "weight_percent": 2,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "SLA",
+              "measurement": "Agreed supplier improvement proposals submitted on time / proposals due × 100.",
+              "evidence_sources": [
+                "Improvement register",
+                "technical proposals"
+              ],
+              "frequency": "MONTHLY_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            },
+            {
+              "question_id": "MAT-IN-02",
+              "question": "Are proposed alternatives and savings opportunities evaluated by the organization on time?",
+              "accountability": "ORGANIZATION",
+              "weight_percent": 1,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "SLA",
+              "measurement": "Organization proposal decisions issued on time / decisions due × 100.",
+              "evidence_sources": [
+                "Trial requests",
+                "decision register"
+              ],
+              "frequency": "MONTHLY_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            },
+            {
+              "question_id": "MAT-IN-03",
+              "question": "Are agreed sustainability or total-cost-of-ownership improvements verified?",
+              "accountability": "BOTH",
+              "weight_percent": 2,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "PASS",
+              "measurement": "Joint benefit and sustainability milestones verified / milestones due × 100.",
+              "evidence_sources": [
+                "Savings validation",
+                "waste and packaging reports"
+              ],
+              "frequency": "MONTHLY_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            }
+          ]
+        },
+        {
+          "category_id": "CL",
+          "name": "Returns, warranty and after-sales support",
+          "weight_percent": 3,
+          "questions": [
+            {
+              "question_id": "MAT-CL-01",
+              "question": "Are warranty claims, returns and replacement commitments resolved within SLA?",
+              "accountability": "SUPPLIER",
+              "weight_percent": 1,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "SLA",
+              "measurement": "Supplier return/warranty obligations met on time / obligations due × 100.",
+              "evidence_sources": [
+                "Return authorization",
+                "warranty claims"
+              ],
+              "frequency": "MONTHLY_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            },
+            {
+              "question_id": "MAT-CL-02",
+              "question": "Are defective items and supporting claim evidence made available promptly?",
+              "accountability": "ORGANIZATION",
+              "weight_percent": 1,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "SLA",
+              "measurement": "Organization return/claim readiness commitments met / commitments due × 100.",
+              "evidence_sources": [
+                "Quarantine log",
+                "claim submission records"
+              ],
+              "frequency": "MONTHLY_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            },
+            {
+              "question_id": "MAT-CL-03",
+              "question": "Are credits, replacements and final disposition jointly reconciled on time?",
+              "accountability": "BOTH",
+              "weight_percent": 1,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "SLA",
+              "measurement": "Joint return reconciliation actions closed on time / actions due × 100.",
+              "evidence_sources": [
+                "Credit notes",
+                "return reconciliation records"
+              ],
+              "frequency": "MONTHLY_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            }
+          ]
+        }
+      ],
+      "validation_summary": {
+        "profile_id": "MAT",
+        "category_count": 10,
+        "question_count": 44,
+        "total_category_weight_percent": 100,
+        "total_question_weight_percent": 100,
+        "accountability_weight_percent": {
+          "SUPPLIER": 58,
+          "ORGANIZATION": 24,
+          "BOTH": 18
+        },
+        "quantitative_weight_percent": 97,
+        "qualitative_weight_percent": 3
+      }
+    },
+    {
+      "profile_id": "SVC",
+      "name": "Services and maintenance contracts",
+      "scope": "Technical services, repairs, maintenance, inspections, contractors, professional services and recurring outsourced services.",
+      "default_review_frequency": "QUARTERLY_WITH_MONTHLY_SLA_TRACKING",
+      "categories": [
+        {
+          "category_id": "QT",
+          "name": "Service quality, technical performance and effectiveness",
+          "weight_percent": 20,
+          "questions": [
+            {
+              "question_id": "SVC-QT-01",
+              "question": "Are service deliverables accepted at first submission against agreed technical criteria?",
+              "accountability": "SUPPLIER",
+              "weight_percent": 5,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "PASS",
+              "measurement": "First-pass accepted deliverables or work orders / deliverables or work orders reviewed × 100; fix counting basis.",
+              "evidence_sources": [
+                "Service reports",
+                "work order acceptance"
+              ],
+              "frequency": "MONTHLY_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            },
+            {
+              "question_id": "SVC-QT-02",
+              "question": "Are repairs or maintenance tasks effective without repeat work attributable to service quality?",
+              "accountability": "SUPPLIER",
+              "weight_percent": 4,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "PASS",
+              "measurement": "Eligible completed tasks without attributable repeat work in agreed observation window / eligible completed tasks × 100.",
+              "evidence_sources": [
+                "CMMS history",
+                "repeat failure records"
+              ],
+              "frequency": "MONTHLY_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            },
+            {
+              "question_id": "SVC-QT-03",
+              "question": "Are service nonconformances responded to and corrective actions completed on time?",
+              "accountability": "SUPPLIER",
+              "weight_percent": 3,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "SLA",
+              "measurement": "Supplier NCR response and corrective action obligations met by SLA / obligations due × 100.",
+              "evidence_sources": [
+                "NCR and CAPA register"
+              ],
+              "frequency": "MONTHLY_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            },
+            {
+              "question_id": "SVC-QT-04",
+              "question": "Are service reports, measurements and mandatory test results accurate and complete?",
+              "accountability": "SUPPLIER",
+              "weight_percent": 3,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "PASS",
+              "measurement": "First-pass compliant service documentation / reports submitted × 100.",
+              "evidence_sources": [
+                "Service reports",
+                "test certificates"
+              ],
+              "frequency": "MONTHLY_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            },
+            {
+              "question_id": "SVC-QT-05",
+              "question": "Does the organization verify and accept or reject completed services within agreed time?",
+              "accountability": "ORGANIZATION",
+              "weight_percent": 2,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "SLA",
+              "measurement": "Organization acceptance decisions completed by SLA / decisions due × 100.",
+              "evidence_sources": [
+                "Work order closure records",
+                "acceptance log"
+              ],
+              "frequency": "MONTHLY_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            },
+            {
+              "question_id": "SVC-QT-06",
+              "question": "Are agreed post-service functional tests and return-to-operation criteria jointly verified?",
+              "accountability": "BOTH",
+              "weight_percent": 3,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "PASS",
+              "measurement": "Joint verification checkpoints completed / checkpoints due × 100.",
+              "evidence_sources": [
+                "Functional tests",
+                "signed return-to-service records"
+              ],
+              "frequency": "MONTHLY_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            }
+          ]
+        },
+        {
+          "category_id": "DL",
+          "name": "Responsiveness, availability and service delivery",
+          "weight_percent": 18,
+          "questions": [
+            {
+              "question_id": "SVC-DL-01",
+              "question": "Are support requests acknowledged within their priority-specific SLA?",
+              "accountability": "SUPPLIER",
+              "weight_percent": 4,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "SLA",
+              "measurement": "Requests acknowledged within applicable SLA / requests due × 100.",
+              "evidence_sources": [
+                "Helpdesk tickets",
+                "service log"
+              ],
+              "frequency": "MONTHLY_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            },
+            {
+              "question_id": "SVC-DL-02",
+              "question": "Are agreed attendance or mobilization commitments met?",
+              "accountability": "SUPPLIER",
+              "weight_percent": 4,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "SLA",
+              "measurement": "Service attendance commitments met on time / commitments due × 100.",
+              "evidence_sources": [
+                "Dispatch records",
+                "site access log"
+              ],
+              "frequency": "MONTHLY_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            },
+            {
+              "question_id": "SVC-DL-03",
+              "question": "Are services restored or deliverables completed within agreed time, excluding approved organization-caused delays?",
+              "accountability": "SUPPLIER",
+              "weight_percent": 4,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "SLA",
+              "measurement": "Supplier-controlled resolution obligations met by SLA / obligations due × 100.",
+              "evidence_sources": [
+                "Ticket and work order timestamps",
+                "exception log"
+              ],
+              "frequency": "MONTHLY_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            },
+            {
+              "question_id": "SVC-DL-04",
+              "question": "Are equipment, access and site resources made available at the agreed service time?",
+              "accountability": "ORGANIZATION",
+              "weight_percent": 2,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "SLA",
+              "measurement": "Organization readiness commitments met by due date / commitments due × 100.",
+              "evidence_sources": [
+                "Maintenance plan",
+                "access log"
+              ],
+              "frequency": "MONTHLY_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            },
+            {
+              "question_id": "SVC-DL-05",
+              "question": "Are critical escalation and recovery plans jointly activated on time?",
+              "accountability": "BOTH",
+              "weight_percent": 2,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "SLA",
+              "measurement": "Joint escalation and recovery commitments fulfilled on time / commitments due × 100.",
+              "evidence_sources": [
+                "Escalation log",
+                "recovery plan"
+              ],
+              "frequency": "MONTHLY_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            },
+            {
+              "question_id": "SVC-DL-06",
+              "question": "Are planned preventive or recurring service visits completed as scheduled?",
+              "accountability": "SUPPLIER",
+              "weight_percent": 2,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "SLA",
+              "measurement": "Scheduled supplier visits completed within agreed window / visits due × 100.",
+              "evidence_sources": [
+                "Service calendar",
+                "CMMS records"
+              ],
+              "frequency": "MONTHLY_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            }
+          ]
+        },
+        {
+          "category_id": "HS",
+          "name": "Safety, environmental and statutory compliance",
+          "weight_percent": 15,
+          "questions": [
+            {
+              "question_id": "SVC-HS-01",
+              "question": "Do service personnel comply with required permits, lockout/tagout, PPE and critical risk controls?",
+              "accountability": "SUPPLIER",
+              "weight_percent": 4,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "CRITICAL",
+              "measurement": "Compliant mandatory supplier control checks / required checks × 100.",
+              "evidence_sources": [
+                "Permit records",
+                "task audits",
+                "isolation checks"
+              ],
+              "frequency": "EACH_RELEVANT_EVENT_AND_AT_REVIEW",
+              "critical_control": true,
+              "target_rating": 5,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            },
+            {
+              "question_id": "SVC-HS-02",
+              "question": "Does the organization establish safe work conditions, hazard communication and required site-controlled permits?",
+              "accountability": "ORGANIZATION",
+              "weight_percent": 3,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "CRITICAL",
+              "measurement": "Compliant organization critical control checks / required checks × 100.",
+              "evidence_sources": [
+                "Site safety and permit records",
+                "hazard briefings"
+              ],
+              "frequency": "EACH_RELEVANT_EVENT_AND_AT_REVIEW",
+              "critical_control": true,
+              "target_rating": 5,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            },
+            {
+              "question_id": "SVC-HS-03",
+              "question": "Are required trade qualifications, statutory licenses and equipment inspection certificates valid?",
+              "accountability": "SUPPLIER",
+              "weight_percent": 3,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "CRITICAL",
+              "measurement": "Valid mandatory certificates / required certificates × 100.",
+              "evidence_sources": [
+                "Competency and certification register"
+              ],
+              "frequency": "EACH_RELEVANT_EVENT_AND_AT_REVIEW",
+              "critical_control": true,
+              "target_rating": 5,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            },
+            {
+              "question_id": "SVC-HS-04",
+              "question": "Are service incidents and serious near misses reported, contained and escalated as required?",
+              "accountability": "BOTH",
+              "weight_percent": 3,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "CRITICAL",
+              "measurement": "Compliant mandatory reporting and containment obligations / obligations triggered × 100.",
+              "evidence_sources": [
+                "Incident records",
+                "statutory notifications"
+              ],
+              "frequency": "EACH_RELEVANT_EVENT_AND_AT_REVIEW",
+              "critical_control": true,
+              "target_rating": 5,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            },
+            {
+              "question_id": "SVC-HS-05",
+              "question": "Are required environmental controls and lawful waste disposal practices observed?",
+              "accountability": "SUPPLIER",
+              "weight_percent": 2,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "CRITICAL",
+              "measurement": "Compliant mandatory environmental checks / required checks × 100.",
+              "evidence_sources": [
+                "Waste manifests",
+                "environmental audits"
+              ],
+              "frequency": "EACH_RELEVANT_EVENT_AND_AT_REVIEW",
+              "critical_control": true,
+              "target_rating": 5,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            }
+          ]
+        },
+        {
+          "category_id": "CM",
+          "name": "Commercial performance, invoicing and payment",
+          "weight_percent": 12,
+          "questions": [
+            {
+              "question_id": "SVC-CM-01",
+              "question": "Are invoices, timesheets, travel and service charges accurate and supported by authorized work?",
+              "accountability": "SUPPLIER",
+              "weight_percent": 3,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "PASS",
+              "measurement": "First-pass correct invoices / invoices submitted × 100.",
+              "evidence_sources": [
+                "Service orders",
+                "signed timesheets",
+                "invoice records"
+              ],
+              "frequency": "MONTHLY_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            },
+            {
+              "question_id": "SVC-CM-02",
+              "question": "Are undisputed service invoices paid within agreed terms?",
+              "accountability": "ORGANIZATION",
+              "weight_percent": 3,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "SLA",
+              "measurement": "Undisputed invoices paid on time / undisputed invoices due × 100.",
+              "evidence_sources": [
+                "ERP payment ledger"
+              ],
+              "frequency": "MONTHLY_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            },
+            {
+              "question_id": "SVC-CM-03",
+              "question": "Are estimates, callout quotations and extra-work notices provided within agreed response times?",
+              "accountability": "SUPPLIER",
+              "weight_percent": 2,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "SLA",
+              "measurement": "Complete supplier commercial submissions issued by deadline / submissions due × 100.",
+              "evidence_sources": [
+                "Quotation and variation log"
+              ],
+              "frequency": "MONTHLY_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            },
+            {
+              "question_id": "SVC-CM-04",
+              "question": "Are service order approvals and commercial clarifications provided on time?",
+              "accountability": "ORGANIZATION",
+              "weight_percent": 2,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "SLA",
+              "measurement": "Organization commercial approvals and clarifications issued by deadline / decisions due × 100.",
+              "evidence_sources": [
+                "Purchase order workflow",
+                "query register"
+              ],
+              "frequency": "MONTHLY_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            },
+            {
+              "question_id": "SVC-CM-05",
+              "question": "Is additional chargeable work authorized before execution, except under documented emergency authority?",
+              "accountability": "BOTH",
+              "weight_percent": 2,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "CRITICAL",
+              "measurement": "Approved or valid emergency-authorized extra-work instances / extra-work instances executed × 100.",
+              "evidence_sources": [
+                "Variation approvals",
+                "service reports"
+              ],
+              "frequency": "EACH_RELEVANT_EVENT_AND_AT_REVIEW",
+              "critical_control": true,
+              "target_rating": 5,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            }
+          ]
+        },
+        {
+          "category_id": "PL",
+          "name": "Scope, work preparation and demand planning",
+          "weight_percent": 9,
+          "questions": [
+            {
+              "question_id": "SVC-PL-01",
+              "question": "Are service requests complete with asset details, symptoms, scope and site constraints?",
+              "accountability": "ORGANIZATION",
+              "weight_percent": 3,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "PASS",
+              "measurement": "First-pass complete organization service requests / requests raised × 100.",
+              "evidence_sources": [
+                "CMMS requests",
+                "scope of work"
+              ],
+              "frequency": "MONTHLY_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            },
+            {
+              "question_id": "SVC-PL-02",
+              "question": "Are proposed methods, manpower, tools and spares requirements complete before mobilization?",
+              "accountability": "SUPPLIER",
+              "weight_percent": 2,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "PASS",
+              "measurement": "First-pass accepted service preparation packs / packs due × 100.",
+              "evidence_sources": [
+                "Method statements",
+                "resource plans"
+              ],
+              "frequency": "MONTHLY_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            },
+            {
+              "question_id": "SVC-PL-03",
+              "question": "Are planned service demand and shutdown requirements communicated with agreed notice?",
+              "accountability": "ORGANIZATION",
+              "weight_percent": 2,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "SLA",
+              "measurement": "Organization service notices issued within agreed lead time / notices due × 100.",
+              "evidence_sources": [
+                "Maintenance schedule",
+                "shutdown calendar"
+              ],
+              "frequency": "MONTHLY_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            },
+            {
+              "question_id": "SVC-PL-04",
+              "question": "Are responsibilities, exclusions, readiness criteria and work boundaries jointly confirmed?",
+              "accountability": "BOTH",
+              "weight_percent": 2,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "PASS",
+              "measurement": "Joint service readiness checkpoints verified / checkpoints due × 100.",
+              "evidence_sources": [
+                "Pre-job meeting",
+                "scope and responsibility matrix"
+              ],
+              "frequency": "MONTHLY_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            }
+          ]
+        },
+        {
+          "category_id": "GV",
+          "name": "Communication, governance and relationship",
+          "weight_percent": 7,
+          "questions": [
+            {
+              "question_id": "SVC-GV-01",
+              "question": "Are service progress, delays and unresolved technical risks communicated within agreed windows?",
+              "accountability": "SUPPLIER",
+              "weight_percent": 2,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "SLA",
+              "measurement": "Required supplier status and exception updates issued on time / updates due × 100.",
+              "evidence_sources": [
+                "Ticket updates",
+                "progress reports"
+              ],
+              "frequency": "MONTHLY_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            },
+            {
+              "question_id": "SVC-GV-02",
+              "question": "Are organization technical decisions and escalation responses issued within agreed time?",
+              "accountability": "ORGANIZATION",
+              "weight_percent": 2,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "SLA",
+              "measurement": "Organization decisions issued on time / decisions due × 100.",
+              "evidence_sources": [
+                "Decision log",
+                "escalation records"
+              ],
+              "frequency": "MONTHLY_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            },
+            {
+              "question_id": "SVC-GV-03",
+              "question": "Are joint review meetings held and improvement actions closed by deadline?",
+              "accountability": "BOTH",
+              "weight_percent": 2,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "SLA",
+              "measurement": "Joint governance commitments met on time / commitments due × 100.",
+              "evidence_sources": [
+                "SRM minutes",
+                "action tracker"
+              ],
+              "frequency": "MONTHLY_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            },
+            {
+              "question_id": "SVC-GV-04",
+              "question": "Do both parties collaborate constructively and handle disputes transparently?",
+              "accountability": "BOTH",
+              "weight_percent": 1,
+              "measurement_type": "QUALITATIVE",
+              "rating_rubric_id": "QUAL",
+              "measurement": "Assess evidenced collaboration, escalation and issue resolution.",
+              "evidence_sources": [
+                "Joint review feedback",
+                "dispute log"
+              ],
+              "frequency": "AT_EACH_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            }
+          ]
+        },
+        {
+          "category_id": "CP",
+          "name": "People, technical capability and resource management",
+          "weight_percent": 7,
+          "questions": [
+            {
+              "question_id": "SVC-CP-01",
+              "question": "Are assigned specialists competent for the specific asset or service technology?",
+              "accountability": "SUPPLIER",
+              "weight_percent": 2,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "PASS",
+              "measurement": "Competence-verified assignments / assignments checked × 100.",
+              "evidence_sources": [
+                "Training records",
+                "OEM authorizations",
+                "competency matrix"
+              ],
+              "frequency": "MONTHLY_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            },
+            {
+              "question_id": "SVC-CP-02",
+              "question": "Are required tools, calibrated instruments and approved subcontractor resources available and verified?",
+              "accountability": "SUPPLIER",
+              "weight_percent": 2,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "PASS",
+              "measurement": "Compliant resource-readiness checks / checks due × 100.",
+              "evidence_sources": [
+                "Tool register",
+                "calibration certificates",
+                "subcontractor records"
+              ],
+              "frequency": "MONTHLY_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            },
+            {
+              "question_id": "SVC-CP-03",
+              "question": "Are organization counterparts and technical information available when required?",
+              "accountability": "ORGANIZATION",
+              "weight_percent": 2,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "SLA",
+              "measurement": "Organization support commitments fulfilled on time / commitments due × 100.",
+              "evidence_sources": [
+                "Resource schedule",
+                "technical information log"
+              ],
+              "frequency": "MONTHLY_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            },
+            {
+              "question_id": "SVC-CP-04",
+              "question": "Does the supplier demonstrate diagnostic capability and effective technical supervision?",
+              "accountability": "SUPPLIER",
+              "weight_percent": 1,
+              "measurement_type": "QUALITATIVE",
+              "rating_rubric_id": "QUAL",
+              "measurement": "Assess evidence of diagnosis, escalation and supervision quality.",
+              "evidence_sources": [
+                "Technical reviews",
+                "root cause reports"
+              ],
+              "frequency": "AT_EACH_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            }
+          ]
+        },
+        {
+          "category_id": "RK",
+          "name": "Continuity, reliability and information protection",
+          "weight_percent": 5,
+          "questions": [
+            {
+              "question_id": "SVC-RK-01",
+              "question": "Are agreed backup personnel, remote-support or continuity arrangements maintained?",
+              "accountability": "SUPPLIER",
+              "weight_percent": 2,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "PASS",
+              "measurement": "Compliant supplier continuity checkpoints / checkpoints due × 100.",
+              "evidence_sources": [
+                "Business continuity plan",
+                "roster",
+                "support coverage records"
+              ],
+              "frequency": "MONTHLY_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            },
+            {
+              "question_id": "SVC-RK-02",
+              "question": "Are organization dependencies and operational risks resolved by due date?",
+              "accountability": "ORGANIZATION",
+              "weight_percent": 1,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "SLA",
+              "measurement": "Organization risk mitigation actions completed on time / actions due × 100.",
+              "evidence_sources": [
+                "Risk and dependency log"
+              ],
+              "frequency": "MONTHLY_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            },
+            {
+              "question_id": "SVC-RK-03",
+              "question": "Are applicable access, confidentiality and information-security controls observed during service?",
+              "accountability": "BOTH",
+              "weight_percent": 2,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "CRITICAL",
+              "measurement": "Compliant mandatory access/security checks / required checks × 100.",
+              "evidence_sources": [
+                "Access logs",
+                "remote connection approvals",
+                "data-handling audits"
+              ],
+              "frequency": "EACH_RELEVANT_EVENT_AND_AT_REVIEW",
+              "critical_control": true,
+              "target_rating": 5,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            }
+          ]
+        },
+        {
+          "category_id": "IN",
+          "name": "Continuous improvement, innovation and sustainability",
+          "weight_percent": 4,
+          "questions": [
+            {
+              "question_id": "SVC-IN-01",
+              "question": "Are agreed reliability, efficiency or service improvement proposals submitted on time?",
+              "accountability": "SUPPLIER",
+              "weight_percent": 1,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "SLA",
+              "measurement": "Supplier improvement proposals submitted by agreed date / proposals due × 100.",
+              "evidence_sources": [
+                "Improvement register",
+                "recommendations"
+              ],
+              "frequency": "MONTHLY_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            },
+            {
+              "question_id": "SVC-IN-02",
+              "question": "Does the organization evaluate proposed improvements and communicate decisions promptly?",
+              "accountability": "ORGANIZATION",
+              "weight_percent": 1,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "SLA",
+              "measurement": "Organization improvement decisions issued on time / decisions due × 100.",
+              "evidence_sources": [
+                "Decision log",
+                "improvement register"
+              ],
+              "frequency": "MONTHLY_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            },
+            {
+              "question_id": "SVC-IN-03",
+              "question": "Are agreed service improvement and sustainability benefits jointly validated?",
+              "accountability": "BOTH",
+              "weight_percent": 2,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "PASS",
+              "measurement": "Joint benefit milestones verified / milestones due × 100.",
+              "evidence_sources": [
+                "Reliability trends",
+                "energy or waste reports",
+                "benefits register"
+              ],
+              "frequency": "MONTHLY_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            }
+          ]
+        },
+        {
+          "category_id": "CL",
+          "name": "Closure, knowledge transfer and warranty",
+          "weight_percent": 3,
+          "questions": [
+            {
+              "question_id": "SVC-CL-01",
+              "question": "Are final reports, recommendations and required knowledge-transfer deliverables accepted?",
+              "accountability": "SUPPLIER",
+              "weight_percent": 1,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "PASS",
+              "measurement": "Accepted closure deliverables / deliverables due × 100.",
+              "evidence_sources": [
+                "Final service reports",
+                "training records"
+              ],
+              "frequency": "MONTHLY_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            },
+            {
+              "question_id": "SVC-CL-02",
+              "question": "Does the organization close completed work orders and provide warranty claim evidence on time?",
+              "accountability": "ORGANIZATION",
+              "weight_percent": 1,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "SLA",
+              "measurement": "Organization closeout and claim commitments met / commitments due × 100.",
+              "evidence_sources": [
+                "CMMS closure records",
+                "warranty claim log"
+              ],
+              "frequency": "MONTHLY_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            },
+            {
+              "question_id": "SVC-CL-03",
+              "question": "Are outstanding defects, warranty obligations and follow-up actions jointly tracked and reconciled?",
+              "accountability": "BOTH",
+              "weight_percent": 1,
+              "measurement_type": "QUANTITATIVE",
+              "rating_rubric_id": "SLA",
+              "measurement": "Joint closeout actions completed by due date / actions due × 100.",
+              "evidence_sources": [
+                "Punch list",
+                "warranty register",
+                "joint sign-off"
+              ],
+              "frequency": "MONTHLY_AND_AT_REVIEW",
+              "critical_control": false,
+              "target_rating": 4,
+              "rating_threshold_override": null,
+              "applicability_default": "APPLICABLE_IF_RELEVANT_TO_SCOPE_AND_ACTIVITY_DUE"
+            }
+          ]
+        }
+      ],
+      "validation_summary": {
+        "profile_id": "SVC",
+        "category_count": 10,
+        "question_count": 43,
+        "total_category_weight_percent": 100,
+        "total_question_weight_percent": 100,
+        "accountability_weight_percent": {
+          "SUPPLIER": 56,
+          "ORGANIZATION": 24,
+          "BOTH": 20
+        },
+        "quantitative_weight_percent": 98,
+        "qualitative_weight_percent": 2
+      }
+    }
+  ],
+  "review_record_template": {
+    "evaluation_id": null,
+    "template_version": "1.0.0",
+    "configuration_version": null,
+    "profile_id": null,
+    "organization_id": null,
+    "legal_entity_id": null,
+    "site_ids": [],
+    "supplier_id": null,
+    "supplier_name": null,
+    "vendor_code": null,
+    "supplier_contact": null,
+    "organization_contact": null,
+    "contract_po_project_references": [],
+    "commodity_or_service_scope": null,
+    "period_start": null,
+    "period_end": null,
+    "review_date": null,
+    "reviewed_by": [],
+    "status": "DRAFT",
+    "prior_review_scores": [
+      {
+        "period": null,
+        "score": null
+      },
+      {
+        "period": null,
+        "score": null
+      },
+      {
+        "period": null,
+        "score": null
+      }
+    ],
+    "question_responses": [],
+    "category_results": [],
+    "overall_score": null,
+    "provisional_points_earned": null,
+    "weighted_target_score": null,
+    "coverage_percent": null,
+    "applicable_original_weight_percent": null,
+    "excluded_original_weight_percent": null,
+    "accountability_subscores": {
+      "SUPPLIER": null,
+      "ORGANIZATION": null,
+      "BOTH": null
+    },
+    "critical_findings": [],
+    "performance_band": null,
+    "target_achieved": null,
+    "meeting_minutes": {
+      "date": null,
+      "venue": null,
+      "attendees": [],
+      "apologies": [],
+      "absent": [],
+      "discussion_points": [],
+      "decisions": []
+    },
+    "improvement_actions": [],
+    "signoffs": {
+      "supplier": {
+        "name": null,
+        "role": null,
+        "decision": null,
+        "date": null,
+        "comments": null
+      },
+      "organization": {
+        "name": null,
+        "role": null,
+        "decision": null,
+        "date": null,
+        "comments": null
+      }
+    },
+    "audit_log": []
+  },
+  "question_response_template": {
+    "question_id": null,
+    "accountability": null,
+    "applicability": "APPLICABLE",
+    "applicability_rationale": null,
+    "applicability_approved_by": [],
+    "original_weight_percent": null,
+    "effective_weight_percent": null,
+    "numerator": null,
+    "denominator": null,
+    "measured_value": null,
+    "measurement_unit": null,
+    "evidence_references": [],
+    "organization_rating": null,
+    "supplier_rating": null,
+    "calculated_rating": null,
+    "agreed_rating": null,
+    "agreement_status": "PENDING",
+    "variance_explanation": null,
+    "weighted_score": null,
+    "critical_breach_detected": false,
+    "comments": null,
+    "action_ids": []
+  },
+  "action_template": {
+    "action_id": null,
+    "related_question_ids": [],
+    "finding": null,
+    "root_cause": null,
+    "action_description": null,
+    "action_accountability": "SUPPLIER_OR_ORGANIZATION_OR_BOTH",
+    "named_action_owner": null,
+    "supporting_owners": [],
+    "priority": "NORMAL",
+    "created_date": null,
+    "due_date": null,
+    "status": "OPEN",
+    "completion_date": null,
+    "completion_evidence": [],
+    "effectiveness_verification": null,
+    "verified_by": null,
+    "verified_date": null
+  },
+  "workflow": {
+    "states": [
+      "DRAFT",
+      "SUPPLIER_AND_ORGANIZATION_ASSESSMENT",
+      "RECONCILIATION",
+      "CRITICAL_REVIEW_IF_REQUIRED",
+      "JOINT_SIGN_OFF",
+      "FINALIZED",
+      "ACTION_FOLLOW_UP"
+    ],
+    "rules": [
+      "Collect independent organization and supplier assessments before reconciliation.",
+      "Resolve differences against objective evidence; unresolved disputes remain visible and block finalization.",
+      "Record agreed corrective and improvement actions with named owners and deadlines.",
+      "Obtain both parties sign-off; keep disagreements or refusals in the audit log.",
+      "Track actions to verified completion and compare subsequent review scores."
+    ]
+  },
+  "validation_summary": [
+    {
+      "profile_id": "PRJ",
+      "category_count": 10,
+      "question_count": 43,
+      "total_category_weight_percent": 100,
+      "total_question_weight_percent": 100,
+      "accountability_weight_percent": {
+        "SUPPLIER": 50,
+        "ORGANIZATION": 26,
+        "BOTH": 24
+      },
+      "quantitative_weight_percent": 97,
+      "qualitative_weight_percent": 3
+    },
+    {
+      "profile_id": "MAT",
+      "category_count": 10,
+      "question_count": 44,
+      "total_category_weight_percent": 100,
+      "total_question_weight_percent": 100,
+      "accountability_weight_percent": {
+        "SUPPLIER": 58,
+        "ORGANIZATION": 24,
+        "BOTH": 18
+      },
+      "quantitative_weight_percent": 97,
+      "qualitative_weight_percent": 3
+    },
+    {
+      "profile_id": "SVC",
+      "category_count": 10,
+      "question_count": 43,
+      "total_category_weight_percent": 100,
+      "total_question_weight_percent": 100,
+      "accountability_weight_percent": {
+        "SUPPLIER": 56,
+        "ORGANIZATION": 24,
+        "BOTH": 20
+      },
+      "quantitative_weight_percent": 98,
+      "qualitative_weight_percent": 2
+    }
+  ]
+}

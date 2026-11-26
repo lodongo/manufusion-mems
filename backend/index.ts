@@ -180,6 +180,7 @@ import { billingRoutes } from './billing';
 import { assetRoutes } from './assets';
 import {skillRoutes} from './skills';
 import { procurementRoutes } from './procurement';
+import { supplierRelationshipRoutes } from './supplierRelationshipTemplate';
 import { stockTakeRoutes } from './stockTake';
 import { criticalityRoutes } from './criticality';
 import { forecastingRoutes } from './forecasting';
@@ -1734,6 +1735,7 @@ export const handler = router(recordWiredRoutes({
     ...assetRoutes,
     ...skillRoutes,
     ...procurementRoutes,
+    ...supplierRelationshipRoutes,
     ...stockTakeRoutes,
     ...criticalityRoutes,
     ...forecastingRoutes,

@@ -1,5 +1,6 @@
 /** Independent Cloud Run / local HTTP entrypoint for MEMS. */
 import {ensureToolCatalogue} from '../maintenanceToolCatalogue';
+import {ensureSupplierRelationshipTemplate} from '../supplierRelationshipTemplate';
 import { createServer } from 'node:http';
 import { readFile, stat } from 'node:fs/promises';
 import { resolve, extname, sep } from 'node:path';
@@ -92,7 +93,12 @@ const server = createServer(async (req, res) => {
 server.requestTimeout = 90000;
 async function start(){
  if(process.env.MEMS_ENVIRONMENT==='development'){try{const c=await ensureToolCatalogue();console.log('Maintenance tool catalogue published: '+c.count+' entries, '+c.version);}catch(e){console.error('Maintenance tool catalogue import failed; retry from MEMS Admin.',e);}}
- server.listen(port, '0.0.0.0', () => console.log('Independent MEMS HTTP service listening on :' + port));
+ server.listen(port, '0.0.0.0', () => {
+  console.log('Independent MEMS HTTP service listening on :' + port);
+  if(process.env.MEMS_ENVIRONMENT==='development' && process.env.MEMS_FIREBASE_PROJECT_ID && process.env.MEMS_FIREBASE_PROJECT_ID!=='mems2026') {
+   void ensureSupplierRelationshipTemplate().then(s=>console.log('SRM template database verified: '+s.questionCount+' questions, '+s.version)).catch(e=>console.error('SRM template publication failed; retry from MEMS Admin.',e));
+  }
+ });
 }
 void start();
 

@@ -8,6 +8,7 @@ import { Badge, Button, Card, Empty, PageTitle, Spinner, SubTabs, TextArea, Togg
 import DefaultLists from './DefaultLists';
 import {MntTaskCatalogueAdmin} from '../org/MntTaskCatalogue';
 import {MntToolCatalogueAdmin} from '../org/MntToolCatalogue';
+import SupplierRelationshipAdmin from './SupplierRelationshipAdmin';
 import SafMetadataBrowser from './SafMetadataBrowser';
 import MfgContainerMetadataBrowser, {type MfgContainerMetadataRow} from './MfgContainerMetadataBrowser';
 import MfgPackagingMetadataBrowser, {type PackagingMetadataRow} from './MfgPackagingMetadataBrowser';
@@ -149,7 +150,7 @@ export default function ModulesPage({ code, tab, canWrite, isSuper = false }: { 
     );
 }
 
-type Tab = 'overview' | 'setup' | 'metadata' | 'files' | 'dictionary' | 'tools' | 'task_catalogue';
+type Tab = 'overview' | 'setup' | 'metadata' | 'files' | 'dictionary' | 'tools' | 'task_catalogue' | 'srm_template';
 
 function ModuleDetail({
     module,
@@ -173,7 +174,7 @@ function ModuleDetail({
     onSaved: (code?: string) => void;
 }) {
     const isNew = !module;
-    const active: Tab = isNew ? 'setup' : tab === 'setup' || tab === 'metadata' || tab === 'files' || (tab === 'dictionary' && module?.code === 'PRC') || ((tab === 'tools'||tab === 'task_catalogue') && module?.code === 'MNT') ? tab : 'overview';
+    const active: Tab = isNew ? 'setup' : tab === 'setup' || tab === 'metadata' || tab === 'files' || ((tab === 'dictionary' || tab === 'srm_template') && module?.code === 'PRC') || ((tab === 'tools'||tab === 'task_catalogue') && module?.code === 'MNT') ? tab : 'overview';
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState('');
 
@@ -222,7 +223,7 @@ function ModuleDetail({
                         { key: 'setup', label: 'Setup' },
                         { key: 'metadata', label: 'Metadata' },
                         ...(module.code === 'MNT' ? [{key:'tools' as Tab,label:'Tools & equipment'},{key:'task_catalogue' as Tab,label:'Tasks Catalogue'}] : []),
-                        ...(module.code === 'PRC' ? [{ key: 'dictionary' as Tab, label: 'Asset catalog' }] : []),
+                        ...(module.code === 'PRC' ? [{ key: 'dictionary' as Tab, label: 'Asset catalog' }, {key:'srm_template' as Tab,label:'Supplier relationship evaluation'}] : []),
                         { key: 'files', label: 'Files' },
                     ]}
                 />
@@ -233,6 +234,7 @@ function ModuleDetail({
             {(active === 'metadata' || active === 'files') && module && <Workspace module={module} view={active} canWrite={canWrite} isSuper={isSuper} />}
             {active === 'task_catalogue' && module?.code === 'MNT' && <MntTaskCatalogueAdmin canWrite={canWrite}/>}
             {active === 'tools' && module?.code === 'MNT' && <MntToolCatalogueAdmin canWrite={canWrite}/>}
+            {active === 'srm_template' && module?.code === 'PRC' && <SupplierRelationshipAdmin canWrite={canWrite}/>}
             {active === 'dictionary' && module?.code === 'PRC' && (module.initialized ? <AssetDictionaryAdmin canWrite={canWrite} isSuper={isSuper} /> : <Card tone='danger'><p className='text-sm text-slate-300'>Initialise PRC first.</p></Card>)}
         </div>
     );
