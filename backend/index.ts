@@ -152,6 +152,7 @@ import { glTransactionRoutes } from './glTransactionRoutes';
 import { finLedgerRoutes } from './finLedger';
 import { finOpsRoutes } from './finOps';
 import { vendorRoutes } from './vendors';
+import { purchaseAgreementRoutes } from './purchaseAgreements';
 import { orgHomeRoutes } from './orgHome';
 import { registrationRoutes } from './registration';
 import { applicationRoutes } from './applications';
@@ -1704,6 +1705,7 @@ export const handler = router(recordWiredRoutes({
     ...finLedgerRoutes,
     ...finOpsRoutes,
     ...vendorRoutes,
+    ...purchaseAgreementRoutes,
     ...orgHomeRoutes,
     ...extraRoutes,
     ...registrationRoutes,

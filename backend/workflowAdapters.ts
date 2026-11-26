@@ -97,6 +97,27 @@ const vendors: Adapter = {
     },
 };
 
+const agreements: Adapter = {
+    key: 'prc.agreement', module: 'Procurement', label: 'Purchase agreement',
+    collection: (org) => `${root(org)}/purchase_agreements`, statuses: ['pending_approval', 'returned'],
+    routes: /^org\.procurement\.agreements/,
+    link: 'procurement_agreements', linkLabel: 'Procurement › Purchase agreements',
+    ref: (id, d) => str(d.number) || id, title: (id, d) => `Purchase agreement ${str(d.number) || id}${str(d.vendorName) ? ` · ${str(d.vendorName)}` : ''}`,
+    by: lastBy,
+    async stage(env, id, d) {
+        const { approverCheck } = await import('./purchaseAgreements');
+        const { can } = await import('./procurementSetup');
+        const details = [{ label: 'Supplier', value: str(d.vendorName) }, { label: 'Period', value: `${str(d.startDate)} to ${str(d.endDate)}` }, { label: 'Value', value: Number(o(d.approval).amount) ? `${str(d.orgCurrency)} ${Number(o(d.approval).amount).toLocaleString('en-US', { maximumFractionDigits: 2 })}` : '' }];
+        if (str(d.status) === 'pending_approval') {
+            const step = pendingStep(o(d.approval).steps);
+            if (!step) return null;
+            return stage(`level|${str(step.level)}|${str(o(d.approval).startedAt)}`, `Approve level ${str(step.level)} (${str(step.positionTitle)})`, rule(env, (p) => can(p.ctx, 'PRC.agreements.approve') && approverCheck(p.ctx, d).ok), { details });
+        }
+        if (str(d.status) === 'returned') return stage(`returned|${short(str(d.returnReason))}|${str(o(d.approval).returnedAt)}`, 'Correct the returned purchase agreement and submit it again', only(env, str(d.ownerUid) || str(d.createdBy)), { details: [...details, { label: 'Reason', value: str(d.returnReason) }] });
+        return null;
+    },
+};
+
 // ----- Finance -----
 
 const apDoc = (key: string, coll: string, label: string, perm: string): Adapter => ({
@@ -387,7 +408,7 @@ const hrRules: Adapter = {
 };
 
 export const ADAPTERS: Adapter[] = [
-    requirements, orders, requisitions, vendors,
+    requirements, orders, requisitions, vendors, agreements,
     apDoc('fin.ap_invoice', 'ap_invoices', 'Supplier invoice', 'FIN.ap.approve'),
     apDoc('fin.ap_payment', 'ap_payments', 'Supplier payment', 'FIN.ap.payapprove'),
     apDoc('fin.receipt_adjustment', 'receipt_adjustments', 'Receipt adjustment', 'FIN.receipt.approve'),

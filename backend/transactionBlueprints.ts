@@ -140,7 +140,7 @@ const AREAS: Record<string, string> = {
     'VEV:Vendor performance and SRM:VW,CR,SB,AP,RP',
     'VON:Supplier onboarding requests:VW,ED',
     'CTR:Contracts and SLAs:VW,CR,ED,SB,AP,RR,TR',
-    'FWA:Framework agreements:VW,CR,SB,AP,CL',
+    'FWA:Framework and purchase agreements:VW,CR,ED,SN,SB,AP,RT,RJ,AV,OV,TR,CN,UP,DL,CL',
     'CAT:Material and service catalogue:VW,CR,ED,SB,AP,RJ,EX,DA',
     'BGR:Buyer groups:VW,CR,ED,AL',
     'AUT:Procurement authority:VW,ED,SB,AP',

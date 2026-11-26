@@ -364,6 +364,38 @@ async function executeForecastWeekly(mode: 'scheduled' | 'manual', deadline: num
     }
 }
 
+// ===== Purchase agreement dates =====
+// Daily: starts activated agreements whose start date has come and ends those past their end date, putting the
+// materials back on their own procurement parameters. Each change is in the agreement history and the audit trail.
+
+const PA_JOB_ID = 'prc.agreements-daily';
+const PA_STATE = 'system/purchase_agreements_state';
+export const agreementsDue = (lastCompletedAt: string, at: Date) => (lastCompletedAt || '').slice(0, 10) !== at.toISOString().slice(0, 10);
+
+async function executeAgreementDates(mode: 'scheduled' | 'manual', deadline: number) {
+    const startedAt = nowIso();
+    const t0 = Date.now();
+    const eventId = `${startedAt.replace(/[^0-9]/g, '')}_${randomId(4)}`;
+    const prior = (await getDoc(PA_STATE))?.data ?? {};
+    try {
+        const { settleAllOrganizations } = await import('./purchaseAgreements');
+        const r = await settleAllOrganizations(deadline);
+        const completedAt = nowIso();
+        await writeDoc(PA_STATE, { ...prior, lastStartedAt: startedAt, lastCompletedAt: completedAt, lastResult: r, lastError: '', lastErrorAt: '' });
+        await writeDoc(`${RUNS_COL}/${eventId}`, { jobId: PA_JOB_ID, mode, status: 'success', startedAt, completedAt, durationMs: Date.now() - t0, ...r,
+            summary: `${r.started} purchase agreement(s) started and ${r.expired} ended in ${r.organizations} organization(s)` }, { exists: false });
+        await audit([{ category: 'automation', action: 'prc.agreements_daily.success', details: `${mode}: ${r.started} started, ${r.expired} ended` }]);
+        return r;
+    } catch (e) {
+        const message = e instanceof Error ? e.message : 'Purchase agreement dates failed';
+        const completedAt = nowIso();
+        await writeDoc(PA_STATE, { ...prior, lastStartedAt: startedAt, lastError: message.slice(0, 250), lastErrorAt: completedAt });
+        await writeDoc(`${RUNS_COL}/${eventId}`, { jobId: PA_JOB_ID, mode, status: 'failed', startedAt, completedAt, durationMs: Date.now() - t0, error: message.slice(0, 250) }, { exists: false });
+        await audit([{ category: 'automation', action: 'prc.agreements_daily.failure', outcome: 'failure', details: message.slice(0, 400) }]);
+        throw e;
+    }
+}
+
 // ===== Job registry =====
 // One shared, OIDC-verified heartbeat drives every job. Each job decides whether it is due, runs under its own lock for
 // the tick, keeps its own state and history, and fails on its own without stopping the others.
@@ -410,6 +442,11 @@ const JOBS: Job[] = [
             return workflowSweepDue(str(st.lastCompletedAt), str(st.cursor), at);
         },
         run: (mode, deadline) => executeWorkflowSweep(mode, deadline),
+    },
+    {
+        id: PA_JOB_ID,
+        due: async (at) => agreementsDue(str((await getDoc(PA_STATE))?.data.lastCompletedAt), at),
+        run: (mode, deadline) => executeAgreementDates(mode, deadline),
     },
 ];
 const TICK_BUDGET_MS = 100_000;

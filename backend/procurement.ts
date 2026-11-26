@@ -1736,6 +1736,9 @@ export const procurementRoutes = {
         {const {manualChangeBlocked}=await import('./materialAudit');
         const blockedWhy=await manualChangeBlocked(ctx.orgId,section,changed,{stockControl:[...MATERIAL_STOCK_DIMENSIONS.map(([field])=>field as string),'stockingPolicy'],replenishment:[...REPLENISHMENT_NUMBER_FIELDS,'seasonalFactors']});
         if(blockedWhy)throw new HttpError(409,blockedWhy);}
+        // An active purchase agreement controls some Procurement Information fields; they change through the agreement only.
+        if(section==='procurement'){const {agreementLock}=await import('./purchaseAgreementModel');
+        const held=agreementLock(old?.data,changed);if(held)throw new HttpError(409,held);}
         let occupancyRestrictionChange:{id:string;data:Record<string,unknown>;code:string}|null=null;
         if(section==='inventory'&&changed.includes('warehouseRestriction')){
             // The material's effective per-warehouse restriction must remain allowed in the selected
