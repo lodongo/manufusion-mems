@@ -176,8 +176,14 @@ test('materials using an agreement show in blue and its fields are locked on the
     assert.match(screen, /Days remaining/);
     // Lists are dropdowns; minimum order, multiple and part number are not asked for.
     assert.match(screen, /<SelectField label='Payment terms'/);
-    assert.match(screen, /<SelectField label='Incoterms'/);
+    assert.match(screen, /<SelectField label='Incoterms \(optional\)'/);
     assert.doesNotMatch(screen, /label='Minimum order quantity'|label='Order multiple'|label='Supplier part number'/);
+    // Units are shown by name, never as a registry code, and every quote field shows the material's current standard value.
+    assert.match(screen, /label=\{`Unit price per \$\{unitOf\(item\)\}`\}/);
+    assert.doesNotMatch(screen, /value=\{item\.purchaseUom\}/);
+    for (const h of ['Standard: ${stdPrice}', "Standard: ${own('currency')}", 'Standard: ${stdTerms}', 'Standard: ${stdInco}']) assert.ok(screen.includes(h), h);
+    const back = read('backend/purchaseAgreements.ts');
+    assert.match(back, /purchaseUomName: unitName\(names, str\(i\.purchaseUom\)\), current: standardNow\(/);
     assert.match(read('src/org/OrgHomePage.tsx'), /path: 'procurement_agreements', permission: 'PRC\.agreements\.view'/);
     assert.match(read('backend/automationEngine.ts'), /const PA_JOB_ID = 'prc\.agreements-daily';/);
 });

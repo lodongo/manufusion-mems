@@ -31,9 +31,16 @@ interface Quote { unitPrice: number; currency: string; uom: string; leadTimeDays
 interface Option { code: string; label: string }
 interface Lists { currencies: string[]; paymentTerms: Option[]; incoterms: Option[] }
 const labelOf = (list: Option[], code: string) => list.find((x) => x.code === code)?.label || code;
+const unitOf = (i: { purchaseUom: string; purchaseUomName?: string }) => i.purchaseUomName || i.purchaseUom || 'unit';
+/** The material's current standard value of a field (live from Procurement Information), else the figure kept when it was added. */
+const stdOf = (i: Item, k: string): unknown => {
+    const v = i.current?.[k];
+    return v === undefined ? i.standard[k] : v;
+};
+const blank = (v: unknown) => v === '' || v === null || v === undefined;
 interface Item {
     no: number; materialId: string; materialNumber: string; name: string; warehouseId: string; warehouseCode: string; warehouseName: string;
-    purchaseUom: string; expectedQty: number; standard: Obj; quote?: Quote; applied?: boolean; override?: { on: boolean; reason: string; byName: string; at: string };
+    purchaseUom: string; purchaseUomName?: string; expectedQty: number; standard: Obj; current?: Obj; quote?: Quote; applied?: boolean; override?: { on: boolean; reason: string; byName: string; at: string };
 }
 interface Step { level: string; title: string; positionTitle: string; status: string; byName: string; at: string; note: string }
 interface Use { no: number; orderedQty: number; receivedQty: number; orderedValue: number; savings: number | null; standardInAgreement: number | null; agreedPrice: number; priceBreaches: number; orders: number }
@@ -214,7 +221,7 @@ function AgreementDetail({ id }: { id: string }) {
     if (can.activate) actions.push({ key: 'activate', label: 'Activate', run: () => ask({ title: `Activate ${a.number}?`, message: a.startDate > today() ? `It starts on ${a.startDate}. From then, its parameters replace the materials' procurement parameters (shown in blue) until ${a.endDate}.` : `From now until ${a.endDate}, its parameters replace the materials' procurement parameters (shown in blue). The materials' own values are kept and come back when it ends.`, confirmLabel: 'Activate', acknowledge: 'The agreement parameters replace the materials\' procurement parameters while it is active.' }, () => call('activate', { acknowledge: true }, 'Activated.')) });
     if (can.terminate) actions.push({ key: 'terminate', label: 'Terminate', danger: true, run: () => ask({ title: 'Terminate the agreement?', message: 'The materials go back to their own procurement parameters at once. This cannot be undone.', confirmLabel: 'Terminate', tone: 'danger', reason: { label: 'Reason', minLength: 20 }, phrase: 'TERMINATE', acknowledge: 'The materials go back to their own procurement parameters.' }, (reason) => call('terminate', { reason, acknowledge: true }, 'Terminated.')) });
     if (can.cancel) actions.push({ key: 'cancel', label: 'Cancel the agreement', danger: true, run: () => ask({ title: 'Cancel the agreement?', message: 'A cancelled agreement cannot be reopened.', confirmLabel: 'Cancel agreement', tone: 'danger', reason: { label: 'Reason', minLength: 10 } }, (reason) => call('cancel', { reason }, 'Cancelled.')) });
-    actions.push({ key: 'pdf', label: 'Download RFQ / agreement PDF', run: () => void agreementPdf(a) });
+    actions.push({ key: 'pdf', label: 'Download RFQ / agreement PDF', run: () => void agreementPdf(a, String(a.rfq.dueDate || ''), '', data) });
     const primary = actions.find((x) => ['approve', 'submit', 'activate', 'rfq'].includes(x.key));
 
     return (
@@ -368,7 +375,7 @@ function Overview({ a, can, d, currencies, onSaved }: { a: Detail; can: Can; d: 
 function ItemsTable({ a, can, d, lists, onOpen, onAdd }: { a: Detail; can: Can; d: Dash | null; lists: Lists; onOpen: (i: Item) => void; onAdd: () => void }) {
     const use = new Map((d?.items ?? []).map((u) => [u.no, u]));
     const state = (i: Item) => (i.override?.on ? 'Overridden: own parameters' : i.applied ? 'Using the agreement' : i.quote ? 'Quoted' : 'Waiting for the quote');
-    const std = (i: Item) => (i.standard.unitPrice === '' || i.standard.unitPrice === undefined || i.standard.unitPrice === null ? null : Number(i.standard.unitPrice));
+    const std = (i: Item) => (blank(stdOf(i, 'unitPrice')) ? null : Number(stdOf(i, 'unitPrice')));
     const columns: Array<Column<Item>> = [
         { key: 'no', label: 'Item', type: 'number', value: (i) => i.no },
         { key: 'material', label: 'Material', value: (i) => i.materialNumber, render: (i) => <span className={`font-mono ${i.applied ? blueRow : ''}`}>{i.materialNumber}</span> },
@@ -376,9 +383,11 @@ function ItemsTable({ a, can, d, lists, onOpen, onAdd }: { a: Detail; can: Can; 
         { key: 'warehouse', label: 'Warehouse', value: (i) => `${i.warehouseCode} ${i.warehouseName}`.trim() },
         { key: 'state', label: 'Status', value: state, render: (i) => <span className={i.applied ? `font-medium ${blueRow}` : i.override?.on ? 'text-amber-300' : ''}>{state(i)}</span> },
         { key: 'qty', label: 'Expected quantity', type: 'number', value: (i) => i.expectedQty },
-        { key: 'uom', label: 'Unit', value: (i) => i.purchaseUom },
+        { key: 'uom', label: 'Unit', value: (i) => unitOf(i) },
         { key: 'std', label: 'Standard price', type: 'number', value: std },
-        { key: 'stdcur', label: 'Standard currency', value: (i) => String(i.standard.currency ?? '') },
+        { key: 'stdcur', label: 'Standard currency', value: (i) => String(stdOf(i, 'currency') ?? '') },
+        { key: 'stdlead', label: 'Standard lead time (days)', type: 'number', value: (i) => (blank(stdOf(i, 'leadTimeDays')) ? null : Number(stdOf(i, 'leadTimeDays'))), hidden: true },
+        { key: 'stdterms', label: 'Standard payment terms', value: (i) => (blank(stdOf(i, 'paymentTerms')) ? '' : labelOf(lists.paymentTerms, String(stdOf(i, 'paymentTerms')))), hidden: true },
         { key: 'price', label: 'Agreed price', type: 'number', value: (i) => i.quote?.unitPrice ?? null },
         { key: 'cur', label: 'Currency', value: (i) => i.quote?.currency ?? '' },
         { key: 'lead', label: 'Lead time (days)', type: 'number', value: (i) => i.quote?.leadTimeDays ?? null },
@@ -412,8 +421,8 @@ function ItemSheet({ a, can, lists, item, use, ask, onClose, onDone }: { a: Deta
     const [f, setF] = useState({
         unitPrice: q ? String(q.unitPrice) : '', currency: q?.currency || a.currency, leadTimeDays: q ? String(q.leadTimeDays) : '',
         // The material's own payment terms and incoterms are offered first when they are on the lists.
-        paymentTerms: q?.paymentTerms ?? (lists.paymentTerms.some((x) => x.code === String(item.standard.paymentTerms ?? '')) ? String(item.standard.paymentTerms) : ''),
-        incoterms: q?.incoterms ?? (lists.incoterms.some((x) => x.code === String(item.standard.incoterms ?? '')) ? String(item.standard.incoterms) : ''),
+        paymentTerms: q?.paymentTerms ?? (lists.paymentTerms.some((x) => x.code === String(stdOf(item, 'paymentTerms') ?? '')) ? String(stdOf(item, 'paymentTerms')) : ''),
+        incoterms: q?.incoterms ?? (lists.incoterms.some((x) => x.code === String(stdOf(item, 'incoterms') ?? '')) ? String(stdOf(item, 'incoterms')) : ''),
     });
     const [qty, setQty] = useState(String(item.expectedQty));
     const [tried, setTried] = useState(false);
@@ -454,18 +463,22 @@ function ItemSheet({ a, can, lists, item, use, ask, onClose, onDone }: { a: Deta
             setBusy(false);
         }
     };
-    const s = item.standard;
-    const own = (k: string) => (s[k] === '' || s[k] === undefined || s[k] === null ? 'Not set' : String(s[k]));
+    const own = (k: string) => (blank(stdOf(item, k)) ? 'Not set' : String(stdOf(item, k)));
+    const stdPrice = blank(stdOf(item, 'unitPrice')) ? 'Not set' : `${String(stdOf(item, 'currency') || '')} ${Number(stdOf(item, 'unitPrice')).toLocaleString('en-US', { maximumFractionDigits: 4 })} per ${unitOf(item)}`.trim();
+    const stdTerms = blank(stdOf(item, 'paymentTerms')) ? 'Not set' : labelOf(lists.paymentTerms, String(stdOf(item, 'paymentTerms')));
+    const stdInco = blank(stdOf(item, 'incoterms')) ? 'Not set' : `${String(stdOf(item, 'incoterms'))} · ${labelOf(lists.incoterms, String(stdOf(item, 'incoterms')))}`;
+    const heldBy = String(item.current?.heldBy ?? '');
     const qtyEditable = can.items || can.quote;
     return (
         <Sheet title={`Item ${item.no} · ${item.materialNumber}`} onClose={onClose} footer={can.quote ? <Button className='flex-1' busy={busy} onClick={() => void saveQuote()}>Save quote</Button> : undefined}>
             <p className='text-sm text-soft'>{item.name}</p>
-            <p className='text-xs text-muted'>{item.warehouseCode} {item.warehouseName} · bought per {item.purchaseUom || 'unit'}</p>
+            <p className='text-xs text-muted'>{item.warehouseCode} {item.warehouseName} · bought per {unitOf(item)}</p>
+            {heldBy && <Alert tone='warn'>This material is currently under agreement {heldBy}; the standard values shown are the material's own.</Alert>}
             {item.applied && <Alert tone='info'>This material uses the agreement parameters now (blue on the material's Procurement Information).</Alert>}
             {item.override?.on && <Alert tone='warn'>Overridden by {item.override.byName}: {item.override.reason}</Alert>}
             <div className='rounded-xl border border-line bg-page p-3 text-sm'>
-                <p className='mb-1 text-xs font-semibold text-muted'>Material's own procurement setup (previous figures)</p>
-                <p className='text-soft'>Standard price {own('unitPrice')} {String(s.currency ?? '')} · lead time {own('leadTimeDays')} days · payment terms {s.paymentTerms ? labelOf(lists.paymentTerms, String(s.paymentTerms)) : 'Not set'} · incoterms {s.incoterms ? labelOf(lists.incoterms, String(s.incoterms)) : 'Not set'} · supplier {own('preferredVendorName')}</p>
+                <p className='mb-1 text-xs font-semibold text-muted'>Material's current standard values</p>
+                <p className='text-soft'>Price {stdPrice} · lead time {blank(stdOf(item, 'leadTimeDays')) ? 'Not set' : `${own('leadTimeDays')} days`} · payment terms {stdTerms} · incoterms {stdInco} · supplier {own('preferredVendorName')}</p>
                 <p className='text-soft'>Kept from the material (not quoted): minimum order {own('minimumOrderQuantity')} · order multiple {own('orderMultiple')} · supplier part number {own('vendorPartNumber')}</p>
             </div>
             {use && (use.orderedQty > 0 || use.savings !== null) && (
@@ -473,32 +486,32 @@ function ItemSheet({ a, can, lists, item, use, ask, onClose, onDone }: { a: Deta
             )}
             {qtyEditable ? (
                 <div className='flex items-end gap-2'>
-                    <Field className='flex-1' label='Expected quantity over the agreement' inputMode='decimal' value={qty} onChange={(e) => setQty(e.target.value)} hint='Used for the agreement value and the chart of authority.' />
+                    <Field className='flex-1' label={`Expected quantity over the agreement (${unitOf(item)})`} inputMode='decimal' value={qty} onChange={(e) => setQty(e.target.value)} hint='Used for the agreement value and the chart of authority.' />
                     <Button variant='secondary' disabled={busy || Number(qty) === item.expectedQty} onClick={() => void saveQty()}>Save</Button>
                 </div>
             ) : (
-                <p className='text-sm text-soft'>Expected quantity: {item.expectedQty} {item.purchaseUom}</p>
+                <p className='text-sm text-soft'>Expected quantity: {item.expectedQty} {unitOf(item)}</p>
             )}
             <h3 className='pt-1 text-sm font-semibold text-ink'>Supplier's quote</h3>
             {can.quote ? (
                 <div className='grid grid-cols-1 gap-3 sm:grid-cols-2'>
-                    <Field label={`Unit price per ${item.purchaseUom || 'unit'}`} inputMode='decimal' value={f.unitPrice} onChange={(e) => setF({ ...f, unitPrice: e.target.value })} error={tried ? errors.unitPrice : undefined} />
-                    <SelectField label='Currency' value={f.currency} onChange={(e) => setF({ ...f, currency: e.target.value })} error={tried ? errors.currency : undefined}>
+                    <Field label={`Unit price per ${unitOf(item)}`} inputMode='decimal' value={f.unitPrice} onChange={(e) => setF({ ...f, unitPrice: e.target.value })} error={tried ? errors.unitPrice : undefined} hint={`Standard: ${stdPrice}`} />
+                    <SelectField label='Currency' value={f.currency} onChange={(e) => setF({ ...f, currency: e.target.value })} error={tried ? errors.currency : undefined} hint={`Standard: ${own('currency')}`}>
                         {[...new Set([f.currency, a.currency, ...lists.currencies].filter(Boolean))].map((c) => <option key={c} value={c}>{c}</option>)}
                     </SelectField>
-                    <Field label='Unit of measure' value={item.purchaseUom} readOnly hint="The material's purchase unit; quotes in another unit are refused." onChange={() => undefined} />
-                    <Field label='Lead time (days)' inputMode='numeric' value={f.leadTimeDays} onChange={(e) => setF({ ...f, leadTimeDays: e.target.value })} error={tried ? errors.leadTimeDays : undefined} />
-                    <SelectField label='Payment terms' value={f.paymentTerms} onChange={(e) => setF({ ...f, paymentTerms: e.target.value })} error={tried ? errors.paymentTerms : undefined}>
+                    <Field label='Unit of measure' value={unitOf(item)} readOnly hint="Standard: the material's purchase unit. Quotes in another unit are refused." onChange={() => undefined} />
+                    <Field label='Lead time (days)' inputMode='numeric' value={f.leadTimeDays} onChange={(e) => setF({ ...f, leadTimeDays: e.target.value })} error={tried ? errors.leadTimeDays : undefined} hint={`Standard: ${blank(stdOf(item, 'leadTimeDays')) ? 'Not set' : `${own('leadTimeDays')} days`}`} />
+                    <SelectField label='Payment terms' value={f.paymentTerms} onChange={(e) => setF({ ...f, paymentTerms: e.target.value })} error={tried ? errors.paymentTerms : undefined} hint={`Standard: ${stdTerms}`}>
                         <option value=''>Choose…</option>
                         {lists.paymentTerms.map((x) => <option key={x.code} value={x.code}>{x.label}</option>)}
                     </SelectField>
-                    <SelectField label='Incoterms' value={f.incoterms} onChange={(e) => setF({ ...f, incoterms: e.target.value })} hint='Optional'>
+                    <SelectField label='Incoterms (optional)' value={f.incoterms} onChange={(e) => setF({ ...f, incoterms: e.target.value })} hint={`Standard: ${stdInco}`}>
                         <option value=''>Not given</option>
                         {lists.incoterms.map((x) => <option key={x.code} value={x.code}>{`${x.code} · ${x.label}`}</option>)}
                     </SelectField>
                 </div>
             ) : q ? (
-                <p className={`text-sm ${item.applied ? blueRow : 'text-soft'}`}>{q.currency} {q.unitPrice} per {q.uom} · {q.leadTimeDays} days{q.paymentTerms ? ` · ${labelOf(lists.paymentTerms, q.paymentTerms)}` : ''}{q.incoterms ? ` · ${q.incoterms}` : ''}<span className='block text-xs text-muted'>Recorded by {q.quotedByName} {fmtDate(q.quotedAt)}</span></p>
+                <p className={`text-sm ${item.applied ? blueRow : 'text-soft'}`}>{q.currency} {q.unitPrice} per {unitOf(item)} · {q.leadTimeDays} days{q.paymentTerms ? ` · ${labelOf(lists.paymentTerms, q.paymentTerms)}` : ''}{q.incoterms ? ` · ${q.incoterms}` : ''}<span className='block text-xs text-muted'>Recorded by {q.quotedByName} {fmtDate(q.quotedAt)}</span></p>
             ) : (
                 <p className='text-sm text-muted'>{a.status === 'draft' ? 'Send the RFQ first; the quote is recorded when the supplier answers.' : 'No quote recorded.'}</p>
             )}
@@ -528,7 +541,7 @@ function ItemSheet({ a, can, lists, item, use, ask, onClose, onDone }: { a: Deta
 
 // ----- Add materials -----
 
-interface Candidate { materialId: string; materialNumber: string; name: string; warehouseId: string; warehouseCode: string; warehouseName: string; purchaseUom: string; standardPrice: number | null; standardCurrency: string; leadTimeDays: number | null; preferred: boolean; heldBy: string; onThis: boolean }
+interface Candidate { materialId: string; materialNumber: string; name: string; warehouseId: string; warehouseCode: string; warehouseName: string; purchaseUom: string; purchaseUomName?: string; standardPrice: number | null; standardCurrency: string; leadTimeDays: number | null; preferred: boolean; heldBy: string; onThis: boolean }
 
 function AddMaterials({ a, onClose, onDone }: { a: Detail; onClose: () => void; onDone: (t: string) => void }) {
     const { data, error, loading } = useLoad(() => callBackend<{ candidates: Candidate[] }>(`${API}/candidates`, { id: a.id }));
@@ -570,11 +583,11 @@ function AddMaterials({ a, onClose, onDone }: { a: Detail; onClose: () => void; 
                                     <span className='min-w-0 flex-1 text-sm'>
                                         <span className='block font-mono text-ink'>{c.materialNumber}{c.preferred && <span className='ml-2 text-xs text-brandsoft'>preferred supplier</span>}</span>
                                         <span className='block text-soft'>{c.name}</span>
-                                        <span className='block text-xs text-muted'>{c.warehouseCode} {c.warehouseName} · per {c.purchaseUom || '—'} · standard {c.standardPrice === null ? 'not set' : `${c.standardCurrency} ${c.standardPrice}`}</span>
+                                        <span className='block text-xs text-muted'>{c.warehouseCode} {c.warehouseName} · per {c.purchaseUomName || c.purchaseUom || '—'} · standard price {c.standardPrice === null ? 'not set' : `${c.standardCurrency} ${c.standardPrice}`} · lead time {c.leadTimeDays === null || c.leadTimeDays === undefined || String(c.leadTimeDays) === '' ? 'not set' : `${c.leadTimeDays} days`}</span>
                                         {c.heldBy && <span className='block text-xs text-blue-300'>Under agreement {c.heldBy}</span>}
                                     </span>
                                 </label>
-                                {on && <Field className='mt-2' label={`Expected quantity (${c.purchaseUom || 'units'})`} inputMode='decimal' value={picked[k]} onChange={(e) => setPicked((p) => ({ ...p, [k]: e.target.value }))} error={picked[k] !== '' && !(Number(picked[k]) > 0) ? 'Above zero' : undefined} />}
+                                {on && <Field className='mt-2' label={`Expected quantity (${c.purchaseUomName || c.purchaseUom || 'units'})`} inputMode='decimal' value={picked[k]} onChange={(e) => setPicked((p) => ({ ...p, [k]: e.target.value }))} error={picked[k] !== '' && !(Number(picked[k]) > 0) ? 'Above zero' : undefined} />}
                             </div>
                         );
                     })}
@@ -625,7 +638,7 @@ function RfqSheet({ a, onClose, onDone }: { a: Detail; onClose: () => void; onDo
     );
 }
 
-async function agreementPdf(a: Detail, dueDate = String(a.rfq.dueDate || ''), message = '') {
+async function agreementPdf(a: Detail, dueDate = String(a.rfq.dueDate || ''), message = '', lists?: Lists) {
     const quoted = a.items.some((i) => i.quote);
     await downloadReportPdf({
         title: `${a.number} ${quoted ? 'Purchase agreement' : 'Request for quotation'}`,
@@ -637,8 +650,8 @@ async function agreementPdf(a: Detail, dueDate = String(a.rfq.dueDate || ''), me
             {
                 heading: quoted ? 'Agreed items' : 'Items to quote',
                 table: quoted
-                    ? { head: ['Item', 'Material', 'Description', 'Qty', 'Unit', 'Price', 'Cur', 'Lead days', 'Payment terms', 'Incoterms'], body: a.items.map((i) => [String(i.no), i.materialNumber, i.name, String(i.expectedQty), i.purchaseUom, i.quote ? String(i.quote.unitPrice) : '', i.quote?.currency ?? '', i.quote ? String(i.quote.leadTimeDays) : '', i.quote?.paymentTerms ?? '', i.quote?.incoterms ?? '']) }
-                    : { head: ['Item', 'Material', 'Description', 'Expected qty', 'Unit', 'Unit price', 'Currency', 'Lead days', 'Payment terms', 'Incoterms'], body: a.items.map((i) => [String(i.no), i.materialNumber, i.name, String(i.expectedQty), i.purchaseUom, '', '', '', '', '']) },
+                    ? { head: ['Item', 'Material', 'Description', 'Qty', 'Unit', 'Price', 'Cur', 'Lead days', 'Payment terms', 'Incoterms'], body: a.items.map((i) => [String(i.no), i.materialNumber, i.name, String(i.expectedQty), unitOf(i), i.quote ? String(i.quote.unitPrice) : '', i.quote?.currency ?? '', i.quote ? String(i.quote.leadTimeDays) : '', i.quote?.paymentTerms ? labelOf(lists?.paymentTerms ?? [], i.quote.paymentTerms) : '', i.quote?.incoterms ?? '']) }
+                    : { head: ['Item', 'Material', 'Description', 'Expected qty', 'Unit', 'Unit price', 'Currency', 'Lead days', 'Payment terms', 'Incoterms'], body: a.items.map((i) => [String(i.no), i.materialNumber, i.name, String(i.expectedQty), unitOf(i), '', '', '', '', '']) },
             },
         ],
     });

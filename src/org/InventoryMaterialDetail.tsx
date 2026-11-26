@@ -1833,7 +1833,7 @@ export default function InventoryMaterialDetail({ id, warehouseId, onBack }: { i
                                                 >
                                                     <span className='block text-xs text-blue-300'>Purchase agreement {pa.number} · {pa.vendorName}</span>
                                                     <strong className='mt-1 block text-sm font-semibold text-blue-300'>
-                                                        Agreement price {pa.currency} {pa.unitPrice.toLocaleString('en-US', { maximumFractionDigits: 4 })} per {pa.uom || 'unit'}
+                                                        Agreement price {pa.currency} {pa.unitPrice.toLocaleString('en-US', { maximumFractionDigits: 4 })} per {metadata?.uoms.find((x) => x.code === pa.uom)?.name || metadata?.uoms.find((x) => x.code === pa.uom)?.description || pa.uom || 'unit'}
                                                     </strong>
                                                     <span className='mt-1 block text-xs text-muted'>
                                                         {pa.startDate} to {pa.endDate}. Fields in blue come from the agreement; the standard price stays the material's own.
