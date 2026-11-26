@@ -108,7 +108,7 @@ export interface QuoteLists {
  * enabledCurrencies: codes enabled in the platform currency list. Payment terms are required; incoterms are optional;
  * both must come from their lists.
  */
-export function checkQuote(raw: Obj, ctx: { info: Obj; material: Obj; enabledCurrencies: Set<string>; lists: QuoteLists; label: string }): { quote: Omit<Quote, 'quotedAt' | 'quotedBy' | 'quotedByName'>; problems: string[] } {
+export function checkQuote(raw: Obj, ctx: { info: Obj; material: Obj; enabledCurrencies: Set<string>; lists: QuoteLists; label: string; unitName?: (code: string) => string }): { quote: Omit<Quote, 'quotedAt' | 'quotedBy' | 'quotedByName'>; problems: string[] } {
     const p: string[] = [];
     const at = `${ctx.label}: `;
     const num = (v: unknown) => (v === '' || v === null || v === undefined ? null : Number(v));
@@ -119,7 +119,10 @@ export function checkQuote(raw: Obj, ctx: { info: Obj; material: Obj; enabledCur
     const unit = purchaseUnitOf(ctx.info, ctx.material);
     const uom = str(raw.uom).trim() || unit;
     if (!unit) p.push(`${at}the material has no purchase unit. Set it in Procurement Information first.`);
-    else if (!sameUnit(uom, unit)) p.push(`${at}the quote must be in the material's purchase unit (${unit}), not ${uom}. Ask the supplier to quote per ${unit}.`);
+    else if (!sameUnit(uom, unit)) {
+        const n = ctx.unitName ?? ((c: string) => c);
+        p.push(`${at}the quote must be in the material's purchase unit (${n(unit)}), not ${n(uom)}. Ask the supplier to quote per ${n(unit)}.`);
+    }
     const lead = num(raw.leadTimeDays);
     if (lead === null || !Number.isInteger(lead) || lead < 0 || lead > 3650) p.push(`${at}enter the lead time as whole days from 0 to 3650.`);
     const paymentTerms = str(raw.paymentTerms).trim();

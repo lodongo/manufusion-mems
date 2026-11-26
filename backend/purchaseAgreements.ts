@@ -10,6 +10,7 @@ import { can, requireProcurement } from './procurementSetup';
 import { getAuthority } from './procurementPolicy';
 import { vendorsPath } from './vendors';
 import { suppliersFor } from './materialMedia';
+import { PROCUREMENT_UNITS } from './procurementUnits';
 import { PLACED, approvalRoute, lock, myPositions, nameOfUser, ordersPath, ratesOf, type Step } from './purchaseOrders';
 import {
     EDITABLE_ITEMS, FINAL, HOLDING, MAX_ATTACHMENTS, MAX_ITEMS, MAX_PDF_BYTES, PA_ID, PA_STATUS, QUOTING,
@@ -156,6 +157,33 @@ async function quoteOptions() {
     const [paymentTerms, incoterms] = await Promise.all([listOf('paymentTerms', DEFAULT_PAYMENT), listOf('incoterms', DEFAULT_INCOTERMS)]);
     return { paymentTerms, incoterms, sets: { paymentTerms: new Set(paymentTerms.map((x) => x.code)), incoterms: new Set(incoterms.map((x) => x.code)) } };
 }
+/** Unit names by code: the organization's saved unit list first, then the shipped registry. Codes are never shown alone. */
+async function unitNames(): Promise<Map<string, string>> {
+    const doc = await getDoc('module_workspaces/PRC/metadata/unitsOfMeasure');
+    const out = new Map<string, string>();
+    const name = (u: Obj) => {
+        const label = str(u.label) || str(u.name);
+        const symbol = str(u.symbol);
+        return label ? (symbol && symbol.toLowerCase() !== label.toLowerCase() ? `${label} (${symbol})` : label) : symbol;
+    };
+    for (const u of PROCUREMENT_UNITS as unknown as Obj[]) if (str(u.code) && name(u)) out.set(str(u.code), name(u));
+    for (const u of objs(doc?.data.items)) if (str(u.code) && name(u)) out.set(str(u.code), name(u));
+    return out;
+}
+const unitName = (names: Map<string, string>, code: string) => names.get(code) || code;
+
+/** The material's own procurement values today (what the agreement replaces while it is active). */
+function standardNow(info: Obj, paId: string): Obj {
+    const held = o(info.agreement);
+    const own: Obj = str(held.id) ? { ...info, ...o(info.agreementBaseline) } : info;
+    return {
+        unitPrice: own.unitPrice ?? '', currency: str(own.priceCurrency), purchaseUom: str(own.purchaseUom), leadTimeDays: own.leadTimeDays ?? '',
+        paymentTerms: str(own.paymentTerms), incoterms: str(own.incoterms), minimumOrderQuantity: own.minimumOrderQuantity ?? '', orderMultiple: own.orderMultiple ?? '',
+        vendorPartNumber: str(own.vendorPartNumber), preferredVendorName: str(own.preferredVendorName),
+        heldBy: str(held.id) && str(held.id) !== paId ? str(held.number) || str(held.id) : '',
+    };
+}
+
 const vendorName = (v: Doc) => str(v.data.tradeName) || str(v.data.legalName) || v.id;
 async function approvedVendor(ctx: OrgContext, id: string): Promise<Doc> {
     if (!/^VND\d{6}$/.test(id)) throw new HttpError(400, 'Choose an approved supplier.');
@@ -339,6 +367,9 @@ export const purchaseAgreementRoutes = {
         orgRoute('org.procurement.agreements.get', 'PRC.agreements.view', async (ctx) => {
             const doc = await load(ctx, str(ctx.body.id));
             const d = doc.data;
+            const names = await unitNames();
+            const infos = await Promise.all(objs(d.items).map((i) => getDoc(infoPath(ctx.orgId, str(i.materialId), str(i.warehouseId)))));
+            const items = objs(d.items).map((i, k) => ({ ...i, purchaseUomName: unitName(names, str(i.purchaseUom)), current: standardNow(infos[k]?.data ?? {}, doc.id) }));
             const live = !['draft', 'rfq_sent', 'returned', 'pending_approval', 'rejected', 'cancelled'].includes(str(d.status));
             return {
                 agreement: {
@@ -348,7 +379,7 @@ export const purchaseAgreementRoutes = {
                     quoteDate: str(d.quoteDate),
                     vendorEmail: str(d.vendorEmail),
                     rfq: o(d.rfq),
-                    items: objs(d.items),
+                    items,
                     attachments: attachmentsOut(d),
                     approval: o(d.approval),
                     history: objs(d.history).slice().reverse(),
@@ -389,6 +420,7 @@ export const purchaseAgreementRoutes = {
             const root = `organizations/${ctx.orgId}`;
             const [materials, exts, infos, warehouses, allowed] = await Promise.all([listDocs(`${root}/materials`), listDocs(`${root}/material_extensions`), listDocs(`${root}/procurement_material_info`), listDocs(`${root}/warehouses`), reach(ctx)]);
             const infoMap = new Map(infos.map((i) => [i.id, i.data]));
+            const names = await unitNames();
             const taken = new Set(objs(doc.data.items).map(itemKey));
             const out: Obj[] = [];
             for (const w of warehouses) {
@@ -402,7 +434,7 @@ export const purchaseAgreementRoutes = {
                         materialId: m.id, materialNumber: str(m.data.materialNumber), name: str(m.data.name) || str(m.data.shortText),
                         warehouseId: w.id, warehouseCode: str(w.data.code), warehouseName: str(w.data.name),
                         categoryCode: str(m.data.categoryCode), subcategoryCode: str(m.data.subcategoryCode),
-                        purchaseUom: purchaseUnitOf(info, m.data), standardPrice: info.unitPrice === '' || info.unitPrice === undefined ? null : Number(info.unitPrice), standardCurrency: str(info.priceCurrency),
+                        purchaseUom: purchaseUnitOf(info, m.data), purchaseUomName: unitName(names, purchaseUnitOf(info, m.data)), standardPrice: info.unitPrice === '' || info.unitPrice === undefined ? null : Number(info.unitPrice), standardCurrency: str(info.priceCurrency),
                         leadTimeDays: info.leadTimeDays ?? null, preferred: str(info.preferredVendor) === vendor.id,
                         heldBy: str(held.number), onThis: taken.has(`${m.id}|${w.id}`),
                     });
@@ -551,7 +583,7 @@ export const purchaseAgreementRoutes = {
         orgRoute('org.procurement.agreements.items.quote', 'PRC.agreements.manage', async (ctx) => {
             const doc = await load(ctx, str(ctx.body.id));
             const no = Number(ctx.body.no);
-            const [currencies, options] = await Promise.all([enabledCurrencies(), quoteOptions()]);
+            const [currencies, options, names] = await Promise.all([enabledCurrencies(), quoteOptions(), unitNames()]);
             return mutate(ctx, doc.id, 'items.quote', async (d) => {
                 needOwner(ctx, d);
                 if (!QUOTING.includes(str(d.status))) throw new HttpError(409, 'Send the RFQ to the supplier first. Quotes are recorded until the agreement is submitted.');
@@ -560,12 +592,12 @@ export const purchaseAgreementRoutes = {
                 if (!it) throw new HttpError(404, 'Item not found.');
                 const [m, info] = await Promise.all([getDoc(`organizations/${ctx.orgId}/materials/${str(it.materialId)}`), getDoc(infoPath(ctx.orgId, str(it.materialId), str(it.warehouseId)))]);
                 if (!published(m)) throw new HttpError(409, `${str(it.materialNumber)} is no longer an approved material.`);
-                const { quote, problems } = checkQuote(o(ctx.body.quote), { info: info?.data ?? {}, material: m!.data, enabledCurrencies: currencies, lists: options.sets, label: `Item ${no} ${str(it.materialNumber)}` });
+                const { quote, problems } = checkQuote(o(ctx.body.quote), { info: info?.data ?? {}, material: m!.data, enabledCurrencies: currencies, lists: options.sets, unitName: (c) => unitName(names, c), label: `Item ${no} ${str(it.materialNumber)}` });
                 if (problems.length) throw new HttpError(400, problems.join(' '));
                 const at = nowIso();
                 const prev = o(it.quote);
                 const next = { ...it, quote: { ...quote, quotedAt: at, quotedBy: ctx.uid, quotedByName: nameOfUser(ctx.me) }, previousQuote: Object.keys(prev).length ? prev : it.previousQuote ?? null };
-                return { patch: { items: items.map((i) => (i === it ? next : i)) }, event: 'quote recorded', note: `Item ${no} ${str(it.materialNumber)}: ${quote.currency} ${quote.unitPrice} per ${quote.uom}, ${quote.leadTimeDays} days, ${quote.paymentTerms}${quote.incoterms ? `, ${quote.incoterms}` : ''}`, label: 'Quote recorded' };
+                return { patch: { items: items.map((i) => (i === it ? next : i)) }, event: 'quote recorded', note: `Item ${no} ${str(it.materialNumber)}: ${quote.currency} ${quote.unitPrice} per ${unitName(names, quote.uom)}, ${quote.leadTimeDays} days, ${quote.paymentTerms}${quote.incoterms ? `, ${quote.incoterms}` : ''}`, label: 'Quote recorded' };
             });
         }),
     ],
@@ -837,7 +869,8 @@ async function emailRfq(ctx: OrgContext, d: Obj, dueDate: string, note: string) 
     const to = str(o(vendor?.data.contact).email);
     if (!to) throw new HttpError(409, 'The supplier has no contact email on record. Print the RFQ instead.');
     const orgName = str(ctx.org.data.name) || str(ctx.org.data.legalName) || 'Our organization';
-    const rows = objs(d.items).map((i) => `<tr><td>${esc(i.no)}</td><td>${esc(i.materialNumber)}</td><td>${esc(i.name)}</td><td style="text-align:right">${esc(i.expectedQty)}</td><td>${esc(i.purchaseUom)}</td></tr>`).join('');
+    const names = await unitNames();
+    const rows = objs(d.items).map((i) => `<tr><td>${esc(i.no)}</td><td>${esc(i.materialNumber)}</td><td>${esc(i.name)}</td><td style="text-align:right">${esc(i.expectedQty)}</td><td>${esc(unitName(names, str(i.purchaseUom)))}</td></tr>`).join('');
     const html = `<div style="font-family:Arial,sans-serif;font-size:14px;color:#111"><p>Dear ${esc(str(d.vendorName))},</p><p>${esc(orgName)} invites you to quote for a purchase agreement <strong>${esc(d.number)}</strong> (${esc(d.title)}) from ${esc(d.startDate)} to ${esc(d.endDate)}.</p><table cellpadding="6" cellspacing="0" border="1" style="border-collapse:collapse;border-color:#ccc"><thead><tr><th>Item</th><th>Material</th><th>Description</th><th>Expected quantity</th><th>Unit</th></tr></thead><tbody>${rows}</tbody></table><p>For each item please quote: unit price and currency per the unit shown, lead time in days, payment terms and incoterms.</p><p><strong>Quote due by ${esc(dueDate)}</strong>, quoting ${esc(d.number)}.</p>${note ? `<p>${esc(note)}</p>` : ''}</div>`;
     const res = await fetch('https://api.resend.com/emails', {
         method: 'POST',
