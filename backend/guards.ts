@@ -284,6 +284,9 @@ export async function effectiveAccess(orgId: string, role: string, user: Doc, ad
     const permissions = Array.from(new Set([
         ...directPermissions, ...grants.flatMap((g) => g.permissions), ...workGroupMenuPermissions(workGroupPolicy),
         ...(hrSelfService ? ['HRM.shell.view'] : []),
+        // Linking records in email, chat and actions is a baseline for active members; every result is still filtered by
+        // the person's own access in each module (recordSearch.ts).
+        ...(expired ? [] : ['ADM.records.search']),
     ]));
     const name = extras.length ? `${loaded.name} + ${extras.map((x) => x.name).join(', ')}` : loaded.name;
     return { workGroupPolicy, roleName: expired ? `${name} (expired)` : name, directPermissions, grants, permissions, expired, roleIds: [role, ...extraIds] };
