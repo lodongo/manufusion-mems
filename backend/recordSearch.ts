@@ -204,7 +204,7 @@ const visibleFor = async (h: Helpers, s: Source, id: string, d: Obj) => {
 export const recordSearchRoutes = {
     // Search records across modules the person may see. Body: { q, types?: string[] }.
     'POST /api/org/records/search': [
-        orgRoute('org.records.search', null, async (ctx) => {
+        orgRoute('org.records.search', 'ADM.records.search', async (ctx) => {
             const parsed = parseQuery(str(ctx.body.q));
             const wanted = new Set((Array.isArray(ctx.body.types) ? ctx.body.types.map(str) : []).filter((t) => byType.has(t)));
             if (parsed.type) wanted.add(parsed.type);
@@ -231,7 +231,7 @@ export const recordSearchRoutes = {
     ],
     // Live cards for references in a message. Body: { refs: [{ type, id }] } (up to 30).
     'POST /api/org/records/resolve': [
-        orgRoute('org.records.resolve', null, async (ctx) => {
+        orgRoute('org.records.resolve', 'ADM.records.search', async (ctx) => {
             const refs = (Array.isArray(ctx.body.refs) ? ctx.body.refs : []).filter(isObj).map((r) => ({ type: str(r.type), id: str(r.id) })).filter((r) => byType.has(r.type) && /^[A-Za-z0-9_.-]{1,100}$/.test(r.id));
             if (refs.length > 30) throw new HttpError(400, 'At most 30 references at a time');
             const h = await helpersFor(ctx);

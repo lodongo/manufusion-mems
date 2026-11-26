@@ -32,6 +32,7 @@ const p = (key: string, label: string, sensitive = false): PermDef => (sensitive
 
 export const ADM_PERMISSIONS: PermDef[] = [
     p('ADM.users', 'Manage users', true),
+    p('ADM.records.search', 'Search and link records from every module in email, chat and actions (results limited to what the person may see in each module; baseline for active members)'),
     p('ADM.structure', 'Manage organization design and job roles', true),
     p('ADM.modules', 'Manage modules and subscription', true),
     p('ADM.roles', 'Manage security roles and permissions', true),
