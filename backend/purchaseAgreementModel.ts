@@ -2,9 +2,10 @@
 // Purchase agreements (PA + 8 digits): the pure rules, with no database access, so they can be tested on their own.
 //
 // A purchase agreement fixes, for a supplier and a period, the buying parameters of chosen spares (material in a
-// warehouse): price, currency, purchase unit, lead time, minimum order quantity, order multiple, the supplier's part
-// number, payment terms and incoterms. The values come from the supplier's quote to an RFQ and are checked against the
-// procurement setup of each material (the same fields and rules as Material › Procurement Information).
+// warehouse): price, currency, purchase unit, lead time, payment terms and incoterms. The values come from the
+// supplier's quote to an RFQ and are checked against the procurement setup of each material (the same fields, units and
+// lists as Material › Procurement Information). Minimum order quantity, order multiple and the supplier's part number
+// are not quoted: the material's own values are used.
 //
 // While an agreement is active and in date, its parameters are the material's procurement parameters. The material's
 // own values are kept (agreementBaseline) and come back when the agreement ends, is terminated, or the item is
@@ -47,9 +48,6 @@ export const FINAL = ['expired', 'terminated', 'rejected', 'cancelled'];
 /** Agreement quote field -> Material › Procurement Information field it sets while the agreement is active. */
 export const APPLIED_FIELDS: Array<[quoteKey: string, infoKey: string]> = [
     ['leadTimeDays', 'leadTimeDays'],
-    ['minimumOrderQuantity', 'minimumOrderQuantity'],
-    ['orderMultiple', 'orderMultiple'],
-    ['vendorPartNumber', 'vendorPartNumber'],
     ['paymentTerms', 'paymentTerms'],
     ['incoterms', 'incoterms'],
 ];
@@ -61,9 +59,6 @@ export interface Quote {
     currency: string;
     uom: string;
     leadTimeDays: number;
-    minimumOrderQuantity: number | null;
-    orderMultiple: number | null;
-    vendorPartNumber: string;
     paymentTerms: string;
     incoterms: string;
     quotedAt: string;
@@ -102,11 +97,18 @@ export const itemKey = (i: Obj) => `${str(i.materialId)}|${str(i.warehouseId)}`;
 export const purchaseUnitOf = (info: Obj, material: Obj) => str(info.purchaseUom) || str(material.uom);
 const sameUnit = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
 
+/** Payment terms and incoterms codes the quote may use (the PRC metadata lists Procurement Information uses). */
+export interface QuoteLists {
+    paymentTerms: Set<string>;
+    incoterms: Set<string>;
+}
+
 /**
  * Checks a quoted item against the material's procurement setup. Returns the cleaned quote and the problems.
- * enabledCurrencies: codes enabled in the platform currency list.
+ * enabledCurrencies: codes enabled in the platform currency list. Payment terms are required; incoterms are optional;
+ * both must come from their lists.
  */
-export function checkQuote(raw: Obj, ctx: { info: Obj; material: Obj; enabledCurrencies: Set<string>; label: string }): { quote: Omit<Quote, 'quotedAt' | 'quotedBy' | 'quotedByName'>; problems: string[] } {
+export function checkQuote(raw: Obj, ctx: { info: Obj; material: Obj; enabledCurrencies: Set<string>; lists: QuoteLists; label: string }): { quote: Omit<Quote, 'quotedAt' | 'quotedBy' | 'quotedByName'>; problems: string[] } {
     const p: string[] = [];
     const at = `${ctx.label}: `;
     const num = (v: unknown) => (v === '' || v === null || v === undefined ? null : Number(v));
@@ -120,27 +122,19 @@ export function checkQuote(raw: Obj, ctx: { info: Obj; material: Obj; enabledCur
     else if (!sameUnit(uom, unit)) p.push(`${at}the quote must be in the material's purchase unit (${unit}), not ${uom}. Ask the supplier to quote per ${unit}.`);
     const lead = num(raw.leadTimeDays);
     if (lead === null || !Number.isInteger(lead) || lead < 0 || lead > 3650) p.push(`${at}enter the lead time as whole days from 0 to 3650.`);
-    const moq = num(raw.minimumOrderQuantity);
-    if (moq !== null && (!Number.isFinite(moq) || moq < 0 || moq > 1e12)) p.push(`${at}the minimum order quantity must be a number of 0 or more.`);
-    const mult = num(raw.orderMultiple);
-    if (mult !== null && (!Number.isFinite(mult) || mult < 0 || mult > 1e12)) p.push(`${at}the order multiple must be a number of 0 or more.`);
-    if (moq !== null && mult !== null && moq > 0 && mult > 0 && Math.abs(moq / mult - Math.round(moq / mult)) > 1e-9) p.push(`${at}the minimum order quantity (${moq}) must be a multiple of the order multiple (${mult}).`);
-    const text = (k: string) => {
-        const s = str(raw[k]).replace(/\s+/g, ' ').trim();
-        if (s.length > 120) p.push(`${at}${k} is too long (120 characters at most).`);
-        return s.slice(0, 120);
-    };
+    const paymentTerms = str(raw.paymentTerms).trim();
+    if (!paymentTerms) p.push(`${at}choose the payment terms.`);
+    else if (!ctx.lists.paymentTerms.has(paymentTerms)) p.push(`${at}choose the payment terms from the list.`);
+    const incoterms = str(raw.incoterms).trim();
+    if (incoterms && !ctx.lists.incoterms.has(incoterms)) p.push(`${at}choose the incoterms from the list.`);
     return {
         quote: {
             unitPrice: price !== null && Number.isFinite(price) ? round(price, 4) : 0,
             currency,
             uom: unit || uom,
             leadTimeDays: lead !== null && Number.isFinite(lead) ? lead : 0,
-            minimumOrderQuantity: moq !== null && Number.isFinite(moq) ? moq : null,
-            orderMultiple: mult !== null && Number.isFinite(mult) ? mult : null,
-            vendorPartNumber: text('vendorPartNumber'),
-            paymentTerms: text('paymentTerms'),
-            incoterms: text('incoterms'),
+            paymentTerms,
+            incoterms,
         },
         problems: p,
     };
