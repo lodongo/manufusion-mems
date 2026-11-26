@@ -214,7 +214,7 @@ test('routes are wired with their permissions, audited, scoped to the site and r
 test('workspace UI: action bar on top, content scrolls, rich tables with Excel and templates, standard fields and confirmations', () => {
     const ui = read('src/org/PlnPlanningWorkspace.tsx');
     const pf = read('src/org/ProductionFoundation.tsx');
-    assert.ok(pf.includes("active==='sop'?<PlnPlanningWorkspace/>"));
+    assert.ok(pf.includes("active==='sop'?<PlnPlanningWorkspace onOpenSetup={()=>changeTab('sopSetup')}/>"));
     assert.ok(pf.includes("useState<Tab>(module==='PLN'?'sop':'materialPolicy')"));
     assert.ok(ui.includes("sticky top-0 z-20"), 'action bar stays on top');
     assert.ok(ui.includes("min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain"), 'only the content scrolls');
@@ -223,4 +223,16 @@ test('workspace UI: action bar on top, content scrolls, rich tables with Excel a
     assert.ok(ui.includes("reason: { label: 'Reason for the change', minLength: 10 }"), 'setup change needs a reason');
     assert.ok(ui.includes('Fix the highlighted lines.'), 'demand lines verified before saving');
     assert.ok(!ui.includes('window.prompt') && !ui.includes('window.confirm'));
+});
+
+test('S&OP setup is its own focused tab; site, year and plan are a menu, not dropdowns', () => {
+    const ui = read('src/org/PlnPlanningWorkspace.tsx');
+    const pf = read('src/org/ProductionFoundation.tsx');
+    assert.ok(pf.includes("{key:'sopSetup',label:'S&OP Setup'"));
+    assert.ok(pf.includes(":active==='sopSetup'?<PlnPlanningSetup/>"));
+    assert.ok(ui.includes('export function PlnPlanningSetup()'));
+    assert.ok(!ui.includes("{ key: 'setup', label: 'Setup'"), 'setup is no longer a workspace view');
+    assert.ok(!ui.includes("<Select label='Site'") && !ui.includes("<Select label='Plan'"), 'no site or plan dropdown');
+    assert.ok(ui.includes("role='menuitemradio'") && ui.includes("title='Site, financial year and plan'"));
+    assert.ok(ui.includes("S&OP planning setup") && ui.includes("disabled={!dirty} onClick={save}"), 'pinned save bar, enabled only with changes');
 });

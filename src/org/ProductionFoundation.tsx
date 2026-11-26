@@ -3,7 +3,8 @@ import { Alert, Field as MemsField, SelectField, TextArea } from '../components/
 import { Spinner } from '../admin/kit';
 import { SkuConfigurationFields, SkuSetupPanel, SkuIdentityGuide, UnitChoice, emptySkuSetup, type SkuSelections, type SkuSetup } from './MfgSkuSetup';
 import PlnDemand from './PlnDemand';
-import PlnPlanningWorkspace from './PlnPlanningWorkspace';
+import PlnPlanningWorkspace, { PlnPlanningSetup } from './PlnPlanningWorkspace';
+import { Check, LayoutGrid, X } from 'lucide-react';
 import PlnSkuCostCenterRatings from './PlnSkuCostCenterRatings';
 import PlnSkuAuditLog from './PlnSkuAuditLog';
 import ManufacturingResources from './ManufacturingResources';
@@ -34,7 +35,7 @@ import { callBackend } from '../lib/backend';
 import { hasPerm } from '../types';
 
 type Kind='items'|'boms'|'resources'|'routings';
-type Tab=Kind|'skuSetup'|'materialPolicy'|'formDefaults'|'config'|'sop'|'demand'|'capacityOverview'|'documentation';
+type Tab=Kind|'skuSetup'|'materialPolicy'|'formDefaults'|'config'|'sop'|'sopSetup'|'demand'|'capacityOverview'|'documentation';
 type Row=Record<string,unknown>&{id:string;name:string;revision?:number;type?:string};
 type Component={
  source?:'INTERMEDIATE'|'WAREHOUSE'|'PROCESS_SUPPLY';
@@ -88,6 +89,7 @@ const tabs:{key:Tab;label:string;shortLabel:string;phase:Phase;hint:string}[]=[
     {key:'routings',label:'Process Routings',shortLabel:'Process routings',phase:'capacity',hint:'Define operation sequences using configured resources and outputs'},
     {key:'capacityOverview',label:'Production Capacity Overview',shortLabel:'Capacity overview',phase:'capacity',hint:'Compare all authorized process flows, capacities and buffer constraints'},
     {key:'sop',label:'S&OP Planning Cycle',shortLabel:'S&OP planning cycle',phase:'planning',hint:'Annual demand per SKU for the financial year, detailed SKU forecast, BOM unitisation, MRP, rough-cut capacity and Chart of Authority approval'},
+    {key:'sopSetup',label:'S&OP Setup',shortLabel:'S&OP setup',phase:'planning',hint:'Current-period rule, seasonality, forecast basis, indivisible units and packs, unitisation tolerance and capacity calendar'},
     {key:'config',label:'Planning Configuration',shortLabel:'Planning rules',phase:'planning',hint:'Configure planning horizon, frozen period and lot-sizing defaults'},
     {key:'demand',label:'Demand & S&OP',shortLabel:'Demand & S&OP',phase:'planning',hint:'Maintain forecast and firm demand after the relevant masters are configured'},
     {key:'documentation',label:'Documentation & Setup Guide',shortLabel:'Documentation',phase:'guide',hint:'Search guided setup, topics, troubleshooting and fictional examples'},
@@ -1021,7 +1023,7 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
     const canViewMasters=hasPerm(permissions,'MFG.view');
     const canViewPlanning=hasPerm(permissions,'PLN.view');
     const visibleTabs=tabs.filter(t=>t.key==='documentation'?module==='PLN'&&canViewPlanning:
-        t.key==='formDefaults'||t.key==='config'||t.key==='demand'||t.key==='sop'?canViewPlanning:canViewMasters);
+        t.key==='formDefaults'||t.key==='config'||t.key==='demand'||t.key==='sop'||t.key==='sopSetup'?canViewPlanning:canViewMasters);
     // Configuration progression depends on saved masters, not merely opening tabs.
     // Keep MFG master-data navigation and read-only PLN users usable.
     const enforceSetup=module==='PLN'&&canViewMasters&&canViewPlanning;
@@ -1086,6 +1088,9 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
         const data=await callBackend<SkuSetup>('/api/org/pln-mfg/sku/setup');
         setSkuSetup(data);
     };
+    const [stageMenu,setStageMenu]=useState(false);
+    const activeTab=tabs.find(tab=>tab.key===active);
+    const activePhase=phases.find(phase=>phase.key===activeTab?.phase);
     const changeTab=(tab:Tab)=>{
         if(enforceSetup&&loading&&tab!=='documentation'){
             setBlockedTarget(tab);
@@ -1251,15 +1256,45 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
     };
     return <div className='space-y-4'>
         <PageTitle title={module==='PLN'?'Production Planning & MRP':'Manufacturing'} action={null}/>
-        <nav aria-label='Production configuration menu' className='rounded-xl border border-line bg-panel px-3 py-2'>
-            <SelectField id='manufacturing-step-select' label='Configuration' value={active}
-                onChange={event=>changeTab(event.target.value as Tab)}>
-                {phases.map(phase=><optgroup key={phase.key} label={phase.title}>
-                    {visibleTabs.filter(tab=>tab.phase===phase.key).map(tab=>
-                        <option key={tab.key} value={tab.key}>{tab.shortLabel}</option>)}
-                </optgroup>)}
-            </SelectField>
+        {/* One row: a menu of every stage (grouped by phase) and the stages of the current phase as quick tabs. */}
+        <nav aria-label='Production configuration menu' className='flex items-center gap-1 rounded-xl border border-line bg-panel p-1.5'>
+            <button type='button' aria-haspopup='menu' aria-expanded={stageMenu} aria-label='All stages' title='All stages'
+                onClick={()=>setStageMenu(true)} className='flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-brand hover:bg-brand/10'>
+                <LayoutGrid className='h-5 w-5'/>
+            </button>
+            <div role='tablist' aria-label={activePhase?.title??'Stages'} className='flex min-w-0 flex-1 gap-1 overflow-x-auto'>
+                {visibleTabs.filter(tab=>tab.phase===activeTab?.phase).map(tab=>
+                    <button key={tab.key} type='button' role='tab' aria-selected={tab.key===active} onClick={()=>changeTab(tab.key)}
+                        className={'min-h-11 shrink-0 rounded-lg px-3 text-sm font-medium '+(tab.key===active?'bg-brand text-onbrand':'text-soft hover:bg-page')}>
+                        {tab.shortLabel}
+                    </button>)}
+            </div>
         </nav>
+        {stageMenu&&<div role='dialog' aria-modal='true' aria-label='Production planning menu' className='fixed inset-0 z-50 flex items-end justify-center bg-[#000000]/50 sm:items-center' onClick={()=>setStageMenu(false)}>
+            <div className='flex max-h-[85dvh] w-full max-w-lg flex-col rounded-t-2xl bg-panel text-ink sm:rounded-2xl' onClick={e=>e.stopPropagation()}>
+                <div className='flex items-center justify-between gap-2 border-b border-line p-3'>
+                    <h2 className='text-base font-semibold'>{module==='PLN'?'Production Planning & MRP':'Manufacturing'}</h2>
+                    <button type='button' aria-label='Close menu' onClick={()=>setStageMenu(false)} className='flex h-11 w-11 items-center justify-center rounded-xl border border-line'><X className='h-4 w-4'/></button>
+                </div>
+                <div role='menu' className='min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain p-3'>
+                    {phases.filter(phase=>visibleTabs.some(tab=>tab.phase===phase.key)).map(phase=><section key={phase.key} aria-label={phase.title}>
+                        <p className='px-1 text-xs font-semibold uppercase tracking-wide text-muted'>{phase.title}</p>
+                        <div className='mt-1 space-y-1'>
+                            {visibleTabs.filter(tab=>tab.phase===phase.key).map(tab=>
+                                <button key={tab.key} type='button' role='menuitem' aria-current={tab.key===active?'page':undefined}
+                                    onClick={()=>{setStageMenu(false);changeTab(tab.key);}}
+                                    className={'flex min-h-12 w-full items-center gap-3 rounded-xl px-3 py-2 text-left '+(tab.key===active?'bg-brand/10 ring-1 ring-brand':'hover:bg-page')}>
+                                    <span className='min-w-0 flex-1'>
+                                        <span className='block truncate text-sm font-semibold text-ink'>{tab.shortLabel}</span>
+                                        <span className='block text-xs text-muted'>{tab.hint}</span>
+                                    </span>
+                                    {tab.key===active&&<Check className='h-4 w-4 shrink-0 text-brand'/>}
+                                </button>)}
+                        </div>
+                    </section>)}
+                </div>
+            </div>
+        </div>}
         {setupBlocked&&<div role='alert' className='space-y-2 rounded-xl border border-amber-500/50 p-3 text-sm'>
             <p>{setupBlocked}</p>
             <Button variant='secondary' className='w-fit px-3 text-xs'
@@ -1281,7 +1316,7 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
         {active==='documentation'?<PlnDocumentation onNavigate={value=>changeTab(value as Tab)}/>:
         loading?<Spinner/>:active==='formDefaults'?<PlnFormDefaultsPanel initial={formDefaults} revision={formDefaultsRevision} sites={refs.sites} canEdit={canConfig} onSaved={(next,revision)=>{
             setConfig(previous=>({...previous,formDefaults:next}));setFormDefaultsRevision(revision);
-        }}/>:active==='sop'?<PlnPlanningWorkspace/>:active==='demand'?<PlnDemand permissions={permissions} formDefaults={formDefaults}/>: active==='skuSetup'?<SkuSetupPanel setup={skuSetup} canEdit={canSkuConfig} onSaved={refreshSkuSetup}
+        }}/>:active==='sop'?<PlnPlanningWorkspace onOpenSetup={()=>changeTab('sopSetup')}/>:active==='sopSetup'?<PlnPlanningSetup/>:active==='demand'?<PlnDemand permissions={permissions} formDefaults={formDefaults}/>: active==='skuSetup'?<SkuSetupPanel setup={skuSetup} canEdit={canSkuConfig} onSaved={refreshSkuSetup}
             onOpenSkus={()=>changeTab('items')}/>:active==='materialPolicy'?<Card className='space-y-4'>
             <h2 className='font-semibold'>Manufacturing material handling</h2>
             <p className='text-sm text-muted'>Configure material consumption and intermediate stock policies. The same material and BOM structure applies to every organization.</p>
