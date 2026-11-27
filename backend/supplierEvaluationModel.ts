@@ -214,3 +214,108 @@ export const profilesFor = (scopes: Array<{ kind: string }>) => PROFILES.filter(
 
 /** Overdue: open or done-but-unverified actions past their due date. */
 export const overdue = (a: Obj, day: string) => str(a.status) === 'open' && !!str(a.dueDate) && str(a.dueDate) < day;
+
+// ---------------------------------------------------------------------------
+// Deeper analytics: contribution, projection, cadence, action closure, question history, heat-map, rank.
+// ---------------------------------------------------------------------------
+
+export interface Contribution { accountability: Accountability; weight: number; earned: number; lost: number; open: number }
+/**
+ * How supplier, organization and joint questions make up the 100 points: earned, lost (not OK) and still open, averaged
+ * over the scorecards. Earned across the three adds up to the overall score.
+ */
+export function contributionOf(cards: Array<Pick<ScorecardScore, 'sub'>>): Contribution[] {
+    const n = cards.length || 1;
+    return ACCOUNTABILITY.map((a) => {
+        let weight = 0, earned = 0, assessed = 0;
+        for (const c of cards) { weight += c.sub[a].weight; earned += c.sub[a].earned; assessed += c.sub[a].assessed ?? c.sub[a].weight; }
+        return { accountability: a, weight: round(weight / n), earned: round(earned / n), lost: round((assessed - earned) / n), open: round((weight - assessed) / n) };
+    });
+}
+
+/** Where a scorecard can still finish: now (all open fail) to best case (all open OK). */
+export const projectionOf = (c: Pick<ScorecardScore, 'score' | 'coverage'>) => ({ low: round(c.score), high: round(c.score + (100 - c.coverage)) });
+
+export const daysBetween = (a: string, b: string) => Math.round((Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`)) / 86_400_000);
+
+export interface Cadence { phase: 'none' | 'upcoming' | 'open' | 'closed'; start: string; end: string; daysToOpen: number | null; daysToClose: number | null; windowDays: number; elapsedPct: number; next: { start: string; end: string } | null; daysSinceLast: number | null; dueBy: string; overdue: boolean }
+/** Where the evaluation calendar stands today, and when this supplier is next due. */
+export function cadenceOf(win: { start: string; end: string } | null | undefined, frequency: string, lastFinalWindowEnd: string, lastFinalAt: string, day: string): Cadence {
+    const sinceLast = lastFinalAt ? daysBetween(lastFinalAt.slice(0, 10), day) : null;
+    if (!win) return { phase: 'none', start: '', end: '', daysToOpen: null, daysToClose: null, windowDays: 0, elapsedPct: 0, next: null, daysSinceLast: sinceLast, dueBy: '', overdue: false };
+    const phase = day < win.start ? 'upcoming' : day <= win.end ? 'open' : 'closed';
+    const windowDays = daysBetween(win.start, win.end) + 1;
+    const elapsed = phase === 'upcoming' ? 0 : phase === 'closed' ? windowDays : daysBetween(win.start, day) + 1;
+    const covered = !!lastFinalWindowEnd && lastFinalWindowEnd >= win.end;
+    return {
+        phase, start: win.start, end: win.end,
+        daysToOpen: phase === 'upcoming' ? daysBetween(day, win.start) : null,
+        daysToClose: phase === 'open' ? daysBetween(day, win.end) : null,
+        windowDays, elapsedPct: round((elapsed / windowDays) * 100, 1),
+        next: nextWindow(win.end, frequency), daysSinceLast: sinceLast,
+        dueBy: covered ? nextWindow(win.end, frequency).end : win.end,
+        overdue: phase === 'closed' && !covered,
+    };
+}
+
+export interface ActionStats {
+    total: number; open: number; done: number; verified: number; overdue: number; closureRate: number; verifiedRate: number;
+    onTimeRate: number | null; avgDaysToClose: number | null; avgDaysToVerify: number | null;
+    aging: Array<{ label: string; count: number }>; dueSoon: number;
+    byAccountability: Array<{ accountability: Accountability; open: number; closed: number }>;
+}
+/** Closure tracker: how many actions are closed, on time, how fast, and how late the open ones are. */
+export function actionStats(actions: Obj[], day: string): ActionStats {
+    const st = (a: Obj) => str(a.status);
+    const closed = actions.filter((a) => ['done', 'verified'].includes(st(a)));
+    const open = actions.filter((a) => st(a) === 'open');
+    const late = open.filter((a) => str(a.dueDate) && str(a.dueDate) < day);
+    const onTime = closed.filter((a) => str(a.doneAt) && str(a.dueDate) && str(a.doneAt).slice(0, 10) <= str(a.dueDate));
+    const close = closed.filter((a) => str(a.doneAt) && str(a.createdAt)).map((a) => daysBetween(str(a.createdAt).slice(0, 10), str(a.doneAt).slice(0, 10)));
+    const verify = actions.filter((a) => st(a) === 'verified' && str(a.verifiedAt) && str(a.doneAt)).map((a) => daysBetween(str(a.doneAt).slice(0, 10), str(a.verifiedAt).slice(0, 10)));
+    const avg = (xs: number[]) => (xs.length ? round(xs.reduce((s, x) => s + x, 0) / xs.length, 1) : null);
+    const lateBy = (a: Obj) => daysBetween(str(a.dueDate), day);
+    const total = actions.length;
+    return {
+        total, open: open.length, done: actions.filter((a) => st(a) === 'done').length, verified: actions.filter((a) => st(a) === 'verified').length, overdue: late.length,
+        closureRate: total ? round((closed.length / total) * 100, 1) : 0,
+        verifiedRate: total ? round((actions.filter((a) => st(a) === 'verified').length / total) * 100, 1) : 0,
+        onTimeRate: closed.length ? round((onTime.length / closed.length) * 100, 1) : null,
+        avgDaysToClose: avg(close), avgDaysToVerify: avg(verify),
+        aging: [
+            { label: 'Not yet due', count: open.length - late.length },
+            { label: '1–7 days late', count: late.filter((a) => lateBy(a) <= 7).length },
+            { label: '8–30 days late', count: late.filter((a) => lateBy(a) > 7 && lateBy(a) <= 30).length },
+            { label: 'Over 30 days late', count: late.filter((a) => lateBy(a) > 30).length },
+        ],
+        dueSoon: open.filter((a) => str(a.dueDate) >= day && daysBetween(day, str(a.dueDate)) <= 7).length,
+        byAccountability: ACCOUNTABILITY.map((acc) => ({ accountability: acc, open: open.filter((a) => str(a.accountability) === acc).length, closed: closed.filter((a) => str(a.accountability) === acc).length })),
+    };
+}
+
+export interface QuestionHistory { assessed: number; notOk: number; streak: number; last: { state: string; note: string; at: string; evaluation: string } | null }
+/**
+ * Each question's record over earlier evaluations (oldest first): how often assessed and failed, the current run of
+ * consecutive failures, and the last result with its finding.
+ */
+export function questionHistory(evals: Array<{ number: string; at: string; answers: Record<string, Answer> }>): Record<string, QuestionHistory> {
+    const out: Record<string, QuestionHistory> = {};
+    for (const e of evals) {
+        for (const [k, a] of Object.entries(e.answers)) {
+            if (!a || (a.state !== 'ok' && a.state !== 'not_ok')) continue;
+            const h = (out[k] ??= { assessed: 0, notOk: 0, streak: 0, last: null });
+            h.assessed++;
+            if (a.state === 'not_ok') { h.notOk++; h.streak++; } else h.streak = 0;
+            h.last = { state: a.state, note: str(a.note), at: e.at, evaluation: e.number };
+        }
+    }
+    return out;
+}
+
+/** Percentile rank of a score among others (100 = best). */
+export function rankOf(score: number, all: number[]): { rank: number; of: number; percentile: number } {
+    const sorted = [...all].sort((a, b) => b - a);
+    const rank = sorted.findIndex((x) => x <= score) + 1 || sorted.length;
+    const below = all.filter((x) => x < score).length;
+    return { rank, of: all.length, percentile: all.length > 1 ? round((below / (all.length - 1)) * 100) : 100 };
+}

@@ -1,4 +1,4 @@
-import { useId } from 'react';
+import { useId, useState } from 'react';
 
 // Shared visuals for supplier relationship evaluation: a 0-100 colour scale that moves smoothly from red through
 // yellow to green, a semicircle gauge, small rings, bars and a trend line. Colours are computed, not themed, so the
@@ -140,3 +140,152 @@ export const answerStyle = (state: string) =>
         : state === 'not_ok'
             ? { background: 'rgba(239, 68, 68, 0.12)', borderColor: 'rgba(239, 68, 68, 0.45)' }
             : {};
+
+// ----- Deeper visuals -----
+
+export const ACC_HUE: Record<string, number> = { SUPPLIER: 210, ORGANIZATION: 280, BOTH: 32 };
+export const accColor = (a: string, alpha = 1) => `hsla(${ACC_HUE[a] ?? 0}, 65%, 50%, ${alpha})`;
+const ACC_NAME: Record<string, string> = { SUPPLIER: 'Supplier', ORGANIZATION: 'Organization', BOTH: 'Joint' };
+
+/**
+ * 100 points split by who is accountable: solid = earned, hatched = lost (not OK), faint = still open.
+ * Earned segments add up to the score.
+ */
+export function ContributionBar({ rows }: { rows: Array<{ accountability: string; weight: number; earned: number; lost: number; open: number }> }) {
+    const id = useId().replace(/:/g, '');
+    const total = rows.reduce((s, r) => s + r.weight, 0) || 100;
+    return (
+        <div>
+            <svg width='0' height='0' className='absolute'>
+                <defs>
+                    {rows.map((r) => (
+                        <pattern key={r.accountability} id={`h${id}${r.accountability}`} patternUnits='userSpaceOnUse' width='6' height='6' patternTransform='rotate(45)'>
+                            <rect width='6' height='6' fill={accColor(r.accountability, 0.12)} />
+                            <line x1='0' y1='0' x2='0' y2='6' stroke={scoreColor(0, 0.7)} strokeWidth='2.5' />
+                        </pattern>
+                    ))}
+                </defs>
+            </svg>
+            <div className='flex h-7 w-full overflow-hidden rounded-lg' role='img' aria-label='Score contribution'>
+                {rows.map((r) => (
+                    <div key={r.accountability} className='flex h-full' style={{ width: `${(r.weight / total) * 100}%`, borderRight: '2px solid transparent' }}>
+                        <div style={{ width: `${(r.earned / (r.weight || 1)) * 100}%`, background: accColor(r.accountability), transition: 'width 600ms' }} />
+                        <svg style={{ width: `${(r.lost / (r.weight || 1)) * 100}%`, height: '100%', transition: 'width 600ms' }} preserveAspectRatio='none'><rect width='100%' height='100%' fill={`url(#h${id}${r.accountability})`} /></svg>
+                        <div style={{ width: `${(r.open / (r.weight || 1)) * 100}%`, background: accColor(r.accountability, 0.15), transition: 'width 600ms' }} />
+                    </div>
+                ))}
+            </div>
+            <div className='mt-3 grid grid-cols-3 gap-2'>
+                {rows.map((r) => (
+                    <div key={r.accountability} className='rounded-xl bg-page p-2'>
+                        <p className='flex items-center gap-1.5 text-xs font-semibold' style={{ color: accColor(r.accountability) }}><span className='h-2.5 w-2.5 rounded-sm' style={{ background: accColor(r.accountability) }} />{ACC_NAME[r.accountability]}</p>
+                        <p className='mt-1 text-lg font-bold text-ink'>{fmt(r.earned)}<span className='text-xs font-normal text-muted'> / {fmt(r.weight)}</span></p>
+                        <p className='text-xs text-muted'>lost {fmt(r.lost)}{r.open > 0.05 ? ` · open ${fmt(r.open)}` : ''}</p>
+                    </div>
+                ))}
+            </div>
+        </div>
+    );
+}
+
+/** Several lines over the same windows: overall plus supplier, organization and joint. Tap a legend item to hide it. */
+export function MultiTrend({ points, series, bands, height = 180 }: { points: Array<Record<string, number | string | null>>; series: Array<{ key: string; label: string; color: string; bold?: boolean }>; bands?: { improveFrom: number; passFrom: number }; height?: number }) {
+    const [off, setOff] = useState<Record<string, boolean>>({});
+    const w = 340, h = height, pl = 28, pr = 22, pt = 14, pb = 24;
+    if (!points.length) return <p className='text-sm text-muted'>No final evaluations yet.</p>;
+    const x = (i: number) => (points.length === 1 ? (pl + w - pr) / 2 : pl + (i * (w - pl - pr)) / (points.length - 1));
+    const y = (v: number) => pt + (1 - v / 100) * (h - pt - pb);
+    return (
+        <div>
+            <svg width='100%' viewBox={`0 0 ${w} ${h}`} role='img' aria-label='Score trends'>
+                {bands && (
+                    <>
+                        <rect x={pl} y={y(100)} width={w - pl - pr} height={y(bands.passFrom) - y(100)} fill={scoreColor(90, 0.09)} />
+                        <rect x={pl} y={y(bands.passFrom)} width={w - pl - pr} height={y(bands.improveFrom) - y(bands.passFrom)} fill={scoreColor(55, 0.09)} />
+                        <rect x={pl} y={y(bands.improveFrom)} width={w - pl - pr} height={y(0) - y(bands.improveFrom)} fill={scoreColor(5, 0.07)} />
+                    </>
+                )}
+                {[0, 25, 50, 75, 100].map((g) => (
+                    <g key={g}>
+                        <line x1={pl} x2={w - pr} y1={y(g)} y2={y(g)} stroke='currentColor' className='text-line' strokeWidth={0.6} />
+                        <text x={pl - 4} y={y(g) + 4} textAnchor='end' fontSize={12} className='fill-current text-muted'>{g}</text>
+                    </g>
+                ))}
+                {series.filter((s) => !off[s.key]).map((s) => {
+                    const pts = points.map((p, i) => ({ i, v: typeof p[s.key] === 'number' ? (p[s.key] as number) : null })).filter((p) => p.v !== null) as Array<{ i: number; v: number }>;
+                    if (!pts.length) return null;
+                    return (
+                        <g key={s.key}>
+                            <path d={pts.map((p, k) => `${k ? 'L' : 'M'} ${x(p.i).toFixed(1)} ${y(p.v).toFixed(1)}`).join(' ')} fill='none' stroke={s.color} strokeWidth={s.bold ? 3 : 1.8} strokeDasharray={s.bold ? undefined : '4 3'} strokeLinecap='round' />
+                            {pts.map((p) => <circle key={p.i} cx={x(p.i)} cy={y(p.v)} r={s.bold ? 4.5 : 3} fill={s.bold ? scoreColor(p.v) : s.color} />)}
+                            {s.bold && pts.map((p) => <text key={`t${p.i}`} x={x(p.i)} y={y(p.v) - 8} textAnchor='middle' fontSize={12} fontWeight={700} fill={scoreColor(p.v)}>{Math.round(p.v)}</text>)}
+                        </g>
+                    );
+                })}
+                {points.map((p, i) => <text key={i} x={x(i)} y={h - 6} textAnchor='middle' fontSize={12} className='fill-current text-muted'>{String(p.label ?? '').slice(2, 7)}</text>)}
+            </svg>
+            <div className='mt-1 flex flex-wrap gap-2'>
+                {series.map((s) => (
+                    <button key={s.key} type='button' aria-pressed={!off[s.key]} onClick={() => setOff((o) => ({ ...o, [s.key]: !o[s.key] }))} className={`flex min-h-[44px] items-center gap-1.5 rounded-full border border-line px-3 text-xs ${off[s.key] ? 'text-muted line-through' : 'text-soft'}`}>
+                        <span className='h-2.5 w-2.5 rounded-full' style={{ background: s.color }} />{s.label}
+                    </button>
+                ))}
+            </div>
+        </div>
+    );
+}
+
+/** Rows (categories) x columns (evaluations), each cell coloured by its score. */
+export function Heatmap({ columns, rows }: { columns: string[]; rows: Array<{ id: string; name: string; cells: Array<number | null> }> }) {
+    return (
+        <div className='overflow-x-auto'>
+            <table className='w-full border-separate' style={{ borderSpacing: 3 }}>
+                <thead>
+                    <tr>
+                        <th className='text-left text-xs font-normal text-muted'>Category</th>
+                        {columns.map((c, i) => <th key={`${c}${i}`} className='min-w-[40px] text-center text-xs font-normal text-muted'>{c.slice(2, 7)}</th>)}
+                    </tr>
+                </thead>
+                <tbody>
+                    {rows.map((r) => (
+                        <tr key={r.id}>
+                            <td className='max-w-[110px] truncate pr-1 text-xs text-soft' title={r.name}>{r.name}</td>
+                            {r.cells.map((v, i) => (
+                                <td key={i} className='h-9 rounded-md text-center text-xs font-semibold' style={{ background: v === null ? 'transparent' : scoreColor(v, 0.22), color: v === null ? undefined : scoreColor(v), border: v === null ? '1px dashed currentColor' : undefined }}>{v === null ? '' : Math.round(v)}</td>
+                            ))}
+                        </tr>
+                    ))}
+                </tbody>
+            </table>
+        </div>
+    );
+}
+
+/** A countdown tile: big number of days with a progress bar through the window. */
+export function Countdown({ days, label, caption, pct, tone }: { days: number | null; label: string; caption?: string; pct?: number; tone?: number }) {
+    return (
+        <div className='rounded-2xl border border-line bg-panel p-3'>
+            <p className='text-xs uppercase tracking-wide text-muted'>{label}</p>
+            <p className='mt-0.5 text-3xl font-bold' style={{ color: tone === undefined ? undefined : scoreColor(tone) }}>{days === null ? '—' : days}<span className='ml-1 text-sm font-medium text-muted'>{days === 1 ? 'day' : 'days'}</span></p>
+            {caption && <p className='text-xs text-soft'>{caption}</p>}
+            {pct !== undefined && <div className='mt-2'><ScoreBar pct={100 - pct} height={6} /></div>}
+        </div>
+    );
+}
+
+/** Actions moving from raised to done to verified. */
+export function ClosureFunnel({ total, closed, verified }: { total: number; closed: number; verified: number }) {
+    const steps = [{ label: 'Raised', n: total, tone: 30 }, { label: 'Done', n: closed, tone: 65 }, { label: 'Verified', n: verified, tone: 100 }];
+    return (
+        <div className='space-y-1.5'>
+            {steps.map((s) => (
+                <div key={s.label} className='flex items-center gap-2'>
+                    <span className='w-16 shrink-0 text-xs text-soft'>{s.label}</span>
+                    <div className='h-6 flex-1 overflow-hidden rounded-md bg-line'>
+                        <div className='flex h-full items-center justify-end rounded-md pr-2 text-xs font-semibold text-white' style={{ width: `${total ? Math.max(8, (s.n / total) * 100) : 0}%`, background: scoreColor(s.tone), transition: 'width 600ms' }}>{s.n}</div>
+                    </div>
+                </div>
+            ))}
+        </div>
+    );
+}
