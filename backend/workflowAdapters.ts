@@ -118,6 +118,23 @@ const agreements: Adapter = {
     },
 };
 
+const supplierEvaluations: Adapter = {
+    key: 'prc.srm', module: 'Procurement', label: 'Supplier evaluation',
+    collection: (org) => `${root(org)}/srm_evaluations`, statuses: ['submitted', 'returned'],
+    routes: /^org\.procurement\.srm\.evaluations/,
+    link: 'procurement_srm', linkLabel: 'Procurement › Supplier evaluation',
+    ref: (id, d) => str(d.number) || id, title: (id, d) => `Supplier evaluation ${str(d.number) || id}${str(d.vendorName) ? ` · ${str(d.vendorName)}` : ''}`,
+    by: lastBy,
+    async stage(env, id, d) {
+        const { srmApproverCheck } = await import('./supplierEvaluation');
+        const { can } = await import('./procurementSetup');
+        const details = [{ label: 'Supplier', value: str(d.vendorName) }, { label: 'Legal entity', value: str(d.legalEntityName) }, { label: 'Window', value: `${str(d.windowStart)} to ${str(d.windowEnd)}` }, { label: 'Score', value: String(Number(o(d.result).score) || 0) }];
+        if (str(d.status) === 'submitted') return stage(`approve|${str(d.submittedAt)}`, 'Approve or return the supplier evaluation', rule(env, (p) => can(p.ctx, 'PRC.srm.approve') && srmApproverCheck(p.ctx, d).ok), { details });
+        if (str(d.status) === 'returned') return stage(`returned|${short(str(d.returnReason))}|${str(d.returnedAt)}`, 'Correct the returned supplier evaluation and submit it again', only(env, str(d.submittedBy) || str(d.createdBy)), { details: [...details, { label: 'Reason', value: str(d.returnReason) }] });
+        return null;
+    },
+};
+
 // ----- Finance -----
 
 const apDoc = (key: string, coll: string, label: string, perm: string): Adapter => ({
@@ -408,7 +425,7 @@ const hrRules: Adapter = {
 };
 
 export const ADAPTERS: Adapter[] = [
-    requirements, orders, requisitions, vendors, agreements,
+    requirements, orders, requisitions, vendors, agreements, supplierEvaluations,
     apDoc('fin.ap_invoice', 'ap_invoices', 'Supplier invoice', 'FIN.ap.approve'),
     apDoc('fin.ap_payment', 'ap_payments', 'Supplier payment', 'FIN.ap.payapprove'),
     apDoc('fin.receipt_adjustment', 'receipt_adjustments', 'Receipt adjustment', 'FIN.receipt.approve'),

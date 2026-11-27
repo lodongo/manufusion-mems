@@ -92,6 +92,11 @@ export const SOURCES: Source[] = [
         visible: (h, id, d) => h.involved('VEN', id, d) || h.holds('PRC.vendors.view'),
     },
     {
+        type: 'SRE', label: 'Supplier evaluation', module: 'Procurement', coll: 'srm_evaluations', link: 'procurement_srm', linkLabel: 'Supplier evaluation', adapters: ['prc.srm'],
+        ref: (id, d) => first(d.number, id), title: (id, d) => first(d.vendorName, 'Supplier evaluation'), sub: (d) => [str(d.legalEntityName), str(d.windowStart) && str(d.windowEnd) ? `${str(d.windowStart)} to ${str(d.windowEnd)}` : ''].filter(Boolean).join(' · '), status: (d) => str(d.status), when: (d) => first(d.updatedAt, d.createdAt),
+        visible: (h, id, d) => h.involved('SRE', id, d) || h.holds('PRC.srm.view', 'PRC.srm.evaluate', 'PRC.srm.approve'),
+    },
+    {
         type: 'PA', label: 'Purchase agreement', module: 'Procurement', coll: 'purchase_agreements', link: 'procurement_agreements', linkLabel: 'Purchase agreements', adapters: ['prc.agreement'],
         ref: (id, d) => first(d.number, id), title: (id, d) => first(d.title, d.vendorName, 'Purchase agreement'), sub: (d) => [str(d.vendorName), str(d.startDate) && str(d.endDate) ? `${str(d.startDate)} to ${str(d.endDate)}` : ''].filter(Boolean).join(' · '), status: (d) => str(d.status), when: (d) => first(d.updatedAt, d.createdAt),
         visible: (h, id, d) => h.involved('PA', id, d) || h.holds('PRC.agreements.view', 'PRC.agreements.manage', 'PRC.agreements.approve'),

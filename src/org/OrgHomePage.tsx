@@ -60,6 +60,7 @@ const PurchaseRequirements = lazy(() => import('./PurchaseRequirements'));
 const ProcurementSetup = lazy(() => import('./ProcurementSetup'));
 const PurchaseOrders = lazy(() => import('./PurchaseOrders'));
 const PurchaseAgreements = lazy(() => import('./PurchaseAgreements'));
+const SupplierEvaluation = lazy(() => import('./SupplierEvaluation'));
 const ProcurementDashboard = lazy(() => import('./ProcurementDashboard'));
 const Journals = lazy(() => import('./Journals'));
 const FinGl = lazy(() => import('./FinGl'));
@@ -154,6 +155,7 @@ const MODULE_LINKS: Record<string, LinkItem[]> = {
         { label: 'Vendors', path: 'procurement_vendors', permission: 'PRC.vendors.view' },
         { label: 'Quotations', path: 'procurement_quotations', permission: 'PRC.quotes.view' },
         { label: 'Purchase agreements', path: 'procurement_agreements', permission: 'PRC.agreements.view' },
+        { label: 'Supplier evaluation', path: 'procurement_srm', permission: 'PRC.srm.view' },
         { label: 'Purchase requisitions', path: 'procurement_requisitions', everyone: true },
         { label: 'Purchase orders', path: 'procurement_orders', everyone: true },
         { label: 'Procurement dashboard', path: 'procurement_dashboard', everyone: true },
@@ -505,6 +507,7 @@ export default function OrgHomePage({
     else if (activeMenu && section === 'procurement_vendors') content = <Vendors id={id} sub={sub} />;
     else if (activeMenu && section === 'procurement_quotations') content = <Quotations id={id} />;
     else if (activeMenu && section === 'procurement_agreements') content = <PurchaseAgreements id={id} />;
+    else if (activeMenu && section === 'procurement_srm') content = <SupplierEvaluation id={id} />;
     else if (activeMenu && section === 'procurement_buyers') content = <BuyerGroups back='organization_home' />;
     else if (activeMenu && section === 'warehouse_overview') content = <WarehouseOverview back='organization_home' />;
     else if (activeMenu && section === 'procurement_requisitions') content = <PurchaseOrders kind='requisitions' id={id} />;
