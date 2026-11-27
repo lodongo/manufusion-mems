@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
+    actionStats, cadenceOf, contributionOf, projectionOf, questionHistory, rankOf,
     adoptionProblems, bandOf, bandProblems, cleanEligible, effectiveProfile, nextState, nextWindow, overallOf, profilesFor,
     scoreCard, submitProblems, windowProblems,
 } from '../../backend/supplierEvaluationModel.ts';
@@ -134,4 +135,52 @@ test('approval reaches people as workflow actions; screens are wired', () => {
     assert.match(vis, /rgba\(34, 197, 94, 0\.13\)/, 'OK is light green');
     assert.match(vis, /rgba\(239, 68, 68, 0\.12\)/, 'not OK is light red');
     assert.match(vis, /const hue = \(s \/ 100\) \* 125;/, 'red to yellow to green');
+});
+
+test('deeper analytics: contribution, projection, cadence, action closure, repeat findings and rank', () => {
+    const card = { score: 40, coverage: 60, sub: { SUPPLIER: { earned: 40, weight: 40, assessed: 40 }, ORGANIZATION: { earned: 0, weight: 20, assessed: 20 }, BOTH: { earned: 0, weight: 40, assessed: 0 } } };
+    const c = contributionOf([card]);
+    assert.deepEqual(c.map((x) => [x.accountability, x.earned, x.lost, x.open]), [['SUPPLIER', 40, 0, 0], ['ORGANIZATION', 0, 20, 0], ['BOTH', 0, 0, 40]]);
+    assert.equal(c.reduce((s, x) => s + x.earned, 0), 40, 'earned adds up to the score');
+    assert.deepEqual(projectionOf(card), { low: 40, high: 80 });
+
+    const open = cadenceOf({ start: '2026-10-01', end: '2026-12-31' }, 'quarterly', '2026-09-30', '2026-10-05T10:00:00Z', '2026-11-27');
+    assert.equal(open.phase, 'open');
+    assert.equal(open.daysToClose, 34);
+    assert.equal(open.daysSinceLast, 53);
+    assert.deepEqual(open.next, { start: '2027-01-01', end: '2027-03-31' });
+    const up = cadenceOf({ start: '2027-01-01', end: '2027-03-31' }, 'quarterly', '', '', '2026-11-27');
+    assert.equal(up.phase, 'upcoming');
+    assert.equal(up.daysToOpen, 35);
+    assert.equal(cadenceOf({ start: '2026-07-01', end: '2026-09-30' }, 'quarterly', '', '', '2026-11-27').overdue, true);
+
+    const s = actionStats([
+        { status: 'open', dueDate: '2026-11-10', createdAt: '2026-10-01', accountability: 'SUPPLIER' },
+        { status: 'open', dueDate: '2026-12-01', createdAt: '2026-11-01', accountability: 'SUPPLIER' },
+        { status: 'done', dueDate: '2026-11-30', createdAt: '2026-10-01', doneAt: '2026-10-21', accountability: 'ORGANIZATION' },
+        { status: 'verified', dueDate: '2026-10-15', createdAt: '2026-09-01', doneAt: '2026-10-20', verifiedAt: '2026-10-24', accountability: 'BOTH' },
+    ], '2026-11-27');
+    assert.equal(s.closureRate, 50);
+    assert.equal(s.onTimeRate, 50, 'one closed before its due date, one after');
+    assert.equal(s.avgDaysToClose, (20 + 49) / 2);
+    assert.equal(s.avgDaysToVerify, 4);
+    assert.equal(s.overdue, 1);
+    assert.equal(s.dueSoon, 1);
+    assert.deepEqual(s.aging.map((a) => a.count), [1, 0, 1, 0]);
+    assert.deepEqual(s.byAccountability.find((b) => b.accountability === 'SUPPLIER'), { accountability: 'SUPPLIER', open: 2, closed: 0 });
+
+    const h = questionHistory([
+        { number: 'A', at: '2026-03-31', answers: { 'MAT|q': { state: 'ok' } } },
+        { number: 'B', at: '2026-06-30', answers: { 'MAT|q': { state: 'not_ok', note: 'late' } } },
+        { number: 'C', at: '2026-09-30', answers: { 'MAT|q': { state: 'not_ok', note: 'late again' } } },
+    ]);
+    assert.deepEqual(h['MAT|q'], { assessed: 3, notOk: 2, streak: 2, last: { state: 'not_ok', note: 'late again', at: '2026-09-30', evaluation: 'C' } });
+
+    assert.deepEqual(rankOf(80, [90, 80, 70, 60, 50]), { rank: 2, of: 5, percentile: 75 });
+});
+
+test('the screens show the deeper views', () => {
+    const ui = read('src/org/SupplierEvaluation.tsx');
+    for (const s of ['Where the points come from', 'Can finish between', 'Last time:', "'repeat'", 'Recurring issues', 'Action closure tracker', 'Category heat-map', 'Supplier league table', 'Weakest categories', 'Assessment due in', 'Since last final assessment']) assert.ok(ui.includes(s), s);
+    assert.match(read('backend/supplierEvaluation.ts'), /'POST \/api\/org\/procurement\/srm\/insights'/);
 });

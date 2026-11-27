@@ -9,8 +9,8 @@ import { lock, nameOfUser } from './purchaseOrders';
 import { validateSupplierRelationshipTemplate } from './supplierRelationshipTemplate';
 import {
     ACCOUNTABILITY, BAND_LABEL, FREQUENCIES, KIND_PROFILE, PROFILES, PROFILE_LABEL, STATES,
-    adoptionProblems, answerKey, bandOf, bandProblems, cleanEligible, effectiveProfile, inWindow, nextWindow, overallOf,
-    overdue, profilesFor, scoreCard, submitProblems, windowId, windowProblems,
+    actionStats, adoptionProblems, answerKey, bandOf, bandProblems, cadenceOf, cleanEligible, contributionOf, effectiveProfile, inWindow, nextWindow, overallOf,
+    overdue, profilesFor, questionHistory, rankOf, scoreCard, submitProblems, windowId, windowProblems,
     type Answer, type AnswerState, type Bands, type MasterProfile, type Profile, type ProfileId,
 } from './supplierEvaluationModel';
 
@@ -259,12 +259,115 @@ function dashboardOf(vendorId: string, evals: Doc[], setup: Setup | null) {
         }
     }
     const day = today();
+    // Contribution of supplier, organization and joint questions to the latest score, and over time.
+    const contribution = last ? contributionOf(last.cards.map((c) => ({ sub: o(c.sub) as never }))) : [];
+    const contributionTrend = trend.map((t) => ({ label: t.windowEnd, contributions: contributionOf(t.cards.map((c) => ({ sub: o(c.sub) as never }))) }));
+    const subTrend = trend.map((t) => ({ label: t.windowEnd, score: t.score, SUPPLIER: t.sub.SUPPLIER ?? null, ORGANIZATION: t.sub.ORGANIZATION ?? null, BOTH: t.sub.BOTH ?? null }));
+    // Heat-map: template categories x the last six final evaluations.
+    const heatmap: Record<string, { columns: string[]; rows: Array<{ id: string; name: string; cells: Array<number | null> }> }> = {};
+    for (const p of PROFILES) {
+        const cols = trend.filter((t) => t.cards.some((c) => str(c.profile) === p)).slice(-6);
+        if (!cols.length) continue;
+        const rows = new Map<string, { id: string; name: string; cells: Array<number | null> }>();
+        cols.forEach((t, i) => {
+            for (const x of objs(t.cards.find((c) => str(c.profile) === p)?.categories)) {
+                const r = rows.get(str(x.id)) ?? { id: str(x.id), name: str(x.name), cells: cols.map(() => null) };
+                r.cells[i] = x.pct === null ? null : Number(x.pct);
+                rows.set(r.id, r);
+            }
+        });
+        heatmap[p] = { columns: cols.map((t) => t.windowEnd), rows: [...rows.values()] };
+    }
+    // Recurring issues and consistent strengths, question by question.
+    const finals = mine.filter((e) => str(e.data.status) === 'finalized').sort((a, b) => str(a.data.windowStart).localeCompare(str(b.data.windowStart)));
+    const qh = questionHistory(finals.map((e) => ({ number: str(e.data.number) || e.id, at: str(e.data.windowEnd), answers: answersOf(e.data) })));
+    const qtext = new Map<string, { text: string; accountability: string; weight: number; category: string }>();
+    for (const e of finals) for (const c of objs(e.data.scorecards)) for (const cat of objs(c.categories)) for (const q of objs(cat.questions)) qtext.set(answerKey(str(c.id), str(q.id)), { text: str(q.text), accountability: str(q.accountability), weight: Number(q.weight) || 0, category: str(cat.name) });
+    const qrows = Object.entries(qh).map(([k, h]) => ({ key: k, profile: k.split('|')[0], questionId: k.split('|')[1], ...h, ...(qtext.get(k) ?? { text: '', accountability: '', weight: 0, category: '' }) }));
+    const issues = qrows.filter((q) => q.notOk > 0).sort((a, b) => b.streak - a.streak || b.notOk - a.notOk || b.weight - a.weight).slice(0, 8);
+    const strengths = qrows.filter((q) => q.notOk === 0 && q.assessed > 0).sort((a, b) => b.assessed - a.assessed || b.weight - a.weight).slice(0, 6);
+    const lastFinal = finals[finals.length - 1];
+    const cadence = cadenceOf(setup?.window, setup?.frequency ?? 'quarterly', str(lastFinal?.data.windowEnd), str(lastFinal?.data.approvedAt), day);
     const actions: Obj[] = mine.flatMap((e) => objs(e.data.actions).map((a) => ({ ...a, evaluationId: e.id, evaluationNumber: str(e.data.number) || e.id, legalEntityName: str(e.data.legalEntityName), overdue: overdue(a, day) })));
     const current = mine.filter((e) => setup?.window && str(e.data.windowId) === setup.window.id).map((e) => ({ id: e.id, number: str(e.data.number), legalEntityName: str(e.data.legalEntityName), status: str(e.data.status), score: Number(o(e.data.result).score) || 0, coverage: Number(o(e.data.result).coverage) || 0 }));
     return {
-        last, trend, lastCard, lastCategory, procurementCategories, current,
+        last, trend, lastCard, lastCategory, procurementCategories, current, contribution, contributionTrend, subTrend, heatmap, issues, strengths, cadence,
+        actionStats: actionStats(actions, day),
         actions: actions.sort((a, b) => Number(b.overdue) - Number(a.overdue) || str(a.dueDate).localeCompare(str(b.dueDate))),
         actionCounts: { open: actions.filter((a) => str(a.status) === 'open').length, overdue: actions.filter((a) => a.overdue).length, done: actions.filter((a) => str(a.status) === 'done').length, verified: actions.filter((a) => str(a.status) === 'verified').length },
+    };
+}
+
+/** Each supplier's latest final evaluation. */
+function latestByVendor(evals: Doc[]): Map<string, Doc> {
+    const m = new Map<string, Doc>();
+    for (const e of evals) {
+        if (str(e.data.status) !== 'finalized') continue;
+        const cur = m.get(str(e.data.vendorId));
+        if (!cur || `${str(e.data.windowStart)}${str(e.data.approvedAt)}` > `${str(cur.data.windowStart)}${str(cur.data.approvedAt)}`) m.set(str(e.data.vendorId), e);
+    }
+    return m;
+}
+
+/** Portfolio insights: every evaluated supplier, distribution, trend, weakest categories, window progress, actions. */
+async function insights(ctx: OrgContext) {
+    const [setup, evals, les] = await Promise.all([getSetup(ctx.orgId), listDocs(evalPath(ctx.orgId)), legalEntities(ctx.orgId)]);
+    const day = today();
+    const bands = setup?.bands ?? { improveFrom: 60, passFrom: 75 };
+    const latest = latestByVendor(evals);
+    const finals = evals.filter((e) => str(e.data.status) === 'finalized');
+    const scoresAll = [...latest.values()].map((e) => Number(o(e.data.result).score) || 0);
+    const league = [...latest.values()].map((e) => {
+        const vid = str(e.data.vendorId);
+        const prev = finals.filter((x) => str(x.data.vendorId) === vid && x.id !== e.id && str(x.data.windowStart) < str(e.data.windowStart)).sort((a, b) => str(b.data.windowStart).localeCompare(str(a.data.windowStart)))[0];
+        const acts = evals.filter((x) => str(x.data.vendorId) === vid).flatMap((x) => objs(x.data.actions));
+        const r = o(e.data.result), score = Number(r.score) || 0;
+        const cur = setup?.window ? evals.filter((x) => str(x.data.vendorId) === vid && str(x.data.windowId) === setup.window!.id && str(x.data.status) !== 'cancelled') : [];
+        return {
+            vendorId: vid, vendorName: str(e.data.vendorName), vendorNumber: str(e.data.vendorNumber), score, band: bandOf(score, bands),
+            previous: prev ? Number(o(prev.data.result).score) || 0 : null, delta: prev ? Math.round((score - (Number(o(prev.data.result).score) || 0)) * 10) / 10 : null,
+            supplier: o(r.sub).SUPPLIER ?? null, organization: o(r.sub).ORGANIZATION ?? null, joint: o(r.sub).BOTH ?? null,
+            openActions: acts.filter((a) => str(a.status) === 'open').length, overdueActions: acts.filter((a) => overdue(a, day)).length,
+            lastWindowEnd: str(e.data.windowEnd), lastLegalEntity: str(e.data.legalEntityName),
+            currentStatus: cur.length ? (cur.every((x) => str(x.data.status) === 'finalized') ? 'finalized' : cur.some((x) => str(x.data.status) === 'submitted') ? 'submitted' : 'in_progress') : setup?.eligible.some((x) => x.vendorId === vid) ? 'not_started' : 'not_selected',
+            rank: rankOf(score, scoresAll).rank,
+        };
+    }).sort((a, b) => b.score - a.score);
+    // Portfolio trend: average final score per window.
+    const byWindow = new Map<string, { start: string; end: string; scores: number[]; sub: Record<string, number[]> }>();
+    for (const e of finals) {
+        const k = str(e.data.windowId);
+        const w = byWindow.get(k) ?? { start: str(e.data.windowStart), end: str(e.data.windowEnd), scores: [], sub: { SUPPLIER: [], ORGANIZATION: [], BOTH: [] } };
+        w.scores.push(Number(o(e.data.result).score) || 0);
+        for (const a of ACCOUNTABILITY) { const v = o(o(e.data.result).sub)[a]; if (typeof v === 'number') w.sub[a].push(v); }
+        byWindow.set(k, w);
+    }
+    const avg = (xs: number[]) => (xs.length ? Math.round((xs.reduce((s, x) => s + x, 0) / xs.length) * 10) / 10 : null);
+    const trend = [...byWindow.values()].sort((a, b) => a.start.localeCompare(b.start)).slice(-8).map((w) => ({ label: w.end, score: avg(w.scores) ?? 0, count: w.scores.length, SUPPLIER: avg(w.sub.SUPPLIER), ORGANIZATION: avg(w.sub.ORGANIZATION), BOTH: avg(w.sub.BOTH) }));
+    // Weakest template categories across suppliers' latest evaluations.
+    const cat = new Map<string, { profile: string; id: string; name: string; values: number[] }>();
+    for (const e of latest.values()) for (const c of objs(o(e.data.result).cards)) for (const x of objs(c.categories)) {
+        if (x.pct === null || x.pct === undefined) continue;
+        const k = `${str(c.profile)}|${str(x.id)}`;
+        const r = cat.get(k) ?? { profile: str(c.profile), id: str(x.id), name: str(x.name), values: [] };
+        r.values.push(Number(x.pct));
+        cat.set(k, r);
+    }
+    const categories = [...cat.values()].map((r) => ({ profile: r.profile, id: r.id, name: r.name, average: avg(r.values) ?? 0, suppliers: r.values.length, failing: r.values.filter((v) => v < bands.improveFrom).length })).sort((a, b) => a.average - b.average);
+    // Window progress per legal entity.
+    const progress = setup?.window ? les.map((le) => {
+        const ws = evals.filter((e) => str(e.data.windowId) === setup.window!.id && str(e.data.legalEntityId) === le.id && str(e.data.status) !== 'cancelled');
+        const total = setup.eligible.length;
+        return { legalEntityId: le.id, legalEntityName: le.name, total, started: ws.length, submitted: ws.filter((e) => str(e.data.status) === 'submitted').length, finalized: ws.filter((e) => str(e.data.status) === 'finalized').length, avgCoverage: avg(ws.map((e) => Number(o(e.data.result).coverage) || 0)) };
+    }) : [];
+    const actions = evals.flatMap((e) => objs(e.data.actions));
+    const contribution = contributionOf([...latest.values()].flatMap((e) => objs(o(e.data.result).cards).map((c) => ({ sub: o(c.sub) as never }))));
+    return {
+        bands, cadence: cadenceOf(setup?.window, setup?.frequency ?? 'quarterly', '', '', day), frequencyLabel: FREQUENCIES[setup?.frequency ?? '']?.label ?? '',
+        league, distribution: { pass: league.filter((x) => x.band === 'pass').length, improve: league.filter((x) => x.band === 'improve').length, fail: league.filter((x) => x.band === 'fail').length },
+        average: avg(scoresAll), trend, categories: categories.slice(0, 12), progress, actionStats: actionStats(actions, day), contribution,
+        eligible: setup?.eligible.length ?? 0, evaluated: latest.size,
+        stamp: `${evals.length}:${evals.reduce((m, e) => (str(e.data.updatedAt) > m ? str(e.data.updatedAt) : m), '')}`,
     };
 }
 
@@ -419,8 +522,25 @@ export const supplierEvaluationRoutes = {
             const doc = await loadEval(ctx, str(ctx.body.id));
             const version = Number(doc.data.version) || 1;
             if (Number(ctx.body.knownVersion) === version) return { unchanged: true, version };
-            const inEntity = (await myEntities(ctx)).has(str(doc.data.legalEntityId));
-            return { unchanged: false, evaluation: evalOut(ctx, doc.id, doc.data, inEntity) };
+            const [entities, all] = await Promise.all([myEntities(ctx), listDocs(evalPath(ctx.orgId))]);
+            const inEntity = entities.has(str(doc.data.legalEntityId));
+            // Earlier final evaluations of this supplier (same legal entity first), oldest first, for repeat findings.
+            const earlier = all
+                .filter((e) => e.id !== doc.id && str(e.data.vendorId) === str(doc.data.vendorId) && str(e.data.status) === 'finalized')
+                .sort((a, b) => Number(str(a.data.legalEntityId) === str(doc.data.legalEntityId)) - Number(str(b.data.legalEntityId) === str(doc.data.legalEntityId)) || str(a.data.windowStart).localeCompare(str(b.data.windowStart)));
+            const last = earlier[earlier.length - 1];
+            const day = today();
+            return {
+                unchanged: false,
+                evaluation: evalOut(ctx, doc.id, doc.data, inEntity),
+                previous: {
+                    history: questionHistory(earlier.map((e) => ({ number: str(e.data.number) || e.id, at: str(e.data.windowEnd), answers: answersOf(e.data) }))),
+                    last: last ? { id: last.id, number: str(last.data.number) || last.id, score: Number(o(last.data.result).score) || 0, windowEnd: str(last.data.windowEnd), legalEntityName: str(last.data.legalEntityName), cards: objs(o(last.data.result).cards).map((c) => ({ profile: str(c.profile), score: Number(c.score) || 0, categories: objs(c.categories).map((x) => ({ id: str(x.id), pct: x.pct === null ? null : Number(x.pct) })) })) } : null,
+                    evaluations: earlier.length,
+                },
+                window: { daysLeft: str(doc.data.windowEnd) >= day ? Math.max(0, Math.round((Date.parse(`${str(doc.data.windowEnd)}T00:00:00Z`) - Date.parse(`${day}T00:00:00Z`)) / 86_400_000)) : 0, closed: str(doc.data.windowEnd) < day },
+                actionStats: actionStats(objs(doc.data.actions), day),
+            };
         }),
     ],
 
@@ -570,6 +690,13 @@ export const supplierEvaluationRoutes = {
         }),
     ],
 
+    'POST /api/org/procurement/srm/insights': [
+        orgRoute('org.procurement.srm.insights', 'PRC.srm.view', async (ctx) => {
+            requireProcurement(ctx);
+            return insights(ctx);
+        }),
+    ],
+
     'POST /api/org/procurement/srm/dashboard': [
         orgRoute('org.procurement.srm.dashboard', 'PRC.srm.view', async (ctx) => {
             requireProcurement(ctx);
@@ -578,7 +705,10 @@ export const supplierEvaluationRoutes = {
             const [v, evals, setup] = await Promise.all([getDoc(`${vendorsPath(ctx.orgId)}/${vendorId}`), listDocs(evalPath(ctx.orgId)), getSetup(ctx.orgId)]);
             if (!v) throw new HttpError(404, 'Supplier not found.');
             const mine = evals.filter((e) => str(e.data.vendorId) === vendorId);
+            const latest = latestByVendor(evals);
+            const own = latest.get(vendorId);
             return {
+                rank: own ? rankOf(Number(o(own.data.result).score) || 0, [...latest.values()].map((e) => Number(o(e.data.result).score) || 0)) : null,
                 vendor: { id: v.id, number: str(v.data.number) || v.id, name: vendorName(v), srmScore: typeof v.data.srmScore === 'number' ? v.data.srmScore : null },
                 bands: setup?.bands ?? { improveFrom: 60, passFrom: 75 }, eligible: !!setup?.eligible.some((e) => e.vendorId === vendorId),
                 ...dashboardOf(vendorId, evals, setup),

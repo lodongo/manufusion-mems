@@ -9,10 +9,10 @@ import { Badge, Button, Spinner, useLoad } from '../admin/kit';
 import { fmtDate } from '../admin/format';
 import { Screen, Segmented, messageOf, useConfirm } from '../components/screen';
 import {
-    ACCOUNTABILITY, ACCOUNTABILITY_LABEL, KIND_PROFILE, PROFILE_LABEL, answerKey, nextState, overallOf, scoreCard,
-    type Accountability, type Answer, type AnswerState, type Profile, type ProfileId,
+    ACCOUNTABILITY, ACCOUNTABILITY_LABEL, KIND_PROFILE, PROFILE_LABEL, answerKey, contributionOf, nextState, overallOf, projectionOf, scoreCard,
+    type Accountability, type ActionStats, type Answer, type AnswerState, type Cadence, type Contribution, type Profile, type ProfileId, type QuestionHistory,
 } from '../../backend/supplierEvaluationModel';
-import { BandChip, BandStrip, Ring, ScoreBar, ScoreGauge, TrendChart, answerStyle, fmt, scoreColor } from './srmVisuals';
+import { BandChip, BandStrip, ClosureFunnel, ContributionBar, Countdown, Heatmap, MultiTrend, Ring, ScoreBar, ScoreGauge, accColor, answerStyle, fmt, scoreColor } from './srmVisuals';
 
 // Procurement › Supplier evaluation: supplier relationship evaluation for materials, services and assets.
 // Setup (frequency, bands, eligible suppliers and categories, window, adopted template questions) -> per legal entity
@@ -43,7 +43,7 @@ function usePoll(fn: () => void, ms: number, on = true) {
 export default function SupplierEvaluation({ id }: { id?: string }) {
     if (id && SRE.test(id)) return <Scorecard id={id} />;
     if (id && VND.test(id)) return <SupplierDashboardScreen vendorId={id} />;
-    return <Home initial={id === 'setup' ? 'setup' : id === 'results' ? 'results' : 'evaluate'} />;
+    return <Home initial={id === 'setup' ? 'setup' : id === 'results' ? 'results' : id === 'insights' ? 'insights' : 'evaluate'} />;
 }
 
 // =============================== Home ===============================
@@ -52,7 +52,7 @@ interface Row { key: string; legalEntityId: string; legalEntityName: string; min
 interface Hist { id: string; number: string; vendorId: string; vendorName: string; legalEntityName: string; windowStart: string; windowEnd: string; score: number; band: string; sub: Record<string, number | null>; approvedAt: string }
 interface ListData { setup: { version: number; frequencyLabel: string; bands: Bands; window: { id: string; start: string; end: string } | null } | null; windowOpen: boolean; rows: Row[]; history: Hist[]; open: number; can: { evaluate: boolean; approve: boolean; setup: boolean }; stamp: string }
 
-function Home({ initial }: { initial: 'evaluate' | 'results' | 'setup' }) {
+function Home({ initial }: { initial: 'evaluate' | 'insights' | 'results' | 'setup' }) {
     const [tab, setTab] = useState(initial);
     const { data, error, loading, reload } = useLoad(() => callBackend<ListData>(`${API}/evaluations/list`, {}), []);
     const stamp = useRef('');
@@ -68,15 +68,15 @@ function Home({ initial }: { initial: 'evaluate' | 'results' | 'setup' }) {
             title='Supplier evaluation'
             subtitle='Supplier relationship evaluation for materials, services and assets'
             onBack={() => navigate('organization_home')}
-            toolbar={<Segmented label='Supplier evaluation' value={tab} onChange={(t) => setTab(t)} options={[{ value: 'evaluate', label: 'Evaluate', count: data?.open || undefined }, { value: 'results', label: 'Results' }, { value: 'setup', label: 'Setup' }]} />}
-            bodyFlush={tab !== 'setup' && !!data?.setup}
+            toolbar={<Segmented label='Supplier evaluation' value={tab} onChange={(t) => setTab(t)} options={[{ value: 'evaluate', label: 'Evaluate', count: data?.open || undefined }, { value: 'insights', label: 'Insights' }, { value: 'results', label: 'Results' }, { value: 'setup', label: 'Setup' }]} />}
+            bodyFlush={['evaluate', 'results', 'insights'].includes(tab) && !!data?.setup}
         >
             {tab === 'setup' ? <Setup onSaved={reload} /> : loading && !data ? <Spinner /> : error ? <Alert tone='error'>{error}</Alert> : !data?.setup ? (
                 <div className='space-y-3 p-1'>
                     <Alert tone='info'>Supplier evaluation is not set up yet. {data?.can.setup ? 'Open Setup to choose the frequency, performance bands, suppliers, window and template questions.' : 'Ask the supplier evaluation administrator to set it up.'}</Alert>
                     {data?.can.setup && <Button onClick={() => setTab('setup')}>Open setup</Button>}
                 </div>
-            ) : tab === 'evaluate' ? <EvaluateTab data={data} /> : <ResultsTab data={data} />}
+            ) : tab === 'evaluate' ? <EvaluateTab data={data} /> : tab === 'insights' ? <div className='h-full overflow-y-auto'><InsightsTab /></div> : <ResultsTab data={data} />}
         </Screen>
     );
 }
@@ -394,6 +394,7 @@ function AccChip({ a }: { a: Accountability }) {
 
 // =============================== Scorecard ===============================
 
+interface Prev { history: Record<string, QuestionHistory>; last: { id: string; number: string; score: number; windowEnd: string; legalEntityName: string; cards: Array<{ profile: string; score: number; categories: Array<{ id: string; pct: number | null }> }> } | null; evaluations: number }
 interface Action { id: string; profile: string; questionId: string; question: string; description: string; accountability: Accountability; owner: string; dueDate: string; status: string; evidence?: string; doneByName?: string; verifiedByName?: string; createdByName: string; createdAt: string }
 interface Evaluation {
     id: string; number: string; status: string; windowStart: string; windowEnd: string; legalEntityName: string; vendorId: string; vendorNumber: string; vendorName: string;
@@ -412,17 +413,22 @@ function Scorecard({ id }: { id: string }) {
     const [actionFor, setActionFor] = useState<{ profile: string; questionId: string; text: string } | null>(null);
     const [menu, setMenu] = useState(false);
     const [live, setLive] = useState(true);
+    const [prev, setPrev] = useState<Prev | null>(null);
+    const [win, setWin] = useState<{ daysLeft: number; closed: boolean } | null>(null);
+    const [filter, setFilter] = useState<'all' | 'open' | 'not_ok' | 'ok' | 'repeat'>('all');
     const pending = useRef(0);
     const verRef = useRef(0);
     const { ask, sheet } = useConfirm();
 
     const load = useCallback(async (force = false) => {
         try {
-            const r = await callBackend<{ unchanged: boolean; version: number; evaluation?: Evaluation }>(`${API}/evaluations/get`, { id, knownVersion: force ? 0 : verRef.current });
+            const r = await callBackend<{ unchanged: boolean; version: number; evaluation?: Evaluation; previous?: Prev; window?: { daysLeft: number; closed: boolean } }>(`${API}/evaluations/get`, { id, knownVersion: force ? 0 : verRef.current });
             setLive(true);
             if (r.unchanged || !r.evaluation || pending.current > 0) return;
             verRef.current = r.evaluation.version;
             setEv(r.evaluation);
+            if (r.previous) setPrev(r.previous);
+            if (r.window) setWin(r.window);
             setProfile((p) => p ?? (r.evaluation!.scorecards[0]?.id as ProfileId) ?? 'actions');
         } catch (e) {
             if (!verRef.current) setError(messageOf(e));
@@ -501,11 +507,42 @@ function Scorecard({ id }: { id: string }) {
 
             {!category && card && cardScore && (
                 <div className='space-y-3'>
+                    {(() => {
+                        const lastCard = prev?.last?.cards.find((c) => c.profile === card.id);
+                        const proj = projectionOf(cardScore);
+                        return (
+                            <div className='grid grid-cols-2 gap-2'>
+                                <Countdown label={win?.closed ? 'Window closed' : 'Window closes in'} days={win ? win.daysLeft : null} caption={`${ev.windowStart} to ${ev.windowEnd}`} pct={win ? Math.min(100, (win.daysLeft / Math.max(1, (Date.parse(ev.windowEnd) - Date.parse(ev.windowStart)) / 86_400_000)) * 100) : undefined} tone={win ? Math.min(100, win.daysLeft * 4) : undefined} />
+                                <div className='rounded-2xl border border-line bg-panel p-3'>
+                                    <p className='text-xs uppercase tracking-wide text-muted'>Last evaluation</p>
+                                    {lastCard ? (
+                                        <>
+                                            <p className='mt-0.5 text-3xl font-bold' style={{ color: scoreColor(lastCard.score) }}>{fmt(lastCard.score)}</p>
+                                            <p className='text-xs text-soft'>{prev!.last!.number} · {prev!.last!.windowEnd}</p>
+                                            {cardScore.coverage >= 99.9 ? <p className='text-xs font-semibold' style={{ color: scoreColor(cardScore.score >= lastCard.score ? 100 : 0) }}>{cardScore.score >= lastCard.score ? '▲' : '▼'} {fmt(Math.abs(cardScore.score - lastCard.score))} vs last</p> : <p className='text-xs text-soft'>This one can reach <strong style={{ color: scoreColor(proj.high) }}>{fmt(proj.high)}</strong></p>}
+                                        </>
+                                    ) : <p className='mt-1 text-sm text-soft'>First evaluation of this supplier{prev?.evaluations ? '' : ' here'}.</p>}
+                                </div>
+                            </div>
+                        );
+                    })()}
                     <div className='rounded-2xl border border-line bg-panel p-4'>
                         <div className='grid grid-cols-1 items-center gap-2 sm:grid-cols-2'>
                             <div>
                                 <ScoreGauge score={cardScore.score} coverage={cardScore.coverage} bands={bands} label={PROFILE_LABEL[card.id]} />
                                 <div className='mt-1 flex justify-center'><BandChip score={cardScore.score} bands={bands} /></div>
+                                {cardScore.coverage < 99.9 && (() => {
+                                    const pr = projectionOf(cardScore);
+                                    return (
+                                        <div className='mt-3 px-2'>
+                                            <div className='relative h-3 rounded-full bg-line'>
+                                                <div className='absolute h-3 rounded-full' style={{ left: `${pr.low}%`, width: `${pr.high - pr.low}%`, background: `linear-gradient(90deg, ${scoreColor(pr.low)}, ${scoreColor(pr.high)})`, opacity: 0.55, transition: 'all 600ms' }} />
+                                                {[bands.improveFrom, bands.passFrom].map((b) => <span key={b} className='absolute top-[-3px] h-[18px] w-px bg-ink/40' style={{ left: `${b}%` }} />)}
+                                            </div>
+                                            <p className='mt-1 text-center text-xs text-soft'>Can finish between <strong style={{ color: scoreColor(pr.low) }}>{fmt(pr.low)}</strong> and <strong style={{ color: scoreColor(pr.high) }}>{fmt(pr.high)}</strong> · {fmt(100 - cardScore.coverage)} points still open</p>
+                                        </div>
+                                    );
+                                })()}
                             </div>
                             <div className='space-y-3'>
                                 <div className='grid grid-cols-3 gap-1'>
@@ -522,9 +559,17 @@ function Scorecard({ id }: { id: string }) {
                             </div>
                         </div>
                     </div>
+                    <div className='rounded-2xl border border-line bg-panel p-4'>
+                        <p className='text-sm font-semibold text-ink'>Where the points come from</p>
+                        <p className='mb-3 text-xs text-muted'>100 points split by who is accountable: solid earned, hatched lost, faint still open.</p>
+                        <ContributionBar rows={contributionOf([cardScore])} />
+                    </div>
                     <p className='px-1 text-xs text-muted'>Scope: {ev.scopes.filter((s) => KIND_PROFILE[s.kind] === card.id).map((s) => s.categoryName).join(', ')}</p>
                     {card.categories.map((c) => {
                         const cs = cardScore.categories.find((x) => x.id === c.id)!;
+                        const before = prev?.last?.cards.find((x) => x.profile === card.id)?.categories.find((x) => x.id === c.id)?.pct ?? null;
+                        const atStake = cs.weight - cs.assessed;
+                        const repeats = c.questions.filter((x) => (prev?.history[answerKey(card.id, x.id)]?.streak ?? 0) > 0).length;
                         return (
                             <button key={c.id} type='button' onClick={() => setCategory(c.id)} className='w-full rounded-2xl border border-line bg-panel p-3 text-left active:bg-page'>
                                 <div className='flex items-center gap-3'>
@@ -532,6 +577,11 @@ function Scorecard({ id }: { id: string }) {
                                     <div className='min-w-0 flex-1'>
                                         <p className='text-sm font-medium text-ink'>{c.name}</p>
                                         <p className='text-xs text-muted'>{fmt(cs.earned, 2)} of {fmt(cs.weight, 2)} points · {cs.ok} OK · {cs.notOk} not OK · {cs.open} open</p>
+                                        <p className='text-xs'>
+                                            {atStake > 0.01 && <span className='mr-2 text-soft'>{fmt(atStake, 2)} pts at stake</span>}
+                                            {before !== null && <span className='mr-2 text-muted'>last {Math.round(before)}%{cs.pct !== null && cs.open === 0 && Math.round(cs.pct - before) !== 0 ? <strong style={{ color: scoreColor(cs.pct >= before ? 100 : 0) }}> {cs.pct >= before ? '▲' : '▼'}{Math.abs(Math.round(cs.pct - before))}</strong> : null}</span>}
+                                            {repeats > 0 && <span className='font-semibold' style={{ color: scoreColor(0) }}>{repeats} failed last time</span>}
+                                        </p>
                                         <div className='mt-1.5'><ScoreBar pct={cs.assessed > 0 ? (cs.earned / cs.weight) * 100 : null} height={6} /></div>
                                     </div>
                                     <ChevronRight className='h-5 w-5 shrink-0 text-muted' />
@@ -552,11 +602,24 @@ function Scorecard({ id }: { id: string }) {
                         </div>
                         <div className='mt-1.5'><ScoreBar pct={catScore.assessed > 0 ? (catScore.earned / catScore.weight) * 100 : null} /></div>
                         <p className='mt-1 text-xs text-muted'>Card score {fmt(cardScore!.score)} / 100 · tap a question: not assessed → OK → not OK</p>
+                        <div className='mt-2 flex gap-1.5 overflow-x-auto'>
+                            {([['all', 'All', cat.questions.length], ['open', 'Open', catScore.open], ['not_ok', 'Not OK', catScore.notOk], ['ok', 'OK', catScore.ok], ['repeat', 'Failed last time', cat.questions.filter((x) => (prev?.history[answerKey(card.id, x.id)]?.streak ?? 0) > 0).length]] as const).map(([k, l, n]) => (
+                                <button key={k} type='button' aria-pressed={filter === k} onClick={() => setFilter(k)} className={`min-h-[44px] shrink-0 rounded-full border px-3 text-xs font-medium ${filter === k ? 'border-brand bg-brand text-onbrand' : 'border-line text-soft'}`}>{l} {n}</button>
+                            ))}
+                        </div>
                     </div>
-                    {cat.questions.map((x) => {
+                    {cat.questions.filter((x) => {
+                        const st0 = ev.answers[answerKey(card.id, x.id)]?.state ?? 'unassessed';
+                        if (filter === 'open') return st0 === 'unassessed';
+                        if (filter === 'not_ok') return st0 === 'not_ok';
+                        if (filter === 'ok') return st0 === 'ok';
+                        if (filter === 'repeat') return (prev?.history[answerKey(card.id, x.id)]?.streak ?? 0) > 0;
+                        return true;
+                    }).map((x) => {
                         const a = ev.answers[answerKey(card.id, x.id)];
                         const st = a?.state ?? 'unassessed';
                         const qActions = ev.actions.filter((y) => y.profile === card.id && y.questionId === x.id);
+                        const hist = prev?.history[answerKey(card.id, x.id)];
                         return (
                             <div key={x.id} className='rounded-2xl border border-line p-3 transition-colors duration-300' style={answerStyle(st)}>
                                 <div className='flex items-start gap-2'>
@@ -567,6 +630,13 @@ function Scorecard({ id }: { id: string }) {
                                             <span className='font-semibold' style={{ color: st === 'ok' ? scoreColor(100) : st === 'not_ok' ? scoreColor(0) : undefined }}>{st === 'ok' ? 'OK' : st === 'not_ok' ? 'Not OK' : 'Not assessed'}</span>
                                             {a?.byName && <span>· {a.byName}</span>}
                                         </p>
+                                        {hist?.last && (
+                                            <p className='mt-1 text-xs text-muted'>
+                                                Last time: <strong style={{ color: hist.last.state === 'ok' ? scoreColor(100) : scoreColor(0) }}>{hist.last.state === 'ok' ? 'OK' : 'Not OK'}</strong>
+                                                {hist.last.note ? ` · ${hist.last.note}` : ''} · failed {hist.notOk} of {hist.assessed}
+                                                {hist.streak > 1 && <span className='ml-1 rounded-full px-1.5 font-semibold' style={{ background: scoreColor(0, 0.15), color: scoreColor(0) }}>repeat ×{hist.streak}</span>}
+                                            </p>
+                                        )}
                                     </button>
                                     <button type='button' aria-label='How to measure' onClick={() => setInfo(x)} className='flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-muted active:bg-page'><Info className='h-5 w-5' /></button>
                                 </div>
@@ -704,16 +774,22 @@ function ActionsPanel({ ev, ask, onDone }: { ev: Evaluation; ask: ReturnType<typ
 
 // =============================== Supplier dashboard ===============================
 
+type ActRow = Action & { evaluationId: string; evaluationNumber: string; legalEntityName: string; overdue: boolean; doneAt?: string };
+interface QRow { key: string; profile: string; questionId: string; text: string; category: string; accountability: string; weight: number; assessed: number; notOk: number; streak: number; last: { state: string; note: string; at: string; evaluation: string } | null }
 interface Dash {
     vendor: { id: string; number: string; name: string; srmScore: number | null }; bands: Bands; eligible: boolean;
+    rank: { rank: number; of: number; percentile: number } | null;
     last: { id: string; number: string; score: number; band: string; sub: Record<string, number | null>; windowStart: string; windowEnd: string; legalEntityName: string } | null;
     trend: Array<{ id: string; windowStart: string; windowEnd: string; score: number; legalEntityName: string }>;
+    subTrend: Array<{ label: string; score: number; SUPPLIER: number | null; ORGANIZATION: number | null; BOTH: number | null }>;
+    contribution: Contribution[]; contributionTrend: Array<{ label: string; contributions: Contribution[] }>;
     lastCard: Record<string, { score: number; previous: number | null; at: string; sub: Record<string, { pct: number | null }> }>;
     lastCategory: Record<string, Array<{ id: string; name: string; pct: number | null; previous: number | null; earned: number; weight: number }>>;
+    heatmap: Record<string, { columns: string[]; rows: Array<{ id: string; name: string; cells: Array<number | null> }> }>;
+    issues: QRow[]; strengths: QRow[]; cadence: Cadence;
     procurementCategories: Array<{ kind: string; categoryCode: string; categoryName: string; score: number | null; at: string }>;
     current: Array<{ id: string; number: string; legalEntityName: string; status: string; score: number; coverage: number }>;
-    actions: Array<Action & { evaluationId: string; evaluationNumber: string; legalEntityName: string; overdue: boolean }>;
-    actionCounts: { open: number; overdue: number; done: number; verified: number };
+    actions: ActRow[]; actionStats: ActionStats; actionCounts: { open: number; overdue: number; done: number; verified: number };
     stamp: string;
 }
 
@@ -725,7 +801,80 @@ function SupplierDashboardScreen({ vendorId }: { vendorId: string }) {
     );
 }
 
-/** Last scores, trends and action follow-up for one supplier. Also shown on the supplier's page. */
+function Section({ title, hint, children, right }: { title: string; hint?: string; children: ReactNode; right?: ReactNode }) {
+    return (
+        <section className='rounded-2xl border border-line bg-panel p-4'>
+            <div className='mb-3 flex items-start justify-between gap-2'>
+                <div className='min-w-0'><h3 className='text-sm font-semibold text-ink'>{title}</h3>{hint && <p className='text-xs text-muted'>{hint}</p>}</div>
+                {right}
+            </div>
+            {children}
+        </section>
+    );
+}
+
+function CadenceTiles({ c, done }: { c: Cadence; done: boolean }) {
+    if (c.phase === 'none') return <Alert tone='info'>No evaluation window is set.</Alert>;
+    const t = c.phase === 'upcoming' ? { label: 'Next assessment opens in', days: c.daysToOpen, caption: `${c.start} to ${c.end}` }
+        : c.phase === 'open' ? (done ? { label: 'Next assessment opens in', days: c.next ? Math.max(0, Math.round((Date.parse(`${c.next.start}T00:00:00Z`) - Date.now()) / 86_400_000)) : null, caption: c.next ? `Next window ${c.next.start} to ${c.next.end}` : '' } : { label: 'Assessment due in', days: c.daysToClose, caption: `Window closes ${c.end}` })
+            : { label: c.overdue ? 'Assessment overdue by' : 'Next window not set', days: c.overdue ? Math.round((Date.now() - Date.parse(`${c.end}T00:00:00Z`)) / 86_400_000) : null, caption: c.next ? `Suggested next ${c.next.start} to ${c.next.end}` : '' };
+    const urgent = c.phase === 'open' && !done ? Math.min(100, (c.daysToClose ?? 0) * 4) : c.overdue ? 0 : 90;
+    return (
+        <div className='grid grid-cols-2 gap-2'>
+            <Countdown label={t.label} days={t.days} caption={t.caption} tone={urgent} pct={c.phase === 'open' && !done ? c.elapsedPct : undefined} />
+            <Countdown label='Since last final assessment' days={c.daysSinceLast} caption={c.daysSinceLast === null ? 'Never assessed' : undefined} tone={c.daysSinceLast === null ? 0 : Math.max(0, 100 - c.daysSinceLast / 2)} />
+        </div>
+    );
+}
+
+function ClosureTracker({ st }: { st: ActionStats }) {
+    const maxAging = Math.max(1, ...st.aging.map((a) => a.count));
+    return (
+        <div className='space-y-4'>
+            <div className='grid grid-cols-3 gap-1'>
+                <Ring pct={st.total ? st.closureRate : null} label='Closed' />
+                <Ring pct={st.onTimeRate} label='On time' />
+                <Ring pct={st.total ? st.verifiedRate : null} label='Verified' />
+            </div>
+            <ClosureFunnel total={st.total} closed={st.done + st.verified} verified={st.verified} />
+            <div className='grid grid-cols-3 gap-2 text-center'>
+                <div className='rounded-xl bg-page p-2'><p className='text-lg font-bold text-ink'>{st.avgDaysToClose === null ? '—' : fmt(st.avgDaysToClose)}</p><p className='text-xs text-muted'>days to close</p></div>
+                <div className='rounded-xl bg-page p-2'><p className='text-lg font-bold text-ink'>{st.avgDaysToVerify === null ? '—' : fmt(st.avgDaysToVerify)}</p><p className='text-xs text-muted'>days to verify</p></div>
+                <div className='rounded-xl bg-page p-2'><p className='text-lg font-bold' style={{ color: st.dueSoon ? scoreColor(50) : undefined }}>{st.dueSoon}</p><p className='text-xs text-muted'>due in 7 days</p></div>
+            </div>
+            <div>
+                <p className='mb-1.5 text-xs font-semibold text-muted'>Open actions by lateness</p>
+                {st.aging.map((a, i) => (
+                    <div key={a.label} className='mb-1 flex items-center gap-2'>
+                        <span className='w-32 shrink-0 text-xs text-soft'>{a.label}</span>
+                        <div className='h-4 flex-1 overflow-hidden rounded bg-line'><div className='h-full rounded' style={{ width: `${(a.count / maxAging) * 100}%`, background: scoreColor([95, 55, 25, 0][i]), transition: 'width 600ms' }} /></div>
+                        <span className='w-6 text-right text-xs font-semibold text-ink'>{a.count}</span>
+                    </div>
+                ))}
+            </div>
+            <div>
+                <p className='mb-1.5 text-xs font-semibold text-muted'>Who owns the actions</p>
+                <div className='grid grid-cols-3 gap-2'>
+                    {st.byAccountability.map((b) => (
+                        <div key={b.accountability} className='rounded-xl bg-page p-2'>
+                            <p className='text-xs font-semibold' style={{ color: accColor(b.accountability) }}>{ACCOUNTABILITY_LABEL[b.accountability]}</p>
+                            <p className='text-sm text-ink'><strong>{b.open}</strong> open · {b.closed} closed</p>
+                        </div>
+                    ))}
+                </div>
+            </div>
+        </div>
+    );
+}
+
+const SERIES = [
+    { key: 'score', label: 'Overall', color: 'hsl(150, 10%, 45%)', bold: true },
+    { key: 'SUPPLIER', label: 'Supplier', color: accColor('SUPPLIER') },
+    { key: 'ORGANIZATION', label: 'Organization', color: accColor('ORGANIZATION') },
+    { key: 'BOTH', label: 'Joint', color: accColor('BOTH') },
+];
+
+/** Last scores, trends, contribution, recurring issues and action follow-up for one supplier (also on the supplier page). */
 export function SupplierRelationshipDashboard({ vendorId }: { vendorId: string }) {
     const { data, error, loading, reload } = useLoad(() => callBackend<Dash>(`${API}/dashboard`, { vendorId }), [vendorId]);
     const stamp = useRef('');
@@ -737,35 +886,45 @@ export function SupplierRelationshipDashboard({ vendorId }: { vendorId: string }
         } catch { /* keep the last view */ }
     }, 20000);
     const [p, setP] = useState<string>('');
+    const [view, setView] = useState<'overview' | 'trends' | 'issues' | 'actions'>('overview');
     if (loading && !data) return <Spinner />;
     if (error || !data) return <Alert tone='error'>{error || 'The dashboard could not be loaded.'}</Alert>;
     const profiles = Object.keys(data.lastCard) as ProfileId[];
     const sel = (p && data.lastCard[p] ? p : profiles[0]) as ProfileId | undefined;
-    const delta = (a: number | null, b: number | null) => (a === null || b === null ? null : a - b);
-    const actionColumns: Array<Column<Dash['actions'][number]>> = [
+    const prevScore = data.trend.length > 1 ? data.trend[data.trend.length - 2].score : null;
+    const doneThisWindow = data.current.some((c) => c.status === 'finalized');
+    const actionColumns: Array<Column<ActRow>> = [
         { key: 'desc', label: 'Action', value: (a) => a.description },
         { key: 'status', label: 'Status', value: (a) => (a.overdue ? 'Overdue' : a.status), render: (a) => <Badge tone={a.status === 'verified' ? 'brand' : a.overdue ? 'danger' : a.status === 'done' ? 'warn' : 'muted'}>{a.overdue ? 'Overdue' : a.status === 'open' ? 'Open' : a.status === 'done' ? 'Done' : 'Verified'}</Badge> },
         { key: 'due', label: 'Due', type: 'date', value: (a) => a.dueDate },
+        { key: 'late', label: 'Days late', type: 'number', value: (a) => (a.overdue ? Math.round((Date.now() - Date.parse(`${a.dueDate}T00:00:00Z`)) / 86_400_000) : null) },
         { key: 'owner', label: 'Owner', value: (a) => a.owner },
         { key: 'acc', label: 'Accountable', value: (a) => ACCOUNTABILITY_LABEL[a.accountability] ?? a.accountability },
         { key: 'q', label: 'Question', value: (a) => a.questionId },
         { key: 'le', label: 'Legal entity', value: (a) => a.legalEntityName, hidden: true },
         { key: 'eval', label: 'Evaluation', value: (a) => a.evaluationNumber, hidden: true },
+        { key: 'evidence', label: 'Evidence', value: (a) => a.evidence ?? '', hidden: true },
     ];
     return (
         <div className='space-y-3'>
-            <div className='rounded-2xl border border-line bg-panel p-4'>
-                <p className='text-xs uppercase tracking-wide text-muted'>{data.vendor.number}</p>
-                <p className='text-base font-semibold text-ink'>{data.vendor.name}</p>
+            {/* Hero: score, band, change, rank, sub-scores */}
+            <section className='rounded-2xl border border-line bg-panel p-4'>
+                <div className='flex items-start justify-between gap-2'>
+                    <div className='min-w-0'>
+                        <p className='text-xs uppercase tracking-wide text-muted'>{data.vendor.number}</p>
+                        <p className='truncate text-base font-semibold text-ink'>{data.vendor.name}</p>
+                    </div>
+                    {data.rank && <div className='shrink-0 text-right'><p className='text-xl font-bold text-ink'>#{data.rank.rank}<span className='text-sm font-normal text-muted'> of {data.rank.of}</span></p><p className='text-xs text-muted'>better than {fmt(data.rank.percentile, 0)}% of suppliers</p></div>}
+                </div>
                 {!data.last ? (
-                    <Alert tone='info'>{data.eligible ? 'No final evaluation yet. Scores appear here once an evaluation is approved.' : 'This supplier is not selected for evaluation.'}</Alert>
+                    <div className='mt-3'><Alert tone='info'>{data.eligible ? 'No final evaluation yet. Scores appear here once an evaluation is approved.' : 'This supplier is not selected for evaluation.'}</Alert></div>
                 ) : (
                     <div className='mt-2 grid grid-cols-1 items-center gap-3 sm:grid-cols-2'>
                         <div>
                             <ScoreGauge score={data.last.score} bands={data.bands} label='Latest overall score' caption={`${data.last.legalEntityName} · ${data.last.windowStart} to ${data.last.windowEnd}`} />
                             <div className='mt-1 flex items-center justify-center gap-2'>
                                 <BandChip score={data.last.score} bands={data.bands} />
-                                {(() => { const prev = data.trend[data.trend.length - 2]; const d = prev ? data.last!.score - prev.score : null; return d === null ? null : <span className='text-xs font-semibold' style={{ color: scoreColor(d >= 0 ? 100 : 0) }}>{d >= 0 ? '▲' : '▼'} {fmt(Math.abs(d))} vs previous</span>; })()}
+                                {prevScore !== null && <span className='text-xs font-semibold' style={{ color: scoreColor(data.last.score >= prevScore ? 100 : 0) }}>{data.last.score >= prevScore ? '▲' : '▼'} {fmt(Math.abs(data.last.score - prevScore))} vs previous</span>}
                             </div>
                         </div>
                         <div className='space-y-3'>
@@ -779,70 +938,244 @@ export function SupplierRelationshipDashboard({ vendorId }: { vendorId: string }
                         </div>
                     </div>
                 )}
-            </div>
+            </section>
 
-            {data.current.length > 0 && (
-                <div className='rounded-2xl border border-line bg-panel p-3'>
-                    <p className='text-sm font-semibold text-ink'>Current window</p>
-                    {data.current.map((c) => (
-                        <button key={c.id} type='button' onClick={() => navigate(`${BASE}/${c.id}`)} className='mt-2 flex min-h-[44px] w-full items-center gap-3 text-left'>
-                            <span className='min-w-0 flex-1 text-sm text-soft'>{c.legalEntityName} · {STATUS[c.status] ?? c.status} · {fmt(c.coverage, 0)}% assessed</span>
-                            <span className='font-semibold' style={{ color: scoreColor(c.score) }}>{fmt(c.score)}</span>
-                            <ChevronRight className='h-4 w-4 text-muted' />
-                        </button>
-                    ))}
-                </div>
-            )}
+            <CadenceTiles c={data.cadence} done={doneThisWindow} />
 
-            {data.trend.length > 0 && (
-                <div className='rounded-2xl border border-line bg-panel p-3'>
-                    <p className='text-sm font-semibold text-ink'>Trend</p>
-                    <TrendChart points={data.trend.map((t) => ({ label: t.windowEnd.slice(2, 7), score: t.score }))} bands={data.bands} />
-                </div>
-            )}
+            <Segmented label='Dashboard sections' value={view} onChange={setView} options={[{ value: 'overview', label: 'Overview' }, { value: 'trends', label: 'Trends' }, { value: 'issues', label: 'Issues', count: data.issues.length || undefined }, { value: 'actions', label: 'Actions', count: data.actionStats.open || undefined }]} />
 
-            {sel && (
-                <div className='rounded-2xl border border-line bg-panel p-3'>
-                    <div className='mb-2 flex flex-wrap items-center justify-between gap-2'>
-                        <p className='text-sm font-semibold text-ink'>Last score by category</p>
-                        {profiles.length > 1 && <Segmented label='Template' value={sel} onChange={(x) => setP(x)} options={profiles.map((x) => ({ value: x, label: PROFILE_LABEL[x].split(' ')[0] }))} />}
-                    </div>
-                    <p className='mb-2 text-xs text-muted'>{PROFILE_LABEL[sel]}: <strong style={{ color: scoreColor(data.lastCard[sel].score) }}>{fmt(data.lastCard[sel].score)}</strong>{data.lastCard[sel].previous !== null && ` (previous ${fmt(data.lastCard[sel].previous)})`}</p>
-                    <div className='space-y-2.5'>
-                        {(data.lastCategory[sel] ?? []).map((c) => {
-                            const d = delta(c.pct, c.previous);
-                            return (
-                                <div key={c.id}>
-                                    <div className='flex items-center justify-between gap-2 text-sm'>
-                                        <span className='min-w-0 truncate text-soft'>{c.name}</span>
-                                        <span className='shrink-0 font-semibold' style={{ color: scoreColor(c.pct) }}>{c.pct === null ? '—' : `${Math.round(c.pct)}%`}{d !== null && d !== 0 && <span className='ml-1 text-xs' style={{ color: scoreColor(d > 0 ? 100 : 0) }}>{d > 0 ? '▲' : '▼'}{Math.abs(Math.round(d))}</span>}</span>
+            {view === 'overview' && (
+                <>
+                    {data.current.length > 0 && (
+                        <Section title='This window' hint='Live as evaluators score'>
+                            {data.current.map((c) => (
+                                <button key={c.id} type='button' onClick={() => navigate(`${BASE}/${c.id}`)} className='flex min-h-[48px] w-full items-center gap-3 text-left'>
+                                    <span className='min-w-0 flex-1'>
+                                        <span className='block text-sm text-ink'>{c.legalEntityName}</span>
+                                        <span className='block text-xs text-muted'>{STATUS[c.status] ?? c.status} · {fmt(c.coverage, 0)}% assessed</span>
+                                        <span className='mt-1 block'><ScoreBar pct={c.coverage} height={4} /></span>
+                                    </span>
+                                    <span className='text-lg font-bold' style={{ color: scoreColor(c.score) }}>{fmt(c.score)}</span>
+                                    <ChevronRight className='h-4 w-4 text-muted' />
+                                </button>
+                            ))}
+                        </Section>
+                    )}
+                    {data.contribution.length > 0 && (
+                        <Section title='Score contribution' hint='Who earned and who lost the points in the latest evaluation'>
+                            <ContributionBar rows={data.contribution} />
+                            {(() => {
+                                const worst = [...data.contribution].sort((a, b) => b.lost - a.lost)[0];
+                                return worst && worst.lost > 0 ? <p className='mt-3 text-xs text-soft'>Most points were lost on <strong style={{ color: accColor(worst.accountability) }}>{ACCOUNTABILITY_LABEL[worst.accountability].toLowerCase()}</strong> questions ({fmt(worst.lost)} of {fmt(worst.weight)}).</p> : null;
+                            })()}
+                        </Section>
+                    )}
+                    {sel && (
+                        <Section title='Last score by category' right={profiles.length > 1 ? <Segmented label='Template' value={sel} onChange={(x) => setP(x)} options={profiles.map((x) => ({ value: x, label: PROFILE_LABEL[x].split(' ')[0] }))} /> : undefined}>
+                            <p className='mb-2 text-xs text-muted'>{PROFILE_LABEL[sel]}: <strong style={{ color: scoreColor(data.lastCard[sel].score) }}>{fmt(data.lastCard[sel].score)}</strong>{data.lastCard[sel].previous !== null && ` (previous ${fmt(data.lastCard[sel].previous)})`}</p>
+                            <div className='space-y-2.5'>
+                                {(data.lastCategory[sel] ?? []).map((c) => {
+                                    const d = c.pct === null || c.previous === null ? null : c.pct - c.previous;
+                                    return (
+                                        <div key={c.id}>
+                                            <div className='flex items-center justify-between gap-2 text-sm'>
+                                                <span className='min-w-0 truncate text-soft'>{c.name}</span>
+                                                <span className='shrink-0 font-semibold' style={{ color: scoreColor(c.pct) }}>{c.pct === null ? '—' : `${Math.round(c.pct)}%`}{d !== null && Math.round(d) !== 0 && <span className='ml-1 text-xs' style={{ color: scoreColor(d > 0 ? 100 : 0) }}>{d > 0 ? '▲' : '▼'}{Math.abs(Math.round(d))}</span>}</span>
+                                            </div>
+                                            <ScoreBar pct={c.pct} height={6} />
+                                            <p className='text-xs text-muted'>{fmt(c.earned, 2)} of {fmt(c.weight, 2)} points</p>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </Section>
+                    )}
+                    {data.procurementCategories.length > 0 && (
+                        <Section title='Procurement categories'>
+                            <div className='grid grid-cols-1 gap-2 sm:grid-cols-2'>
+                                {data.procurementCategories.map((c) => (
+                                    <div key={`${c.kind}${c.categoryCode}`} className='flex items-center gap-3 rounded-xl bg-page p-2'>
+                                        <div className='flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-sm font-bold' style={{ background: scoreColor(c.score, 0.14), color: scoreColor(c.score) }}>{c.score === null ? '—' : Math.round(c.score)}</div>
+                                        <div className='min-w-0'><p className='truncate text-sm text-ink'>{c.categoryName}</p><p className='text-xs text-muted'>{PROFILE_LABEL[KIND_PROFILE[c.kind]]} · {c.at}</p></div>
                                     </div>
-                                    <ScoreBar pct={c.pct} height={6} />
-                                </div>
-                            );
-                        })}
-                    </div>
-                </div>
+                                ))}
+                            </div>
+                        </Section>
+                    )}
+                </>
             )}
 
-            {data.procurementCategories.length > 0 && (
-                <div className='rounded-2xl border border-line bg-panel p-3'>
-                    <p className='text-sm font-semibold text-ink'>Procurement categories</p>
-                    <div className='mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2'>
-                        {data.procurementCategories.map((c) => (
-                            <div key={`${c.kind}${c.categoryCode}`} className='flex items-center gap-3 rounded-xl bg-page p-2'>
-                                <div className='flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-sm font-bold' style={{ background: scoreColor(c.score, 0.14), color: scoreColor(c.score) }}>{c.score === null ? '—' : Math.round(c.score)}</div>
-                                <div className='min-w-0'><p className='truncate text-sm text-ink'>{c.categoryName}</p><p className='text-xs text-muted'>{PROFILE_LABEL[KIND_PROFILE[c.kind]]} · {c.at}</p></div>
+            {view === 'trends' && (
+                <>
+                    <Section title='Score trend' hint='Overall and supplier / organization / joint scores per evaluation. Tap a legend item to hide it.'>
+                        <MultiTrend points={data.subTrend} series={SERIES} bands={data.bands} />
+                    </Section>
+                    {data.contributionTrend.length > 0 && (
+                        <Section title='Contribution over time' hint='Points earned out of 100 by who is accountable'>
+                            <div className='space-y-2'>
+                                {data.contributionTrend.slice(-6).map((t) => {
+                                    const total = t.contributions.reduce((s, c) => s + c.earned, 0);
+                                    return (
+                                        <div key={t.label} className='flex items-center gap-2'>
+                                            <span className='w-12 shrink-0 text-xs text-muted'>{t.label.slice(2, 7)}</span>
+                                            <div className='flex h-5 flex-1 overflow-hidden rounded bg-line'>
+                                                {t.contributions.map((c) => <div key={c.accountability} title={`${ACCOUNTABILITY_LABEL[c.accountability]} ${fmt(c.earned)}`} style={{ width: `${c.earned}%`, background: accColor(c.accountability) }} />)}
+                                            </div>
+                                            <span className='w-10 text-right text-xs font-bold' style={{ color: scoreColor(total) }}>{Math.round(total)}</span>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </Section>
+                    )}
+                    {sel && data.heatmap[sel] && (
+                        <Section title='Category heat-map' hint='Each category across the last evaluations' right={profiles.length > 1 ? <Segmented label='Template' value={sel} onChange={(x) => setP(x)} options={profiles.map((x) => ({ value: x, label: PROFILE_LABEL[x].split(' ')[0] }))} /> : undefined}>
+                            <Heatmap {...data.heatmap[sel]} />
+                        </Section>
+                    )}
+                    {!data.trend.length && <Alert tone='info'>Trends appear after the first final evaluation.</Alert>}
+                </>
+            )}
+
+            {view === 'issues' && (
+                <>
+                    <Section title='Recurring issues' hint='Questions failed in final evaluations, longest run of failures first'>
+                        {!data.issues.length ? <p className='text-sm text-muted'>No question has failed yet.</p> : data.issues.map((q) => (
+                            <div key={q.key} className='mb-2 rounded-xl border p-3' style={answerStyle('not_ok')}>
+                                <p className='text-sm text-ink'>{q.text}</p>
+                                <p className='mt-1 flex flex-wrap items-center gap-2 text-xs text-muted'>
+                                    <span className='font-mono'>{q.questionId}</span><span>{q.category}</span>
+                                    <span style={{ color: accColor(q.accountability) }}>{ACCOUNTABILITY_LABEL[q.accountability as Accountability] ?? q.accountability}</span>
+                                    <span className='font-semibold' style={{ color: scoreColor(0) }}>failed {q.notOk} of {q.assessed}</span>
+                                    {q.streak > 1 && <span className='rounded-full px-1.5 font-semibold' style={{ background: scoreColor(0, 0.15), color: scoreColor(0) }}>{q.streak} in a row</span>}
+                                </p>
+                                {q.last?.note && <p className='mt-1 text-xs text-soft'>Last finding: {q.last.note}</p>}
                             </div>
                         ))}
-                    </div>
-                </div>
+                    </Section>
+                    <Section title='Consistent strengths' hint='Never failed, most often assessed'>
+                        {!data.strengths.length ? <p className='text-sm text-muted'>Not enough evaluations yet.</p> : data.strengths.map((q) => (
+                            <div key={q.key} className='mb-2 rounded-xl border p-3' style={answerStyle('ok')}>
+                                <p className='text-sm text-ink'>{q.text}</p>
+                                <p className='mt-1 text-xs text-muted'><span className='font-mono'>{q.questionId}</span> · {q.category} · OK {q.assessed} of {q.assessed}</p>
+                            </div>
+                        ))}
+                    </Section>
+                </>
             )}
 
-            <div className='h-[420px] overflow-hidden rounded-2xl border border-line'>
-                <RichTable id='prc.srm.vendor.actions' title='Action follow-up' columns={actionColumns} rows={data.actions} rowKey={(a) => `${a.evaluationId}-${a.id}`} onRowClick={(a) => navigate(`${BASE}/${a.evaluationId}`)} rowClassName={(a) => (a.overdue ? 'text-red-400' : '')} empty='No improvement actions.' fileName={`${data.vendor.number}-srm-actions`} height='h-full' />
-            </div>
+            {view === 'actions' && (
+                <>
+                    <Section title='Action closure tracker'>
+                        {data.actionStats.total ? <ClosureTracker st={data.actionStats} /> : <p className='text-sm text-muted'>No improvement actions yet.</p>}
+                    </Section>
+                    <div className='h-[420px] overflow-hidden rounded-2xl border border-line'>
+                        <RichTable id='prc.srm.vendor.actions' title='Actions' columns={actionColumns} rows={data.actions} rowKey={(a) => `${a.evaluationId}-${a.id}`} onRowClick={(a) => navigate(`${BASE}/${a.evaluationId}`)} rowClassName={(a) => (a.overdue ? 'text-red-400' : '')} empty='No improvement actions.' fileName={`${data.vendor.number}-srm-actions`} height='h-full' />
+                    </div>
+                </>
+            )}
         </div>
     );
 }
 
+// =============================== Portfolio insights ===============================
+
+interface League { vendorId: string; vendorName: string; vendorNumber: string; score: number; band: string; previous: number | null; delta: number | null; supplier: number | null; organization: number | null; joint: number | null; openActions: number; overdueActions: number; lastWindowEnd: string; lastLegalEntity: string; currentStatus: string; rank: number }
+interface Insights {
+    bands: Bands; cadence: Cadence; frequencyLabel: string; league: League[]; distribution: { pass: number; improve: number; fail: number }; average: number | null;
+    trend: Array<{ label: string; score: number; count: number; SUPPLIER: number | null; ORGANIZATION: number | null; BOTH: number | null }>;
+    categories: Array<{ profile: string; id: string; name: string; average: number; suppliers: number; failing: number }>;
+    progress: Array<{ legalEntityId: string; legalEntityName: string; total: number; started: number; submitted: number; finalized: number; avgCoverage: number | null }>;
+    actionStats: ActionStats; contribution: Contribution[]; eligible: number; evaluated: number; stamp: string;
+}
+
+function InsightsTab() {
+    const { data, error, loading, reload } = useLoad(() => callBackend<Insights>(`${API}/insights`, {}), []);
+    const stamp = useRef('');
+    useEffect(() => { if (data) stamp.current = data.stamp; }, [data]);
+    usePoll(async () => { try { const r = await callBackend<Insights>(`${API}/insights`, {}); if (r.stamp !== stamp.current) reload(); } catch { /* keep */ } }, 20000);
+    if (loading && !data) return <Spinner />;
+    if (error || !data) return <Alert tone='error'>{error || 'Insights could not be loaded.'}</Alert>;
+    const c = data.cadence;
+    const total = data.league.length || 1;
+    const columns: Array<Column<League>> = [
+        { key: 'rank', label: 'Rank', type: 'number', value: (r) => r.rank },
+        { key: 'vendor', label: 'Supplier', value: (r) => r.vendorName, render: (r) => <span className='font-medium text-ink'>{r.vendorName}</span> },
+        { key: 'score', label: 'Score', type: 'number', value: (r) => r.score, render: (r) => <span className='font-bold' style={{ color: scoreColor(r.score) }}>{fmt(r.score)}</span> },
+        { key: 'delta', label: 'Change', type: 'number', value: (r) => r.delta, render: (r) => (r.delta === null ? '—' : <span style={{ color: scoreColor(r.delta >= 0 ? 100 : 0) }}>{r.delta >= 0 ? '▲' : '▼'} {fmt(Math.abs(r.delta))}</span>) },
+        { key: 'band', label: 'Band', value: (r) => (r.band === 'pass' ? 'Pass' : r.band === 'improve' ? 'Needs improvement' : 'Fail') },
+        { key: 'sup', label: 'Supplier', type: 'number', value: (r) => r.supplier },
+        { key: 'org', label: 'Organization', type: 'number', value: (r) => r.organization },
+        { key: 'joint', label: 'Joint', type: 'number', value: (r) => r.joint },
+        { key: 'open', label: 'Open actions', type: 'number', value: (r) => r.openActions },
+        { key: 'overdue', label: 'Overdue actions', type: 'number', value: (r) => r.overdueActions },
+        { key: 'window', label: 'This window', value: (r) => STATUS[r.currentStatus] ?? (r.currentStatus === 'not_selected' ? 'Not selected' : r.currentStatus) },
+        { key: 'last', label: 'Last assessed', type: 'date', value: (r) => r.lastWindowEnd },
+        { key: 'le', label: 'Legal entity', value: (r) => r.lastLegalEntity, hidden: true },
+    ];
+    return (
+        <div className='space-y-3 p-3'>
+            <div className='grid grid-cols-2 gap-2'>
+                <Countdown label={c.phase === 'upcoming' ? 'Window opens in' : c.phase === 'open' ? 'Window closes in' : 'Window closed'} days={c.phase === 'upcoming' ? c.daysToOpen : c.phase === 'open' ? c.daysToClose : null} caption={c.phase === 'none' ? 'No window set' : `${c.start} to ${c.end} · ${data.frequencyLabel}`} pct={c.phase === 'open' ? c.elapsedPct : undefined} tone={c.phase === 'open' ? Math.min(100, (c.daysToClose ?? 0) * 4) : 80} />
+                <div className='rounded-2xl border border-line bg-panel p-3'>
+                    <p className='text-xs uppercase tracking-wide text-muted'>Portfolio average</p>
+                    <p className='mt-0.5 text-3xl font-bold' style={{ color: scoreColor(data.average) }}>{fmt(data.average)}</p>
+                    <p className='text-xs text-soft'>{data.evaluated} evaluated of {data.eligible} selected</p>
+                </div>
+            </div>
+            <Section title='Where suppliers stand' hint='Latest final score of each supplier'>
+                <div className='flex h-8 w-full overflow-hidden rounded-lg'>
+                    {(['fail', 'improve', 'pass'] as const).map((b, i) => data.distribution[b] > 0 && <div key={b} className='flex items-center justify-center text-xs font-bold text-white' style={{ width: `${(data.distribution[b] / total) * 100}%`, background: scoreColor([10, 55, 95][i]) }}>{data.distribution[b]}</div>)}
+                </div>
+                <div className='mt-2 grid grid-cols-3 text-center text-xs text-soft'><span>Fail {data.distribution.fail}</span><span>Needs improvement {data.distribution.improve}</span><span>Pass {data.distribution.pass}</span></div>
+            </Section>
+            <div className='h-[460px] overflow-hidden rounded-2xl border border-line'>
+                <RichTable<League> id='prc.srm.league' title='Supplier league table' columns={columns} rows={data.league} rowKey={(r) => r.vendorId} onRowClick={(r) => navigate(`${BASE}/${r.vendorId}`)} empty='No final evaluations yet.' fileName='supplier-league-table' height='h-full' />
+            </div>
+            {data.trend.length > 0 && (
+                <Section title='Portfolio trend' hint='Average final score per window'>
+                    <MultiTrend points={data.trend} series={SERIES} bands={data.bands} />
+                </Section>
+            )}
+            {data.contribution.length > 0 && (
+                <Section title='Contribution across suppliers' hint='Average of the latest evaluations'>
+                    <ContributionBar rows={data.contribution} />
+                </Section>
+            )}
+            {data.progress.length > 0 && (
+                <Section title='This window by legal entity'>
+                    {data.progress.map((p) => (
+                        <div key={p.legalEntityId} className='mb-3'>
+                            <div className='flex justify-between text-sm'><span className='text-soft'>{p.legalEntityName}</span><span className='font-semibold text-ink'>{p.finalized} / {p.total} final</span></div>
+                            <div className='mt-1 flex h-3 overflow-hidden rounded-full bg-line'>
+                                <div style={{ width: `${(p.finalized / Math.max(1, p.total)) * 100}%`, background: scoreColor(95) }} />
+                                <div style={{ width: `${(p.submitted / Math.max(1, p.total)) * 100}%`, background: scoreColor(60) }} />
+                                <div style={{ width: `${((p.started - p.finalized - p.submitted) / Math.max(1, p.total)) * 100}%`, background: scoreColor(35, 0.7) }} />
+                            </div>
+                            <p className='mt-0.5 text-xs text-muted'>{p.started} started · {p.submitted} awaiting approval{p.avgCoverage !== null ? ` · ${fmt(p.avgCoverage, 0)}% assessed on average` : ''}</p>
+                        </div>
+                    ))}
+                </Section>
+            )}
+            {data.categories.length > 0 && (
+                <Section title='Weakest categories' hint='Average across suppliers, lowest first'>
+                    <div className='space-y-2.5'>
+                        {data.categories.map((k) => (
+                            <div key={`${k.profile}${k.id}`}>
+                                <div className='flex items-center justify-between gap-2 text-sm'>
+                                    <span className='min-w-0 truncate text-soft'>{k.name} <span className='text-xs text-muted'>· {PROFILE_LABEL[k.profile as ProfileId]?.split(' ')[0]}</span></span>
+                                    <span className='shrink-0 font-semibold' style={{ color: scoreColor(k.average) }}>{Math.round(k.average)}%</span>
+                                </div>
+                                <ScoreBar pct={k.average} height={6} />
+                                <p className='text-xs text-muted'>{k.suppliers} supplier{k.suppliers === 1 ? '' : 's'}{k.failing ? ` · ${k.failing} below ${data.bands.improveFrom}` : ''}</p>
+                            </div>
+                        ))}
+                    </div>
+                </Section>
+            )}
+            <Section title='Action closure across suppliers'>
+                {data.actionStats.total ? <ClosureTracker st={data.actionStats} /> : <p className='text-sm text-muted'>No improvement actions yet.</p>}
+            </Section>
+        </div>
+    );
+}
