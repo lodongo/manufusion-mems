@@ -137,7 +137,7 @@ const AREAS: Record<string, string> = {
     'RTV:Returns to vendor:VW,CR,AP,PS,CN',
     'MCH:Invoice matching:VW,MT,AP,HD,RL',
     'VEN:Vendors:VW,CR,ED,SB,AP,RJ,RT,SU,RA,OV,DL',
-    'VEV:Vendor performance and SRM:VW,CR,SB,AP,RP',
+    'VEV:Vendor performance and SRM:VW,CR,ED,SB,AP,RT,CN,RP',
     'VON:Supplier onboarding requests:VW,ED',
     'CTR:Contracts and SLAs:VW,CR,ED,SB,AP,RR,TR',
     'FWA:Framework and purchase agreements:VW,CR,ED,SN,SB,AP,RT,RJ,AV,OV,TR,CN,UP,DL,CL',

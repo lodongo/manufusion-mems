@@ -67,6 +67,7 @@ const PATH_RULES: Rule[] = [
     [/^org\/procurement\/vendors\/onboarding-requests\/resolve/, 'PRC', 'VON', 'ED'],
     [/^org\/procurement\/vendors\/onboarding-requests/, 'PRC', 'VON', 'VW'],
     [/^org\/procurement\/agreements\//, 'PRC', 'FWA'],
+    [/^org\/procurement\/srm\//, 'PRC', 'VEV'],
     [/^org\/procurement\/vendors\/sla\//, 'PRC', 'CTR'],
     [/^org\/procurement\/vendors\/srm/, 'PRC', 'VEV'],
     [/^org\/procurement\/vendors\//, 'PRC', 'VEN'],

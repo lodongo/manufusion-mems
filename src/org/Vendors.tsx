@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Download, FileText, Paperclip, Pencil, Plus, Trash2, X } from 'lucide-react';
 import { callBackend } from '../lib/backend';
+import { SupplierRelationshipDashboard } from './SupplierEvaluation';
 import { navigate } from '../lib/route';
 import { Alert, Field, SelectField, TextArea } from '../components/ui';
 import RichTable, { type Column } from '../components/RichTable';
@@ -787,8 +788,7 @@ const TABS = [
     { value: 'overview', label: 'Overview' },
     { value: 'orders', label: 'Purchase orders' },
     { value: 'sla', label: 'SLAs' },
-    { value: 'srm_service', label: 'Service SRM' },
-    { value: 'srm_spares', label: 'Spares SRM' },
+    { value: 'srm', label: 'Supplier evaluation' },
 ];
 const amount = (n: number) => n.toLocaleString(undefined, { maximumFractionDigits: 2 });
 const ORDER_COLUMNS = (cur: string): Array<Column<OrderRow>> => [
@@ -1003,15 +1003,6 @@ function SlaPanel({ v, onDone }: { v: Full; onDone: (message: string) => void })
     );
 }
 
-function Blank({ title, text }: { title: string; text: string }) {
-    return (
-        <section className='space-y-1 rounded-2xl border border-line bg-panel p-3'>
-            <h2 className='text-sm font-semibold text-ink'>{title}</h2>
-            <p className='text-sm text-muted'>{text}</p>
-        </section>
-    );
-}
-
 // A temporary, time-limited waiver of a required document that cannot be uploaded. Needs its own permission and a written reason.
 function OverridePanel({ v, onDone, onError }: { v: Full; onDone: (message: string) => void; onError: (message: string) => void }) {
     const [typeCode, setTypeCode] = useState('');
@@ -1107,8 +1098,7 @@ function Detail({ id }: { id: string }) {
             {c.blocked && <Alert tone='info'>{c.blocked}</Alert>}
             {tab === 'orders' && <Orders id={v.id} />}
             {tab === 'sla' && <SlaPanel v={v} onDone={(m) => { setNotice(m); reload(); }} />}
-            {tab === 'srm_service' && <Blank title='Service SRM' text='Service supplier relationship management is not set up yet. This section is ready for it.' />}
-            {tab === 'srm_spares' && <Blank title='Spares SRM' text='Spares supplier relationship management is not set up yet. This section is ready for it.' />}
+            {tab === 'srm' && <SupplierRelationshipDashboard vendorId={v.id} />}
             {tab === 'overview' && (
                 <>
             {c.override && v.missingDocs.length > 0 && <OverridePanel v={v} onDone={(m) => { setNotice(m); reload(); }} onError={setProblem} />}
