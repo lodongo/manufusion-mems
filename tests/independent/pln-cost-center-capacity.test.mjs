@@ -269,7 +269,7 @@ test('production tabs follow configuration precedence and retain scoped availabi
     .map(match=>match[1]);
  assert.deepEqual(actual,expected);
  assert.ok(page.includes('const visibleTabs=tabs.filter('));
- assert.ok(page.includes('canViewMasters);'));
+ assert.ok(page.includes(':canViewMasters;')&&page.includes('permitted(t)'),'each stage keeps its own permission, then the submodule narrows the list');
  assert.ok(!page.includes("module==='PLN'&&t.key==='resources'?false"));
  assert.ok(page.includes("if(visibleTabs.length&&!visibleTabs.some(tab=>tab.key===active)){"),'an unavailable stage falls back to the first permitted one');
 });

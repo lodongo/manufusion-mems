@@ -305,7 +305,7 @@ const plnDemand: Adapter = {
     key: 'pln.demand', module: 'Production Planning', label: 'Demand line',
     collection: (org) => `${root(org)}/pln_demand`, statuses: ['pending_approval'],
     routes: /^org\.pln\.demand/,
-    link: 'pln_foundation', linkLabel: 'Production Planning › Demand register',
+    link: 'pln_planning', linkLabel: 'Production Planning › Demand register',
     ref: (id) => id, title: (id, d) => `Demand ${str(d.skuId)} ${str(d.needDate)} · ${str(d.quantity)}`,
     async stage(env, id, d) {
         return stage(`approve|${str(d.submittedAt)}`, 'Approve or reject the demand line', rule(env, async (p) => p.uid !== str(d.createdBy) && p.uid !== str(d.submittedBy) && (await env.at(p, 'PLN.configure', str(d.siteId)))));
@@ -328,7 +328,7 @@ const plnPlans: Adapter = {
     key: 'pln.plan', module: 'Production Planning', label: 'S&OP plan',
     collection: (org) => `${root(org)}/pln_plans`, statuses: ['draft', 'demand_review', 'supply_planning', 'sop_review', 'approved'],
     routes: /^org\.pln\.planning\./,
-    link: 'pln_foundation', linkLabel: 'Production Planning › S&OP planning cycle',
+    link: 'pln_planning', linkLabel: 'Production Planning › S&OP planning cycle',
     ref: (id) => id, title: (id, d) => `S&OP plan ${id} · ${str(d.siteName)} · ${str(d.fyLabel)}`,
     by: lastBy,
     async stage(env, id, d) {
@@ -358,7 +358,7 @@ const plnRequirements: Adapter = {
     key: 'pln.requirement', module: 'Production Planning', label: 'Commercial requirements',
     collection: (org) => `${root(org)}/pln_requirements`, statuses: ['draft', 'commercial_review', 'firmed', 'purchase_review', 'approved'],
     routes: /^org\.pln\.requirements\./,
-    link: 'pln_foundation', linkLabel: 'Production Planning › Commercial requirements',
+    link: 'pln_planning', linkLabel: 'Production Planning › Commercial requirements',
     ref: (id) => id, title: (id, d) => `Requirements ${id} · ${str(d.title)} · ${str(d.siteName)}`,
     by: lastBy,
     async stage(env, id, d) {
