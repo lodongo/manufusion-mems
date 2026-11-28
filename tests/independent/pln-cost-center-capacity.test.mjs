@@ -218,7 +218,7 @@ test('SKU editor visibly reports failures, persists committed revisions and supp
  assert.ok(ui.includes('setData(current=>current?{...current,mapping:result.mapping}:current)'));
  assert.ok(ui.includes('Add another SKU'));
  assert.ok(ui.includes('const next=available[0]'));
- assert.ok(ui.includes('All eligible manufactured SKUs at this site are already mapped'));
+ assert.ok(ui.includes('No eligible SKUs are available. Check the resource classification'));
  assert.ok(!ui.includes('disabled={!canSave||busy}'));
  assert.ok(backend.includes("SKU '+(i+1)+' ('+line.skuId+'): '"));
 });

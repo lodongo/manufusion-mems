@@ -101,6 +101,31 @@ const allocatedOf=(record:Obj):string[]=>{
 async function authorizeSkuIds(ctx:OrgContext,ids:string[]):Promise<void>{
  for(const skuId of ids)await manufacturedSku(ctx,skuId);
 }
+// Enforce the same resource classification from every shared editor. Existing
+// mismatched allocations remain accessible for review and removal, never silently deleted.
+async function resourceClassification(ctx:OrgContext,id:string){
+ const link=await getDoc('organizations/'+ctx.orgId+'/mfg_resource_cost_centers/'+id);
+ let doc=link?await getDoc('organizations/'+ctx.orgId+'/mfg_resources/'+str(link.data.resourceId)):null;
+ if(!doc)doc=(await listDocs('organizations/'+ctx.orgId+'/mfg_resources')).find(r=>str(r.data.costCenterId)===id&&str(r.data.sourceKind)==='PRODUCTION_COST_CENTER')||null;
+ if(!doc||str(doc.data.status)==='removed')return null;
+ return str(doc.data.productClassification);
+}
+export function validateNewResourceSku(classification:string|null,category:string,alreadyAllocated:boolean){
+ if(classification===null||alreadyAllocated)return;
+ if(!['FINISHED','INTERMEDIATE'].includes(classification))
+  throw new HttpError(400,'Set the manufacturing resource product classification before adding SKUs.');
+ if(category!==classification)
+  throw new HttpError(400,'SKU category does not match the manufacturing resource classification.');
+}
+async function validateResourceAllocations(ctx:OrgContext,id:string,ids:string[],previous:string[]){
+ const classification=await resourceClassification(ctx,id);
+ if(classification===null)return;
+ const existing=new Set(previous);
+ for(const skuId of ids){
+  if(existing.has(skuId))continue;
+  validateNewResourceSku(classification,(await manufacturedSku(ctx,skuId)).category,false);
+ }
+}
 async function authorized(ctx:OrgContext,permission:'read'|'write',id:string){
  if(ctx.role==='org_super_admin')return true;
  const path=await nodePath(ctx.orgId,id);
@@ -282,6 +307,7 @@ export const plnCostCenterCapacityRoutes={
       (Array.isArray(saved.data.skuCapacities)?saved.data.skuCapacities:[])
        .map(line=>validSavedProjection(ctx,location.siteId,line,params))):[];
    return {location,outputs,containers,sizes,units:physicalRatingUnits(),
+    resourceClassification:await resourceClassification(ctx,id),
     mapping:saved?{...expose(saved),skuCapacities:ratings}:null,
     canConfigure:await authorized(ctx,'write',id),
     testOverride:ctx.testMode===true&&ctx.role==='org_super_admin'};
@@ -377,6 +403,7 @@ export const plnCostCenterCapacityRoutes={
    const skuIds=normalizeAllocatedSkuIds(ctx.body.skuIds);
    await authorizeSkuIds(ctx,skuIds);
    const path=ROOT(ctx.orgId)+'/'+id,old=await getDoc(path);
+   await validateResourceAllocations(ctx,id,skuIds,allocatedOf(old?.data||{}));
    const revision=num(old?.data.revision)??0;
    if(Number(ctx.body.expectedRevision)!==revision)
     throw new HttpError(409,'SKU allocation changed. Reload the cost centre before saving.');
@@ -409,6 +436,7 @@ export const plnCostCenterCapacityRoutes={
    if(skuCapacities.some(x=>!allocatedSkuIds.includes(x.skuId)))
     throw new HttpError(400,'Commissioned SKU ratings must belong to the saved SKU allocation.');
    await authorizeSkuIds(ctx,allocatedSkuIds);
+   await validateResourceAllocations(ctx,id,allocatedSkuIds,allocatedOf(old?.data||{}));
    const revision=num(old?.data.revision)??0;
    if(Number(ctx.body.expectedRevision)!==revision)
     throw new HttpError(409,'Cost-centre SKU configuration changed. Reload before saving.');

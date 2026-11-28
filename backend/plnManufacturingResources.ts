@@ -24,9 +24,15 @@ export function resourceCoreRecord(data:Obj,ccId:string,siteId:string,actor:stri
  if(notes.length>600)throw new HttpError(400,'Resource notes must be at most 600 characters.');
  const unit=PROCUREMENT_UNITS.find(u=>u.code===rateUom&&u.active&&u.selectable);
  if(!unit)throw new HttpError(400,'Choose an enabled rate unit from the MEMS UoM master.');
+ const productClassification=str(data.productClassification ?? prior?.productClassification).trim();
+ if(productClassification&&!['FINISHED','INTERMEDIATE'].includes(productClassification))
+  throw new HttpError(400,'Choose finished products or intermediate products.');
+ const rateTimeUom=str(data.rateTimeUom ?? prior?.rateTimeUom).trim();
+ if(rateTimeUom&&!PROCUREMENT_UNITS.some(u=>u.code===rateTimeUom&&u.category==='Time'&&u.active&&u.selectable))
+  throw new HttpError(400,'Choose an enabled time unit for the rate period.');
  const at=nowIso();
  return {
-   ...prior,id:str(prior?.id),name,rateUom,description:notes,notes,
+   ...prior,id:str(prior?.id),name,rateUom,rateTimeUom,productClassification,description:notes,notes,
    siteId,costCenterId:ccId,sourceKind:'PRODUCTION_COST_CENTER',
    type:'WORK_CENTER',rate:0,efficiency:100,assetId:'',
    status:'active',revision:(num(prior?.revision)??0)+1,
@@ -105,7 +111,7 @@ export const plnManufacturingResourceRoutes={
            legalEntityId:chain[chain.length-4].id,departmentId:chain[chain.length-2].id,
            path:chain.map(x=>({id:x.id,name:str(x.data.name)||str(x.data.code)||x.id,
                code:str(x.data.code),level:str(x.data.level)})),
-           resource:linked?{id:linked.id,name:str(linked.data.name),rateUom:str(linked.data.rateUom),
+           resource:linked?{id:linked.id,name:str(linked.data.name),rateUom:str(linked.data.rateUom),rateTimeUom:str(linked.data.rateTimeUom),productClassification:str(linked.data.productClassification),
                notes:str(linked.data.notes||linked.data.description),revision:num(linked.data.revision)??1,
                active:str(linked.data.status)!=='removed'}:null,
            canConfigure:await permitted(ctx,cc.id,true),
@@ -124,7 +130,7 @@ export const plnManufacturingResourceRoutes={
    if(!await permitted(ctx,ccId,false))throw new HttpError(403,'Cost centre outside permitted scope.');
    const cc=await location(ctx,ccId),doc=await resolve(ctx,ccId);
    return {location:cc,resource:doc&&str(doc.data.status)!=='removed'?
-       {id:doc.id,name:str(doc.data.name),rateUom:str(doc.data.rateUom),
+       {id:doc.id,name:str(doc.data.name),rateUom:str(doc.data.rateUom),rateTimeUom:str(doc.data.rateTimeUom),productClassification:str(doc.data.productClassification),
            notes:str(doc.data.notes||doc.data.description),revision:num(doc.data.revision)??1}:null,
        canConfigure:await permitted(ctx,ccId,true),
        testOverride:ctx.testMode===true&&ctx.role==='org_super_admin',
@@ -141,13 +147,14 @@ export const plnManufacturingResourceRoutes={
        throw new HttpError(409,'Manufacturing resource changed. Reload before saving.');
    const core=resourceCoreRecord({
        name:str(ctx.body.name),rateUom:str(ctx.body.rateUom),notes:str(ctx.body.notes),
+       rateTimeUom:str(ctx.body.rateTimeUom ?? old?.data.rateTimeUom),productClassification:str(ctx.body.productClassification ?? old?.data.productClassification),
    },ccId,cc.siteId,ctx.uid,old?.data);
    if(old){
        const updated=await commitChecked([{path:store(ctx.orgId)+'/'+old.id,
            data:{...core,id:old.id},precondition:{updateTime:old.updateTime}}]);
        if(!updated)throw new HttpError(409,'Resource changed concurrently. Reload.');
        await auditResource(ctx,'pln.manufacturing_resource.core_update',ccId,old.id);
-       return {resource:{id:old.id,name:core.name,rateUom:core.rateUom,
+       return {resource:{id:old.id,name:core.name,rateUom:core.rateUom,rateTimeUom:core.rateTimeUom,productClassification:core.productClassification,
            notes:core.notes,revision:core.revision},costCenterId:ccId};
    }
    // The RSC counter and one-per-cost-centre reservation are committed together.
@@ -168,7 +175,7 @@ export const plnManufacturingResourceRoutes={
        ]);
        if(success){
            await auditResource(ctx,'pln.manufacturing_resource.add',ccId,id);
-           return {resource:{id,name:core.name,rateUom:core.rateUom,
+           return {resource:{id,name:core.name,rateUom:core.rateUom,rateTimeUom:core.rateTimeUom,productClassification:core.productClassification,
                notes:core.notes,revision:core.revision},costCenterId:ccId};
        }
        if(await resolve(ctx,ccId))throw new HttpError(409,'This cost centre already has a manufacturing resource. Refresh.');
