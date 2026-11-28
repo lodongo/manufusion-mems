@@ -153,6 +153,7 @@ import { finLedgerRoutes } from './finLedger';
 import { finOpsRoutes } from './finOps';
 import { vendorRoutes } from './vendors';
 import { purchaseAgreementRoutes } from './purchaseAgreements';
+import { vendorInsightRoutes } from './vendorInsights';
 import { supplierEvaluationRoutes } from './supplierEvaluation';
 import { orgHomeRoutes } from './orgHome';
 import { registrationRoutes } from './registration';
@@ -1708,6 +1709,7 @@ export const handler = router(recordWiredRoutes({
     ...finOpsRoutes,
     ...vendorRoutes,
     ...purchaseAgreementRoutes,
+    ...vendorInsightRoutes,
     ...supplierEvaluationRoutes,
     ...orgHomeRoutes,
     ...extraRoutes,

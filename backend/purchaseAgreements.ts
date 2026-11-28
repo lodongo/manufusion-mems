@@ -11,11 +11,13 @@ import { getAuthority } from './procurementPolicy';
 import { vendorsPath } from './vendors';
 import { suppliersFor } from './materialMedia';
 import { PROCUREMENT_UNITS } from './procurementUnits';
-import { PLACED, approvalRoute, lock, myPositions, nameOfUser, ordersPath, ratesOf, type Step } from './purchaseOrders';
+import { approvalRoute, lock, myPositions, nameOfUser, ratesOf, type Step } from './purchaseOrders';
+import { agreementLinesOf, linesUnder, loadLinkData, placedOrders, quoteWaitOf } from './agreementPerformance';
+import { scorecardOf } from './vendorPerformanceModel';
 import {
     EDITABLE_ITEMS, FINAL, HOLDING, MAX_ATTACHMENTS, MAX_ITEMS, MAX_PDF_BYTES, PA_ID, PA_STATUS, QUOTING,
     agreementValue, applyToInfo, checkQuote, converter, dashboardOf, inDate, itemKey, overlaps, periodProblems,
-    purchaseUnitOf, restoreInfo, settleAction, submitProblems, type OrderLine,
+    purchaseUnitOf, restoreInfo, settleAction, submitProblems,
 } from './purchaseAgreementModel';
 
 // ---------------------------------------------------------------------------
@@ -297,24 +299,22 @@ export async function settleAgreements(orgId: string, ctx: OrgContext | null = n
 
 // ----- Dashboard -----
 
-async function orderLines(orgId: string, vendorId: string): Promise<OrderLine[]> {
-    const out: OrderLine[] = [];
-    for (const p of await listDocs(ordersPath(orgId))) {
-        const d = p.data;
-        if (str(d.vendorId) !== vendorId || !PLACED.includes(str(d.status))) continue;
-        const date = (str(d.approvedAt) || str(d.orderDate) || str(d.createdAt)).slice(0, 10);
-        for (const l of objs(d.lines)) {
-            if (!str(l.materialId)) continue;
-            out.push({ orderId: p.id, orderNumber: str(d.number) || p.id, vendorId, status: str(d.status), date, currency: str(d.currency), materialId: str(l.materialId), warehouseId: str(l.warehouseId), quantity: Number(l.quantity) || 0, receivedQty: Number(l.receivedQty) || 0, netUnitPrice: Number(l.netUnitPrice) || Number(l.unitPrice) || 0 });
-        }
-    }
-    return out;
+/** What the supplier's placed orders bought for each material and warehouse, found through the requirement or item number as well as the line itself. */
+export async function agreementFacts(orgId: string, vendorId: string, pa: Obj, rate: (code: string) => number | null, agreementDocs?: Doc[]) {
+    const day = today();
+    const link = await loadLinkData(orgId, vendorId);
+    const pos = await placedOrders(orgId, vendorId);
+    const all = agreementLinesOf(pos, vendorId, link, day);
+    const lines = linesUnder(pa, all);
+    const dash = dashboardOf(pa, objs(pa.items), all, converter(rate), day);
+    const wait = await quoteWaitOf(orgId, vendorId, agreementDocs ?? link.agreements, day);
+    return { all, lines, dash, wait, day, scorecard: scorecardOf({ pa, dash, lines, quoteWait: wait, day }) };
 }
 async function dashboard(ctx: OrgContext, d: Obj) {
     const orgCurrency = str(ctx.org.data.currencyCode);
     const { rate } = await ratesOf(orgCurrency);
-    const lines = await orderLines(ctx.orgId, str(d.vendorId));
-    return dashboardOf(d, objs(d.items), lines, converter(rate));
+    const f = await agreementFacts(ctx.orgId, str(d.vendorId), d, rate);
+    return { ...f.dash, scorecard: f.scorecard };
 }
 
 // ----- Shapes for the screen -----

@@ -88,6 +88,12 @@ export function periodProblems(start: string, end: string, now = today()): strin
 }
 
 /** In date on a day: start <= day <= end. */
+/** The dates orders count as bought under an agreement: its own dates, to the day it was terminated when that was earlier. */
+export const paWindow = (pa: Obj): { start: string; end: string } => {
+    const end = str(pa.endDate);
+    const stopped = str(pa.status) === 'terminated' ? str(pa.terminatedAt).slice(0, 10) : '';
+    return { start: str(pa.startDate), end: stopped && (!end || stopped < end) ? stopped : end };
+};
 export const inDate = (pa: Obj, day = today()) => !!str(pa.startDate) && !!str(pa.endDate) && str(pa.startDate) <= day && day <= str(pa.endDate);
 /** Two periods overlap. */
 export const overlaps = (a1: string, a2: string, b1: string, b2: string) => !!a1 && !!a2 && !!b1 && !!b2 && a1 <= b2 && b1 <= a2;
@@ -290,6 +296,7 @@ export function dashboardOf(pa: Obj, items: Obj[], lines: OrderLine[], convert: 
     const cur = str(pa.currency) || str(o(items[0]?.quote).currency);
     const start = str(pa.startDate);
     const end = str(pa.endDate);
+    const win = paWindow(pa);
     const totalDays = start && end ? Math.max(1, dayDiff(start, end) + 1) : 0;
     const elapsed = start && end ? Math.min(totalDays, Math.max(0, dayDiff(start, day) + 1)) : 0;
     const remaining = end ? Math.max(0, dayDiff(day, end)) : 0;
@@ -302,7 +309,7 @@ export function dashboardOf(pa: Obj, items: Obj[], lines: OrderLine[], convert: 
         const sp = base.unitPrice === '' || base.unitPrice === null || base.unitPrice === undefined ? null : Number(base.unitPrice);
         const sc = str(base.currency);
         const stdIn = sp !== null && Number.isFinite(sp) && sp > 0 && sc ? convert(sp, sc, cur) : null;
-        const mine = lines.filter((l) => l.vendorId === str(pa.vendorId) && l.materialId === str(i.materialId) && l.warehouseId === str(i.warehouseId) && (!start || l.date >= start) && (!end || l.date <= end));
+        const mine = lines.filter((l) => l.vendorId === str(pa.vendorId) && l.materialId === str(i.materialId) && l.warehouseId === str(i.warehouseId) && (!win.start || l.date >= win.start) && (!win.end || l.date <= win.end));
         let orderedQty = 0;
         let receivedQty = 0;
         let orderedValue = 0;
@@ -354,7 +361,7 @@ export function dashboardOf(pa: Obj, items: Obj[], lines: OrderLine[], convert: 
         savings,
         potentialSavings: potential,
         materialsPurchased: per.filter((x) => x.orderedQty > 0).length,
-        orders: new Set(lines.filter((l) => per.some((x) => x.materialId === l.materialId && x.warehouseId === l.warehouseId) && l.vendorId === str(pa.vendorId) && (!start || l.date >= start) && (!end || l.date <= end)).map((l) => l.orderId)).size,
+        orders: new Set(lines.filter((l) => per.some((x) => x.materialId === l.materialId && x.warehouseId === l.warehouseId) && l.vendorId === str(pa.vendorId) && (!win.start || l.date >= win.start) && (!win.end || l.date <= win.end)).map((l) => l.orderId)).size,
         priceBreaches: per.reduce((s, x) => s + x.priceBreaches, 0),
         itemsApplied: per.filter((x) => x.applied).length,
         itemsOverridden: per.filter((x) => x.overridden).length,

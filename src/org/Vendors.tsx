@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Download, FileText, Paperclip, Pencil, Plus, Trash2, X } from 'lucide-react';
 import { callBackend } from '../lib/backend';
 import { SupplierRelationshipDashboard } from './SupplierEvaluation';
+import { VendorOrders } from './VendorOrders';
+import { VendorAgreements } from './VendorAgreements';
 import { navigate } from '../lib/route';
 import { Alert, Field, SelectField, TextArea } from '../components/ui';
 import RichTable, { type Column } from '../components/RichTable';
@@ -787,6 +789,7 @@ interface OrdersOut {
 const TABS = [
     { value: 'overview', label: 'Overview' },
     { value: 'orders', label: 'Purchase orders' },
+    { value: 'agreements', label: 'Purchase agreements' },
     { value: 'sla', label: 'SLAs' },
     { value: 'srm', label: 'Supplier evaluation' },
 ];
@@ -1096,7 +1099,8 @@ function Detail({ id }: { id: string }) {
             {v.returnReason && <Alert tone='warn'>{v.returnReason}</Alert>}
             {v.suspendReason && <Alert tone='error'>Suspended: {v.suspendReason}</Alert>}
             {c.blocked && <Alert tone='info'>{c.blocked}</Alert>}
-            {tab === 'orders' && <Orders id={v.id} />}
+            {tab === 'orders' && <VendorOrders vendorId={v.id} payments={<Orders id={v.id} />} />}
+            {tab === 'agreements' && <VendorAgreements vendorId={v.id} />}
             {tab === 'sla' && <SlaPanel v={v} onDone={(m) => { setNotice(m); reload(); }} />}
             {tab === 'srm' && <SupplierRelationshipDashboard vendorId={v.id} />}
             {tab === 'overview' && (

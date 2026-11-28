@@ -9,6 +9,7 @@ import { Badge, Button, Spinner, useLoad } from '../admin/kit';
 import { fmtDate } from '../admin/format';
 import { downloadReportPdf } from '../lib/report';
 import { Screen, Segmented, messageOf, useConfirm } from '../components/screen';
+import Scorecard, { type ScorecardData } from './AgreementScorecard';
 
 // Purchase agreements (PA + 8 digits) for spares bought from one approved supplier for a period.
 // Draft -> RFQ to the supplier -> each item's quote recorded (checked against the material's procurement setup)
@@ -48,6 +49,7 @@ interface Dash {
     currency: string; active: boolean; totalDays: number; elapsedDays: number; daysRemaining: number; timeUsedPct: number; expectedValue: number;
     orderedValue: number; utilisationPct: number; savings: number; potentialSavings: number; materialsPurchased: number; orders: number;
     priceBreaches: number; itemsApplied: number; itemsOverridden: number; noStandardPrice: number; items: Use[];
+    scorecard?: ScorecardData;
 }
 interface Detail extends Omit<Row, 'items'> {
     notes: string; quoteReference: string; quoteDate: string; vendorEmail: string; rfq: Obj; items: Item[];
@@ -345,6 +347,7 @@ function Overview({ a, can, d, currencies, onSaved }: { a: Detail; can: Can; d: 
                         <Tile label='Overridden items' value={d.itemsOverridden} />
                         <Tile label='No standard price' value={d.noStandardPrice} hint='Not counted in savings' />
                     </div>
+                    {d.scorecard && <Scorecard card={d.scorecard} currency={d.currency} title='Projected and actual scorecard' />}
                 </>
             )}
             <h2 className='pt-2 text-sm font-semibold text-ink'>Agreement</h2>

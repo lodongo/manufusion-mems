@@ -13,6 +13,8 @@ import { receiveGoods, receiptPlan } from './finOps';
 import { checkChosenGl, commit, withLock, type Write } from './finCore';
 import { chargesTotal, rescaleCharges, type Charge } from '../src/shared/procurementCharges';
 import {preparePoApprovalBudget,preparePoCancellationBudget,parsePoGatePolicy,PO_GATE_PATH} from './corporatePoBudget';
+import { agreementLinker, loadLinkData } from './agreementPerformance';
+import { orderDateOf } from './vendorPerformanceModel';
 
 // Purchase requisitions (PRQ + 9 digits) and purchase orders (PO + 9 digits).
 //   organizations/{org}/procurement_requisitions/{PRQ000000001}   one per recommended quotation
@@ -1049,6 +1051,11 @@ function poLinesFrom(rq: Obj, rqId: string, firstNo: number): Obj[] {
         priceRevised: l.priceRevised === true,
         priceNote: str(l.priceNote),
         warehouseName: str(l.warehouseName),
+        // Which stock item and warehouse the line buys, kept so the order can be tied to a purchase agreement.
+        materialId: str(l.materialId),
+        materialNumber: str(l.materialNumber),
+        warehouseId: str(l.warehouseId),
+        warehouseCode: str(l.warehouseCode),
         leadTimeDays: Number(l.leadTimeDays) || 0,
         warrantyMonths: Number(l.warrantyMonths) || 0,
         requisitionId: rqId,
@@ -1548,8 +1555,12 @@ export const purchaseOrderRoutes = {
             const latest = rates.rate(str(d.currency));
             const priceOk = sees(ctx, acc, vis, 'prices');
             const quotesOk = sees(ctx, acc, vis, 'quotes');
+            // Lines bought under a purchase agreement carry its number (and whether the price is above the agreed one).
+            const linker = agreementLinker(await loadLinkData(ctx.orgId, str(d.vendorId)), rates.rate);
+            const orderDay = orderDateOf(d);
             const lines = objs(d.lines).map((l) => {
-                const x: Obj = { ...l, outstanding: outstanding(l) };
+                const ag = linker(d, l, orderDay);
+                const x: Obj = { ...l, outstanding: outstanding(l), agreementId: ag?.id ?? '', agreementNumber: ag?.number ?? '', agreedPrice: priceOk ? ag?.agreedPrice ?? null : null, agreedCurrency: ag?.agreedCurrency ?? '', aboveAgreed: priceOk && ag?.aboveAgreed === true };
                 if (!priceOk) for (const k of ['unitPrice', 'discountPct', 'netUnitPrice', 'total', 'quotePrice', 'budget']) delete x[k];
                 return x;
             });
