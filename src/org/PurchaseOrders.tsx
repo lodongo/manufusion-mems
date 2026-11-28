@@ -78,6 +78,12 @@ interface Line {
     itemName?: string;
     requirement?: string;
     itemCode?: string;
+    /** The purchase agreement the line was bought under (supplier, material, warehouse and date), and whether it was priced above the agreed price. */
+    agreementId?: string;
+    agreementNumber?: string;
+    agreedPrice?: number | null;
+    agreedCurrency?: string;
+    aboveAgreed?: boolean;
     quantity: number;
     unit: string;
     unitPrice: number;
@@ -270,6 +276,17 @@ function HistoryList({ items }: { items: Hist[] }) {
 const LINE_COLUMNS = (cur: string, withReceipt: boolean): Array<Column<Line>> => [
     { key: 'no', label: 'No', type: 'number', value: (l) => l.no },
     { key: 'item', label: 'Item', value: (l) => l.itemName || l.requirement || '' },
+    {
+        key: 'pa',
+        label: 'Purchase agreement',
+        value: (l) => l.agreementNumber ?? '',
+        render: (l) =>
+            l.agreementNumber ? (
+                <button type='button' className='min-h-11 font-mono text-xs font-semibold text-blue-300 underline' onClick={(e) => { e.stopPropagation(); navigate(`organization_home/procurement_agreements/${l.agreementId}`); }}>
+                    {l.agreementNumber}{l.aboveAgreed ? ' · above agreed price' : ''}
+                </button>
+            ) : '',
+    },
     { key: 'code', label: 'Item code', value: (l) => l.itemCode ?? '', hidden: true },
     { key: 'qty', label: 'Quantity', type: 'number', value: (l) => l.quantity, render: (l) => `${l.quantity} ${l.unit}` },
     { key: 'price', label: `Unit price (${cur})`, type: 'number', value: (l) => l.unitPrice },
@@ -1067,7 +1084,7 @@ async function printOrder(po: PoFull) {
                     ['Approved', po.approvedAt ? fmtDate(po.approvedAt) : 'Not yet'],
                 ],
             },
-            { heading: 'Lines', table: { head: ['No', 'Item', 'Quantity', 'Net price', 'Total', 'Needed by'], body: po.lines.map((l) => [String(l.no), l.itemName || l.requirement || '', `${l.quantity} ${l.unit}`, money(l.netUnitPrice), money(l.total), l.dateRequired]) } },
+            { heading: 'Lines', table: { head: ['No', 'Item', 'Quantity', 'Net price', 'Total', 'Needed by', 'Agreement'], body: po.lines.map((l) => [String(l.no), l.itemName || l.requirement || '', `${l.quantity} ${l.unit}`, money(l.netUnitPrice), money(l.total), l.dateRequired, l.agreementNumber || '']) } },
             { heading: 'Approval', table: { head: ['Level', 'Job role', 'Approved by', 'Date'], body: po.approval.steps.map((s) => [s.level, s.positionTitle, s.byName || '-', s.at ? fmtDate(s.at) : '-']) } },
             ...(po.notes ? [{ heading: 'Notes', text: po.notes }] : []),
         ],
@@ -1166,6 +1183,7 @@ function OrderDetail({ id }: { id: string }) {
 
     const isService = po.poType === 'service';
     const expiredLines = lines.filter((l) => l.quoteValidUntil && l.quoteValidUntil < todayIso());
+    const agreements = [...new Set(lines.map((l) => l.agreementNumber).filter((n): n is string => !!n))];
     const newest = po.versions.reduce((m, v) => Math.max(m, v.ver), 0);
     const tabs = [
         { value: 'overview' as Tab, label: 'Overview' },
@@ -1210,6 +1228,7 @@ function OrderDetail({ id }: { id: string }) {
             <div className='flex flex-wrap items-center gap-2'>
                 <Badge tone={poTone(po.status)}>{po.statusLabel}</Badge>
                 <Badge tone='muted'>{po.poTypeLabel}</Badge>
+                {agreements.length > 0 && <Badge tone='brand'>Purchase agreement {agreements.join(', ')}</Badge>}
                 {po.acknowledged && <Badge tone='brand'>Acknowledged by the supplier</Badge>}
                 {['sent', 'partial'].includes(po.status) && !po.acknowledged && <Badge tone='warn'>Not acknowledged yet</Badge>}
                 {expiredLines.length > 0 && <Badge tone='danger'>Quote expired</Badge>}
@@ -1285,7 +1304,7 @@ function OrderDetail({ id }: { id: string }) {
                         />
                     </Section>
                     <Section title={`Lines (${lines.length})`}>
-                        <RichTable id='prc.order.lines' tabKey='overview' columns={LINE_COLUMNS(po.currency, ['open', 'sent', 'partial', 'full'].includes(po.status))} rows={lines} rowKey={(l) => String(l.no)} empty='No lines.' fileName={`${po.number}-lines`} height='h-96' rowClassName={(l) => (l.quoteValidUntil && l.quoteValidUntil < todayIso() ? 'bg-red-500/10' : '')} />
+                        <RichTable id='prc.order.lines' tabKey='overview' columns={LINE_COLUMNS(po.currency, ['open', 'sent', 'partial', 'full'].includes(po.status))} rows={lines} rowKey={(l) => String(l.no)} empty='No lines.' fileName={`${po.number}-lines`} height='h-96' rowClassName={(l) => (l.quoteValidUntil && l.quoteValidUntil < todayIso() ? 'bg-red-500/10' : l.agreementNumber ? 'bg-blue-500/10' : '')} />
                     </Section>
                     {c.edit && (
                         <Section title='Details'>
