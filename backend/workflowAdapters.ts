@@ -354,6 +354,36 @@ const plnPlans: Adapter = {
     },
 };
 
+const plnRequirements: Adapter = {
+    key: 'pln.requirement', module: 'Production Planning', label: 'Commercial requirements',
+    collection: (org) => `${root(org)}/pln_requirements`, statuses: ['draft', 'commercial_review', 'firmed', 'purchase_review', 'approved'],
+    routes: /^org\.pln\.requirements\./,
+    link: 'pln_foundation', linkLabel: 'Production Planning › Commercial requirements',
+    ref: (id) => id, title: (id, d) => `Requirements ${id} · ${str(d.title)} · ${str(d.siteName)}`,
+    by: lastBy,
+    async stage(env, id, d) {
+        const { reqTransitionCheck } = await import('./plnRequirementsModel');
+        const { myPositions } = await import('./purchaseOrders');
+        const site = str(d.siteId);
+        const status = str(d.status) as 'draft';
+        const coa = o(d.coa);
+        const actors = { createdBy: str(d.createdBy), commercialSubmittedBy: str(d.commercialSubmittedBy), firmedBy: str(d.firmedBy), purchaseSubmittedBy: str(d.purchaseSubmittedBy), approvers: approvedBy(coa.steps) };
+        const may = (action: Parameters<typeof reqTransitionCheck>[1], perm: string, extra: (p: Person) => boolean = () => true) =>
+            rule(env, async (p) => extra(p) && !reqTransitionCheck(status, action, p.uid, actors, { explosionRun: true, toBuy: 1 }) && (await env.at(p, perm, site)));
+        if (status === 'draft') return str(d.returnReason) ? stage(`returned|${short(str(d.returnReason))}`, 'Revise the returned commercial requirements', only(env, str(d.createdBy))) : null;
+        if (status === 'commercial_review') return stage(`firm|${str(d.commercialSubmittedAt)}`, 'Firm the commercial requirements (independent approver)', may('firm_commercial', 'PLN.commercial.firm'));
+        if (status === 'firmed') return stage(`work|${str(d.firmedAt)}|${short(str(coa.returnReason))}`, 'Work back to the materials and submit the purchase requirements', may('submit_purchase', 'PLN.commercial.plan'));
+        if (status === 'purchase_review') {
+            const step = pendingStep(coa.steps);
+            if (!step) return null;
+            const code = str(step.positionCode);
+            return stage(`level|${str(step.level)}|${str(d.purchaseSubmittedAt)}`, `Approve purchase level ${str(step.level)} (${str(step.positionTitle)})`, may('approve_purchase', 'PLN.requirements.approve', (p) => !code || code === 'TEST_MODE' || myPositions(p.user).includes(code)), { details: [{ label: 'Purchase value', value: String(coa.amount ?? '') }] });
+        }
+        if (status === 'approved') return stage(`push|${str(d.approvedAt)}`, 'Confirm the quantities and push to procurement', may('push', 'PLN.requirements.push'));
+        return null;
+    },
+};
+
 // ----- Maintenance -----
 
 async function routing(env: Env) {
@@ -442,7 +472,7 @@ export const ADAPTERS: Adapter[] = [
     materialFlow('inv.material_creation', 'materials', 'Material creation'),
     materialFlow('inv.material_extension', 'material_extensions', 'Material extension'),
     stockAdjustments, genericRequests, stockTake, forecastProposals, criticality,
-    plnDemand, mfgMaster('boms'), mfgMaster('routings'), plnPlans,
+    plnDemand, mfgMaster('boms'), mfgMaster('routings'), plnPlans, plnRequirements,
     maintenance('wr'), maintenance('wo'),
     assets, documents, governance, hrRules,
 ];

@@ -828,6 +828,72 @@ export async function dismissReplenishment(ctx: OrgContext, id: string, reason: 
             });
 }
 
+// ----- Requirements raised from firmed planning (commercial requirement sets) -----
+
+/** The immediate manager a requirement raised by this person would wait for, or why there is none. */
+export async function plannedApprover(ctx: OrgContext): Promise<{ title: string; problem: string }> {
+    const a = await approverFor(ctx, ctx.me);
+    return { title: a.managerTitle, problem: a.problem };
+}
+export interface PlannedLineIn {
+    key: string;
+    materialId: string;
+    quantity: number;
+    firmQty: number;
+    reason: string;
+    dateRequired: string;
+    urgency: string;
+    /** Value of the quantity pushed, in the organization currency (indicative budget). */
+    budget: number;
+    technical: string;
+}
+/**
+ * Raises one purchase requirement for a warehouse from the firmed lines of a commercial requirement set. The person who
+ * pushes becomes the requester and the requirement waits for their immediate manager, exactly like a verified
+ * replenishment request; the stores then release it and procurement acknowledges it. Every line is validated like any
+ * item (category adopted, material stocked in the warehouse, GL account allowed, date not past).
+ */
+export async function raisePlannedRequirement(ctx: OrgContext, input: { setId: string; setTitle: string; siteId: string; warehouseId: string; glCode: string; lines: PlannedLineIn[] }): Promise<{ id: string; approver: string; lines: number }> {
+    requireProcurement(ctx);
+    if (!input.lines.length || input.lines.length > MAX_LINES) throw new HttpError(400, `A requirement can have 1 to ${MAX_LINES} items.`);
+    const approver = await approverFor(ctx, ctx.me);
+    if (approver.problem) throw new HttpError(409, approver.problem);
+    const lines: Obj[] = [];
+    let no = 0;
+    for (const l of input.lines) {
+        no += ITEM_STEP;
+        const m = await getDoc(`organizations/${ctx.orgId}/materials/${l.materialId}`);
+        if (!m) throw new HttpError(409, `Material ${l.materialId} no longer exists. Work back again.`);
+        const name = (str(m.data.name) || str(m.data.shortText) || 'Material').slice(0, 160);
+        const uomRaw = str(m.data.uom);
+        const uom = PROCUREMENT_UNITS.find((u) => u.active && u.selectable && (u.code === uomRaw || u.symbol === uomRaw));
+        const item = await prepareItem(ctx, {
+            type: 'material', source: 'warehouse', categoryCode: str(m.data.categoryCode), subcategoryCode: str(m.data.subcategoryCode),
+            requirement: `${name} (${str(m.data.materialNumber)})`, technical: l.technical, quantity: l.quantity, uomCode: uom?.code ?? '',
+            dateRequired: l.dateRequired, urgency: l.urgency, budget: l.budget, warehouseId: input.warehouseId, materialId: l.materialId, costCenterId: input.warehouseId, glCode: input.glCode,
+        }, no);
+        if (str(item.materialId) !== l.materialId || str(item.warehouseId) !== input.warehouseId) throw new HttpError(409, `${str(m.data.materialNumber)} is not stocked in that warehouse any more.`);
+        const missing = missingOf(item);
+        if (missing.length) throw new HttpError(400, `Item ${no}: complete ${missing.join(', ')}.`);
+        lines.push({ ...item, planningSource: { setId: input.setId, key: l.key, firmedQuantity: l.firmQty, reason: l.reason } });
+    }
+    const id = `REQ${String(await nextOrgCounter(ctx.orgId, 'requirementSeq')).padStart(9, '0')}`;
+    const at = nowIso();
+    const wh = lines[0]!;
+    const note = `Planned requirements of ${input.setId}: ${lines.length} item${lines.length === 1 ? '' : 's'} for ${str(wh.warehouseCode)}; sent to ${approver.managerTitle} for approval.`;
+    const ok = await writeDoc(`${requirementsPath(ctx.orgId)}/${id}`, {
+        number: id, title: `${input.setTitle} · ${str(wh.warehouseCode)}`.slice(0, 120), status: 'pending_approval', source: 'planning',
+        requesterUid: ctx.uid, requesterName: nameOfUser(ctx.me), requesterEmail: str(ctx.me.data.email), requesterPosition: approver.position,
+        approverPosition: approver.managerPosition, approverTitle: approver.managerTitle,
+        lines, attachments: [], attachmentSeq: 0, planningSource: { setId: input.setId, siteId: input.siteId, warehouseId: input.warehouseId },
+        submittedAt: at, createdAt: at, updatedAt: at, version: 1,
+        history: [{ at, by: ctx.uid, byName: nameOfUser(ctx.me), action: 'created', note, from: '', to: 'pending_approval' }],
+    }, { exists: false });
+    if (!ok) throw new HttpError(409, 'Purchase requirement number already exists. Try again.');
+    await record(ctx, 'org.procurement.req.planning.raise', id, note.slice(0, 400));
+    return { id, approver: approver.managerTitle, lines: lines.length };
+}
+
 /** Stock lines (a material for a warehouse) of a requirement, and a fingerprint of what the stores released. */
 export const stockLinesOf = (d: Obj) => objs(d.lines).filter((l) => str(l.materialId) && str(l.warehouseId));
 export const stockHash = (d: Obj) => stockLinesOf(d).map((l) => `${Number(l.no)}:${str(l.materialId)}@${str(l.warehouseId)}=${Number(l.quantity) || 0}`).sort().join('|');
