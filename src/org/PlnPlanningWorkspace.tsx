@@ -64,18 +64,18 @@ const pct = (v: number | null | undefined) => (v === null || v === undefined ? '
 const short = (b: Bucket) => `${MONTHS[Number(b.month.slice(5, 7)) - 1]} ${b.month.slice(2, 4)}`;
 const post = <T,>(path: string, body: Record<string, unknown> = {}) => callBackend<T>(API + path, body);
 
-function Panel({ children, className = '' }: { children: ReactNode; className?: string }) {
+export function Panel({ children, className = '' }: { children: ReactNode; className?: string }) {
     return <section className={`min-w-0 rounded-2xl border border-line bg-panel p-3 text-ink sm:p-4 ${className}`}>{children}</section>;
 }
-function Btn({ children, onClick, disabled, variant = 'primary', busy, className = '', title, 'aria-label': ariaLabel }: { children: ReactNode; onClick?: () => void; disabled?: boolean; variant?: 'primary' | 'secondary' | 'danger'; busy?: boolean; className?: string; title?: string; 'aria-label'?: string }) {
+export function Btn({ children, onClick, disabled, variant = 'primary', busy, className = '', title, 'aria-label': ariaLabel }: { children: ReactNode; onClick?: () => void; disabled?: boolean; variant?: 'primary' | 'secondary' | 'danger'; busy?: boolean; className?: string; title?: string; 'aria-label'?: string }) {
     const tone = variant === 'primary' ? 'bg-brand text-onbrand' : variant === 'danger' ? 'border border-red-500/50 text-red-600 dark:text-red-400' : 'border border-line text-ink';
     return <button type='button' title={title} aria-label={ariaLabel} disabled={disabled || busy} onClick={onClick} className={`inline-flex min-h-11 items-center justify-center gap-2 rounded-xl px-4 text-sm font-semibold disabled:opacity-50 ${tone} ${className}`}>{busy && <RefreshCw className='h-4 w-4 animate-spin' />}{children}</button>;
 }
-function Pill({ children, tone = 'muted' }: { children: ReactNode; tone?: 'muted' | 'brand' | 'warn' | 'danger' }) {
+export function Pill({ children, tone = 'muted' }: { children: ReactNode; tone?: 'muted' | 'brand' | 'warn' | 'danger' }) {
     const t = tone === 'brand' ? 'bg-brand/10 text-brand ring-brand/30' : tone === 'warn' ? 'bg-amber-500/10 text-amber-700 ring-amber-500/30 dark:text-amber-400' : tone === 'danger' ? 'bg-red-500/10 text-red-600 ring-red-500/30 dark:text-red-400' : 'bg-page text-soft ring-line';
     return <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ring-1 ${t}`}>{children}</span>;
 }
-function Stat({ label, value, hint, tone }: { label: string; value: string; hint?: string; tone?: 'warn' | 'danger' }) {
+export function Stat({ label, value, hint, tone }: { label: string; value: string; hint?: string; tone?: 'warn' | 'danger' }) {
     return (
         <div className={`min-w-0 rounded-xl border p-3 ${tone === 'danger' ? 'border-red-500/40' : tone === 'warn' ? 'border-amber-500/40' : 'border-line'} bg-page`}>
             <p className='truncate text-xs text-muted'>{label}</p>
@@ -92,7 +92,7 @@ function Num({ label, value, onChange, disabled, hint, step = 'any' }: { label: 
     const id = useId();
     return <Field id={id} label={label} type='number' inputMode='decimal' step={step} value={value} hint={hint} disabled={disabled} onChange={(e) => onChange(e.target.value)} />;
 }
-function Sheet({ title, onClose, children, footer }: { title: string; onClose: () => void; children: ReactNode; footer?: ReactNode }) {
+export function Sheet({ title, onClose, children, footer }: { title: string; onClose: () => void; children: ReactNode; footer?: ReactNode }) {
     return (
         <div role='dialog' aria-modal='true' aria-label={title} className='fixed inset-0 z-50 flex items-end justify-center bg-[#000000]/50 sm:items-center' onClick={onClose}>
             <div className='flex max-h-[92dvh] w-full max-w-3xl flex-col rounded-t-2xl bg-page sm:rounded-2xl' onClick={(e) => e.stopPropagation()}>
@@ -108,7 +108,7 @@ function Sheet({ title, onClose, children, footer }: { title: string; onClose: (
 }
 
 /** A short list of options as one-tap choices (a menu) instead of a dropdown. */
-function Choice<T extends string>({ label, value, onChange, options, disabled }: { label: string; value: T; onChange: (v: T) => void; options: Array<[T, string]>; disabled?: boolean }) {
+export function Choice<T extends string>({ label, value, onChange, options, disabled }: { label: string; value: T; onChange: (v: T) => void; options: Array<[T, string]>; disabled?: boolean }) {
     return (
         <div role='radiogroup' aria-label={label} className='min-w-0'>
             <p className='mb-1 text-sm text-soft'>{label}</p>
@@ -120,7 +120,7 @@ function Choice<T extends string>({ label, value, onChange, options, disabled }:
         </div>
     );
 }
-function MenuSection({ title, children }: { title: string; children: ReactNode }) {
+export function MenuSection({ title, children }: { title: string; children: ReactNode }) {
     return (
         <section aria-label={title} className='space-y-1'>
             <p className='px-1 text-xs font-semibold uppercase tracking-wide text-muted'>{title}</p>
@@ -128,7 +128,7 @@ function MenuSection({ title, children }: { title: string; children: ReactNode }
         </section>
     );
 }
-function MenuItem({ label, hint, selected, onClick }: { label: string; hint?: string; selected: boolean; onClick: () => void }) {
+export function MenuItem({ label, hint, selected, onClick }: { label: string; hint?: string; selected: boolean; onClick: () => void }) {
     return (
         <button type='button' role='menuitemradio' aria-checked={selected} onClick={onClick} className={`flex min-h-12 w-full items-center gap-3 rounded-xl px-3 py-2 text-left ${selected ? 'bg-brand/10 ring-1 ring-brand' : 'hover:bg-page'}`}>
             <span className='min-w-0 flex-1'>

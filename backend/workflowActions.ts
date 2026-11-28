@@ -224,7 +224,7 @@ interface TaskDoc extends Obj {
 const view = (t: TaskDoc, env: Env): TaskView => ({ module: t.module, label: t.label, ref: t.ref, title: t.title, stageLabel: t.stageLabel, link: t.link, linkLabel: t.linkLabel, createdAt: t.createdAt, testMode: t.testMode, intendedNames: t.intended.map((u) => env.byUid.get(u)?.name ?? u).slice(0, 5), details: t.details });
 
 /** Record type of each workflow adapter, for the live record reference (see recordSearch.ts). */
-const RECORD_TYPE: Record<string, string> = { 'prc.requirement': 'PR', 'prc.order': 'PO', 'prc.requisition': 'PRQ', 'prc.vendor': 'VEN', 'fin.ap_invoice': 'INV', 'mnt.wr': 'WR', 'mnt.wo': 'WO', 'inv.material_creation': 'MAT', 'inv.stock_take': 'PI', 'inv.stock_adjustment': 'ADJ', 'ast.asset': 'AST', 'pln.plan': 'SOP' };
+const RECORD_TYPE: Record<string, string> = { 'prc.requirement': 'PR', 'prc.order': 'PO', 'prc.requisition': 'PRQ', 'prc.vendor': 'VEN', 'fin.ap_invoice': 'INV', 'mnt.wr': 'WR', 'mnt.wo': 'WO', 'inv.material_creation': 'MAT', 'inv.stock_take': 'PI', 'inv.stock_adjustment': 'ADJ', 'ast.asset': 'AST', 'pln.plan': 'SOP', 'pln.requirement': 'CMR' };
 export const recordTokenFor = (adapter: string, refId: string) => (RECORD_TYPE[adapter] && /^[A-Za-z0-9_.-]{1,100}$/.test(refId) ? `[[${RECORD_TYPE[adapter]}:${refId}]]` : '');
 async function deliver(env: Env, id: string, t: TaskDoc, uids: string[]) {
     const now = nowIso();

@@ -16,6 +16,7 @@
 //   - commercial confirmed demand is not linked yet: planned demand comes from the annual plan, and approved firm
 //     orders in the demand register consume the forecast.
 // ---------------------------------------------------------------------------
+import { createHash } from 'node:crypto';
 import { HttpError, getDoc, isObj, listDocs, nowIso, nextSequence, str, writeDoc, commitChecked, type Doc } from './core';
 import { orgRoute, type OrgContext } from './guards';
 import { allowedAt, audited, holdsAnywhere, holdsDirect } from './scopeGuard';
@@ -40,10 +41,10 @@ const resultPath = (o: string, id: string, part: string, i: number) => `${root(o
 const recordPath = (o: string, siteId: string, fy: number) => `${root(o)}/pln_plan_of_record/${siteId}_${fy}`;
 const ID = /^[A-Za-z0-9][A-Za-z0-9_-]{1,79}$/;
 const PLAN_ID = /^SOP\d{4}\d{6}$/;
-const today = () => new Date(Date.now() + 3 * 3_600_000).toISOString().slice(0, 10);
-const objs = (v: unknown): Obj[] => (Array.isArray(v) ? v.filter(isObj) : []);
+export const today = () => new Date(Date.now() + 3 * 3_600_000).toISOString().slice(0, 10);
+export const objs = (v: unknown): Obj[] => (Array.isArray(v) ? v.filter(isObj) : []);
 const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
-const asInput = <T>(fn: () => T): T => {
+export const asInput = <T>(fn: () => T): T => {
     try {
         return fn();
     } catch (e) {
@@ -113,10 +114,10 @@ export async function siteYears(orgId: string, siteId: string, on = today()): Pr
 
 // ----- Access -----
 
-async function needAt(ctx: OrgContext, perm: string, siteId: string, mode: 'read' | 'write', what: string) {
+export async function needAt(ctx: OrgContext, perm: string, siteId: string, mode: 'read' | 'write', what: string) {
     if (!(await allowedAt(ctx, [perm], siteId, mode))) throw new HttpError(403, `You need ${perm} at this site to ${what}.`);
 }
-async function sites(ctx: OrgContext, perm: string) {
+export async function sites(ctx: OrgContext, perm: string) {
     const nodes = await listDocs(`${root(ctx.orgId)}/structure`);
     const out: Array<{ id: string; name: string }> = [];
     for (const n of nodes) if (str(n.data.level) === 'site' && str(n.data.status) !== 'inactive' && (await allowedAt(ctx, [perm], n.id, 'read'))) out.push({ id: n.id, name: str(n.data.name) || n.id });
@@ -201,7 +202,7 @@ async function savePlan(ctx: OrgContext, doc: Doc, plan: Plan, patch: Obj, actio
 
 // Whether a SKU is planned in whole units (forecast and demand quantities): from its unit.
 const isWhole = (_setup: PlanningSetup, uom: string) => suggestedSplitRule(uom) === 'WHOLE';
-async function skuMasters(orgId: string, setup: PlanningSetup) {
+export async function skuMasters(orgId: string, setup: PlanningSetup) {
     const items = await listDocs(`${root(orgId)}/mfg_items`);
     const skus = new Map<string, SkuInfo>();
     for (const d of items) {
@@ -257,7 +258,7 @@ async function demandRegister(orgId: string, siteId: string, months: number) {
 }
 
 /** Effective BOMs and routings for a site on a date, with unitisation. */
-async function supplyMasters(orgId: string, siteId: string, date: string, setup: PlanningSetup, skus: Map<string, SkuInfo>) {
+export async function supplyMasters(orgId: string, siteId: string, date: string, setup: PlanningSetup, skus: Map<string, SkuInfo>) {
     const [bomDocs, routeDocs, policy] = await Promise.all([listDocs(`${root(orgId)}/mfg_boms`), listDocs(`${root(orgId)}/mfg_routings`), mfgMaterialPolicyForOrg(orgId).catch(() => null)]);
     const mrpClasses = new Set((policy?.policy.bomClassifications ?? [{ code: 'PRODUCTION', mrpRelevant: true, enabled: true }]).filter((c) => c.mrpRelevant && c.enabled !== false).map((c) => c.code));
     const boms = bomDocs.map((d) => ({ ...d.data, id: d.id, updateTime: d.updateTime }) as Obj & { id: string }).filter((b) => mrpClasses.has(str(b.classificationCode) || 'PRODUCTION'));
@@ -298,7 +299,9 @@ async function supplyMasters(orgId: string, siteId: string, date: string, setup:
         return unitCache.get(k)!;
     };
     const fingerprint = boms.map((b) => `${b.id}:${str(b.updateTime)}`).sort().join('|').length + ':' + routes.length;
-    return { bomOf, routingOf, unitOf, fingerprint };
+    // A content stamp of the effective BOMs and routings, for work-backs that must notice any change.
+    const stamp = createHash('sha1').update(boms.map((b) => `${b.id}:${str(b.updateTime)}`).sort().join('|') + '#' + routes.map((r) => `${r.id}:${str(r.updatedAt) || str(r.approvedAt)}`).sort().join('|')).digest('hex').slice(0, 16);
+    return { bomOf, routingOf, unitOf, fingerprint, stamp };
 }
 
 /** Stock, open supply, cost, lead time and lot rules of every warehouse material the explosion can reach. */
