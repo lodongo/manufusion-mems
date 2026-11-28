@@ -29,7 +29,7 @@ type Line=Rating&{projection?:Projection|null;conversionIssue?:string;skuName?:s
 type Mapping={costCenterId:string;revision:number;skuCapacities:Line[];allocatedSkuIds?:string[];updatedAt:string};
 type Details={location:{costCenterId:string;siteId:string;legalEntityId:string;name:string;code:string};
  outputs:Output[];containers:Container[];sizes:Size[];units:{count:Measure[];time:Measure[]};
- mapping:Mapping|null;canConfigure:boolean;testOverride?:boolean};
+ mapping:Mapping|null;resourceClassification:string|null;canConfigure:boolean;testOverride?:boolean};
 function Action({children,onClick,disabled=false,secondary=false,testOverride=false}:{children:ReactNode;
  onClick:()=>void;disabled?:boolean;secondary?:boolean;testOverride?:boolean}){
  return <button type='button' disabled={disabled} onClick={onClick}
@@ -113,7 +113,9 @@ export default function PlnCostCenterSkuSetup({costCenterId,initialSkuId='',onBa
  };
  useEffect(()=>{void load();},[costCenterId]);
  const outputs=data?.outputs??[],already=new Set(lines.map(x=>x.skuId).filter(Boolean));
- const available=outputs.filter(o=>!already.has(o.id));
+ const eligibleOutputs=data?.resourceClassification===null?outputs:outputs.filter(o=>o.category===data?.resourceClassification);
+ const available=eligibleOutputs.filter(o=>!already.has(o.id));
+ const legacyLines=lines.filter(line=>{const sku=outputs.find(o=>o.id===line.skuId);return sku&&!eligibleOutputs.some(o=>o.id===sku.id);});
  const lineIssues=(line:Line,i:number):string[]=>{
   const result:string[]=[];
   const sku=outputs.find(o=>o.id===line.skuId);
@@ -160,7 +162,7 @@ export default function PlnCostCenterSkuSetup({costCenterId,initialSkuId='',onBa
   if(lines.length>=100){setError('A cost centre supports a maximum of 100 mapped SKUs.');return;}
   const next=available[0];
   if(!next){
-   setError('All eligible manufactured SKUs at this site are already mapped. Create another finished or intermediate SKU in Materials & Products, then refresh this editor.');
+   setError('No eligible SKUs are available. Check the resource classification or create another matching SKU in Materials & Products, then refresh this editor.');
    return;
   }
   setLines(all=>[...all,newSku(next.id)]);
@@ -247,7 +249,7 @@ export default function PlnCostCenterSkuSetup({costCenterId,initialSkuId='',onBa
   finally{setBusy(false);}
  };
  const clear=async()=>{
-  if(!data?.mapping?.skuCapacities.length)return;
+  if(!data?.mapping||(data.mapping.skuCapacities.length===0&&(data.mapping.allocatedSkuIds?.length||0)===0))return;
   setError('');setNotice('');setBusy(true);
   try{
    await callBackend('/api/org/pln/cost-center/clear',{costCenterId,expectedRevision:revision});
@@ -284,7 +286,7 @@ export default function PlnCostCenterSkuSetup({costCenterId,initialSkuId='',onBa
     </div>
     <section className='space-y-2 rounded-xl border border-line bg-page p-3'>
      <div className='flex flex-wrap items-center justify-between gap-2'>
-      <h4 className='text-sm font-semibold'>SKU list · {outputs.length} available · {already.size} selected</h4>
+      <h4 className='text-sm font-semibold'>SKU list · {eligibleOutputs.length} available · {already.size} selected</h4>
       {data.canConfigure&&<Action testOverride={data?.testOverride} secondary disabled={busy||!available.length||lines.length>=100}
        onClick={()=>{
         const batch=available.slice(0,100-lines.length).map(sku=>newSku(sku.id));
@@ -293,9 +295,12 @@ export default function PlnCostCenterSkuSetup({costCenterId,initialSkuId='',onBa
         setError('');setNotice('');
        }}>Select all available</Action>}
      </div>
+     {data.resourceClassification===''&&<p role='alert' className='text-sm text-amber-700'>Choose and save the resource product classification in Core information before adding SKUs.</p>}
+     {data.resourceClassification&&<p className='text-xs text-muted'>Showing {data.resourceClassification==='FINISHED'?'finished':'intermediate'} products for this resource.</p>}
+     {legacyLines.length>0&&<p role='alert' className='text-sm text-amber-700'>Previously allocated SKUs outside this classification remain below for review. Remove them if they should no longer be mapped.</p>}
      <p className='my-2 text-xs text-muted'>Select or remove any manufactured SKU within this cost centre. Each mapped SKU gets its own physical-container and throughput rating below. Selection is saved with the commissioned ratings.</p>
      <div className='grid max-h-72 gap-2 overflow-y-auto sm:grid-cols-2'>
-      {outputs.map(sku=><label key={sku.id} className='flex min-h-11 cursor-pointer items-center gap-2 rounded-lg border border-line bg-panel p-2 text-sm'>
+      {eligibleOutputs.map(sku=><label key={sku.id} className='flex min-h-11 cursor-pointer items-center gap-2 rounded-lg border border-line bg-panel p-2 text-sm'>
        <input type='checkbox' checked={already.has(sku.id)}
         disabled={!data.canConfigure||busy||!already.has(sku.id)&&lines.length>=100}
         onChange={e=>{
@@ -316,7 +321,7 @@ export default function PlnCostCenterSkuSetup({costCenterId,initialSkuId='',onBa
       </label>)}
      </div>
     </section>
-    {!outputs.length&&<p role='status' className='text-sm text-muted'>No manufactured SKU is configured in this organization. Create one in Materials & Products, then use Refresh SKUs.</p>}
+    {!eligibleOutputs.length&&data.resourceClassification!==''&&<p role='status' className='text-sm text-muted'>No manufactured SKU is configured in this organization. Create one in Materials & Products, then use Refresh SKUs.</p>}
     {!available.length&&lines.length>0&&<p className='text-xs text-muted'>All available organization SKUs are mapped to this manufacturing cost centre. To add more, configure additional manufactured SKUs in Materials & Products, then refresh this list. Your saved ratings remain intact.</p>}
     {lines.map((line,i)=>{
      const selected=outputs.find(x=>x.id===line.skuId);
@@ -371,7 +376,7 @@ export default function PlnCostCenterSkuSetup({costCenterId,initialSkuId='',onBa
       </div>
       {expanded&&<div id={'sku-rating-card-'+i} className='space-y-4 border-t border-line pt-3'>
       <Picker label='Manufactured SKU / product' value={line.skuId} disabled={!data.canConfigure||busy}
-       options={[['','Choose SKU'],...outputs.filter(x=>x.id===line.skuId||!already.has(x.id))
+       options={[['','Choose SKU'],...outputs.filter(x=>x.id===line.skuId&&!eligibleOutputs.some(o=>o.id===x.id)).map(x=>[x.id,x.name+' · '+x.category+' (previous allocation)'] as [string,string]),...eligibleOutputs.filter(x=>x.id===line.skuId||!already.has(x.id))
         .map(x=>[x.id,x.name+' · '+x.category] as [string,string])]}
        onChange={skuId=>{update(i,newSku(skuId));setOpenSku(skuId||'draft-'+i);}}/>
       {intermediate&&<div className='space-y-2 rounded-xl border border-line bg-page p-3 text-sm'>

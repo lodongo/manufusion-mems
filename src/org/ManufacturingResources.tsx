@@ -6,7 +6,7 @@ import {COST_CENTER_CATEGORIES,costCenterCategoryLabel,costCenterSubcategories,c
 
 type ScopePart={id:string;name:string;code:string;level:string};
 type Unit={code:string;name:string;symbol:string;category:string};
-type Resource={id:string;name:string;rateUom:string;notes:string;revision:number;active?:boolean};
+type Resource={id:string;name:string;rateUom:string;rateTimeUom:string;productClassification:string;notes:string;revision:number;active?:boolean};
 type CostCenter={
  costCenterId:string;costCenterCode:string;costCenterName:string;
  siteId:string;legalEntityId:string;departmentId:string;
@@ -29,13 +29,16 @@ export function ManufacturingResourceDetail({costCenterId,initialTab='core',init
  const [data,setData]=useState<DetailData|null>(null),[loading,setLoading]=useState(true);
  const [tab,setTab]=useState<'core'|'sku'>(initialTab);
  const [name,setName]=useState(''),[rateUom,setRateUom]=useState(''),[notes,setNotes]=useState('');
+ const [classification,setClassification]=useState(''),[rateCategory,setRateCategory]=useState(''),[rateTimeUom,setRateTimeUom]=useState('');
  const [error,setError]=useState(''),[notice,setNotice]=useState(''),[saving,setSaving]=useState(false);
  const load=async()=>{
   setLoading(true);setError('');
   try{
    const d=await callBackend<DetailData>('/api/org/pln/resource/get',{costCenterId});
    setData(d);setName(d.resource?.name||d.location.name);
-   setRateUom(d.resource?.rateUom||defaultRateUnit(d.unitOptions));
+   const currentUnit=d.resource?.rateUom||defaultRateUnit(d.unitOptions);
+   setRateUom(currentUnit);setRateCategory(d.unitOptions.find(u=>u.code===currentUnit)?.category||'');
+   setClassification(d.resource?.productClassification||'');setRateTimeUom(d.resource?.rateTimeUom||'');
    setNotes(d.resource?.notes||'');
   }catch(e){setError(e instanceof Error?e.message:'Could not load production resource.');}
   finally{setLoading(false);}
@@ -46,7 +49,7 @@ export function ManufacturingResourceDetail({costCenterId,initialTab='core',init
   setSaving(true);setError('');setNotice('');
   try{
    const result=await callBackend<{resource:Resource}>('/api/org/pln/resource/save',{
-    costCenterId,name,rateUom,notes,expectedRevision:data.resource?.revision??0,
+    costCenterId,name,rateUom,rateTimeUom,productClassification:classification,notes,expectedRevision:data.resource?.revision??0,
    });
    setData(v=>v?{...v,resource:result.resource}:v);
    setNotice('Resource core information saved. SKU allocations are updated through the shared cost-centre setup.');
@@ -57,7 +60,7 @@ export function ManufacturingResourceDetail({costCenterId,initialTab='core',init
  const title=data?.resource?.name||data?.location.name||'Manufacturing resource';
  const overrideOutline=data?.testOverride?' border-2 border-blue-500':'';
  const uomOptions=data?.unitOptions||[];
- const categories=[...new Set(uomOptions.map(x=>x.category))].sort();
+ const categories=[...new Set(uomOptions.filter(x=>x.category!=='Time').map(x=>x.category))].sort();
  return <section className='space-y-4'>
   <div className='flex flex-wrap items-start justify-between gap-2'>
    <div className='min-w-0'>
@@ -80,21 +83,36 @@ export function ManufacturingResourceDetail({costCenterId,initialTab='core',init
   {loading&&!data&&<p role='status' className='text-sm text-muted'>Loading production resource…</p>}
   {data&&tab==='core'&&<section role='tabpanel' className='space-y-4 rounded-2xl border border-line bg-panel p-3 sm:p-5'>
    <h3 className='font-semibold text-ink'>Core information</h3>
-   <Text>Only name, rate unit and notes are common resource settings. Commissioned speed, physical container, package and logistics ratings belong to individual mapped SKUs.</Text>
+   <Text>Name, product classification and rate unit are common resource settings. Commissioned speed, physical container, package and logistics ratings belong to individual mapped SKUs.</Text>
    <Field id={'resource-name-'+costCenterId} label='Name' value={name}
     disabled={!data.canConfigure||saving} maxLength={160} onChange={e=>setName(e.target.value)}/>
-   <SelectField id={'resource-rate-unit-'+costCenterId} label='Rate unit' value={rateUom}
-    disabled={!data.canConfigure||saving} onChange={e=>setRateUom(e.target.value)}>
-    <option value=''>Choose unit of measure</option>
-    {categories.map(category=><optgroup key={category} label={category}>
-     {uomOptions.filter(u=>u.category===category).map(u=>
-      <option key={u.code} value={u.code}>{u.name} ({u.symbol})</option>)}
-    </optgroup>)}
+   <SelectField id={'resource-classification-'+costCenterId} label='Resource product classification' value={classification}
+    disabled={!data.canConfigure||saving} onChange={e=>setClassification(e.target.value)}>
+    <option value=''>Choose product classification</option>
+    <option value='INTERMEDIATE'>Intermediate products</option><option value='FINISHED'>Finished products</option>
    </SelectField>
+   <Text>Existing allocations remain available for review if the classification changes.</Text>
+   <SelectField id={'resource-unit-category-'+costCenterId} label='Rate unit category' value={rateCategory}
+    disabled={!data.canConfigure||saving} onChange={e=>{setRateCategory(e.target.value);setRateUom('');}}>
+    <option value=''>Choose unit category</option>
+    {categories.map(category=><option key={category} value={category}>{category}</option>)}
+   </SelectField>
+   <SelectField id={'resource-rate-unit-'+costCenterId} label='Rate unit' value={rateUom}
+    disabled={!data.canConfigure||saving||!rateCategory} onChange={e=>setRateUom(e.target.value)}>
+    <option value=''>Choose unit of measure</option>
+    {uomOptions.filter(u=>u.category===rateCategory).map(u=>
+      <option key={u.code} value={u.code}>{u.name} ({u.symbol})</option>)}
+   </SelectField>
+   <SelectField id={'resource-rate-time-'+costCenterId} label='Per time unit' value={rateTimeUom}
+    disabled={!data.canConfigure||saving} onChange={e=>setRateTimeUom(e.target.value)}>
+    <option value=''>Choose time unit</option>
+    {uomOptions.filter(u=>u.category==='Time').map(u=><option key={u.code} value={u.code}>{u.name} ({u.symbol})</option>)}
+   </SelectField>
+   {rateUom&&rateTimeUom&&<Text>Rate unit: {uomOptions.find(u=>u.code===rateUom)?.name} per {uomOptions.find(u=>u.code===rateTimeUom)?.name}</Text>}
    <TextArea label='Notes' rows={4} maxLength={600} value={notes} disabled={!data.canConfigure||saving} onChange={e=>setNotes(e.target.value)} placeholder='Operating context, constraints and reference notes'/>
    <Text>Resource ID: {data.resource?.id||'Allocated automatically on save'} · Production cost centre: {data.location.name}</Text>
    {data.canConfigure&&<div className='flex flex-wrap justify-end gap-2'>
-    <button type='button' disabled={saving||name.trim().length<2||!rateUom}
+    <button type='button' disabled={saving||name.trim().length<2||!rateUom||!classification||!rateTimeUom}
      className={actionClass+' bg-brand text-onbrand'+overrideOutline} onClick={()=>void save()}>
      {saving?'Saving…':'Save core information'}</button>
    </div>}
@@ -294,6 +312,7 @@ export default function ManufacturingResources({onChanged,onEditSku,defaultCateg
        <p className='font-semibold text-ink'>{x.resource!.name}</p>
        <Text>{x.costCenterName} · {x.costCenterCode} · {x.resource!.id}</Text>
        <Text>{costCenterCategoryLabel(x.costCenterCategory)} · {costCenterSubcategoriesLabel(x.costCenterCategory,{costSubcategories:x.costCenterSubcategories})}</Text>
+       <Text>Product classification: {x.resource!.productClassification==='FINISHED'?'Finished products':x.resource!.productClassification==='INTERMEDIATE'?'Intermediate products':'Not yet classified'}</Text>
        <Text>Click to open Core information and SKU allocation</Text>
       </button>
       <div className='mt-3 flex flex-wrap gap-2'>
