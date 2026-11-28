@@ -224,7 +224,7 @@ test('workspace UI: action bar on top, content scrolls, rich tables with Excel a
     const ui = read('src/org/PlnPlanningWorkspace.tsx');
     const pf = read('src/org/ProductionFoundation.tsx');
     assert.ok(pf.includes("active==='sop'?<PlnPlanningWorkspace onOpenSetup={()=>changeTab('sopSetup')}/>"));
-    assert.ok(pf.includes("useState<Tab>(module==='PLN'?'sop':'materialPolicy')"));
+    assert.ok(pf.includes("useState<Tab>(phase?landingTab(phase):module==='PLN'?'sop':'materialPolicy')"), 'whole-module default still opens S&OP; a submodule opens its own first screen');
     assert.ok(ui.includes("sticky top-0 z-20"), 'action bar stays on top');
     assert.ok(ui.includes("min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain"), 'only the content scrolls');
     for (const id of ['pln.sop.forecast', 'pln.sop.mrp', 'pln.sop.units', 'pln.sop.capacity', 'pln.sop.lines']) assert.ok(ui.includes(`id='${id}'`), id);

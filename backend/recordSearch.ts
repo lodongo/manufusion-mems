@@ -142,12 +142,12 @@ export const SOURCES: Source[] = [
         visible: (h, id, d) => h.involved('AST', id, d) || h.at(['AST.view'], str(d.nodeId)),
     },
     {
-        type: 'SOP', label: 'S&OP plan', module: 'Production Planning', coll: 'pln_plans', link: 'pln_foundation', linkLabel: 'S&OP planning cycle', adapters: ['pln.plan'],
+        type: 'SOP', label: 'S&OP plan', module: 'Production Planning', coll: 'pln_plans', link: 'pln_planning', linkLabel: 'S&OP planning cycle', adapters: ['pln.plan'],
         ref: (id) => id, title: (id, d) => `${first(d.siteName, d.siteId)} · ${str(d.fyLabel)}`, sub: (d) => `${Array.isArray(d.lines) ? d.lines.length : 0} SKUs`, status: (d) => str(d.status), when: (d) => first(d.updatedAt, d.createdAt),
         visible: atSite('PLN.view'),
     },
     {
-        type: 'CMR', label: 'Commercial requirements', module: 'Production Planning', coll: 'pln_requirements', link: 'pln_foundation', linkLabel: 'Commercial requirements', adapters: ['pln.requirement'],
+        type: 'CMR', label: 'Commercial requirements', module: 'Production Planning', coll: 'pln_requirements', link: 'pln_planning', linkLabel: 'Commercial requirements', adapters: ['pln.requirement'],
         ref: (id) => id, title: (id, d) => `${first(d.title, id)} · ${first(d.siteName, d.siteId)}`, sub: (d) => `${Array.isArray(d.lines) ? d.lines.length : 0} final products`, status: (d) => str(d.status), when: (d) => first(d.updatedAt, d.createdAt),
         visible: atSite('PLN.view'),
     },

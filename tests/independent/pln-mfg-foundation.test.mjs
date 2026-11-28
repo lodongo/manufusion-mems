@@ -233,7 +233,7 @@ test('Phase 1 routes are tenant-guarded and there are no physical posting endpoi
 test('PLN and MFG have functional organization home and admin navigation',()=>{
  const shell=read('src/org/OrgShell.tsx'),home=read('src/org/OrgHomePage.tsx'),perms=read('backend/permissionPolicy.ts'),index=read('backend/index.ts');
  assert.match(shell,/case 'mfg_foundation'/);assert.match(shell,/case 'pln_foundation'/);
- assert.match(home,/path:'mfg_foundation'/);assert.match(home,/path:'pln_foundation'/);
+ assert.match(home,/path:'mfg_foundation'/);assert.match(read('src/org/plnSubmodules.ts'),/path: 'pln_foundation'/);
  assert.match(perms,/MFG\.master\.edit/);assert.match(perms,/PLN\.configure/);
  assert.match(index,/\.\.\.plnMfgFoundationRoutes/);
 });

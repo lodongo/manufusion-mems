@@ -19,6 +19,7 @@ import PlnFormDefaultsPanel from './PlnFormDefaultsPanel';
 import { bomUomName } from './plnBomUomDisplay';
 import {normalizedMaterialFlow} from '../shared/utilityDistributionCapacity';
 import {navigate} from '../lib/route';
+import {PLN_SUBMODULES,plnPathOfPhase} from './plnSubmodules';
 import {isUtilityLine,splitLabel,suggestedSplitRule,type SplitRule} from '../shared/bomSplitRule';
 function Card({children,className=''}:{children:ReactNode;className?:string}){
     return <section className={'min-w-0 rounded-2xl border border-line bg-panel p-3 text-ink sm:p-4 '+className}>{children}</section>;
@@ -99,6 +100,10 @@ const tabs:{key:Tab;label:string;shortLabel:string;phase:Phase;hint:string}[]=[
     {key:'demand',label:'Demand & S&OP',shortLabel:'Demand & S&OP',phase:'planning',hint:'Maintain forecast and firm demand after the relevant masters are configured'},
     {key:'documentation',label:'Documentation & Setup Guide',shortLabel:'Documentation',phase:'guide',hint:'Search guided setup, topics, troubleshooting and fictional examples'},
 ];
+/** A screen that sits in another submodule is reached by opening that submodule; this carries the screen to land on. */
+let pendingTab:{tab:Tab;phase:Phase}|null=null;
+const firstTabOf=(phase:Phase):Tab=>tabs.find(tab=>tab.phase===phase)!.key;
+const landingTab=(phase:Phase):Tab=>pendingTab&&pendingTab.phase===phase?pendingTab.tab:firstTabOf(phase);
 const emptyRows:Record<Kind,Row[]>={items:[],boms:[],resources:[],routings:[]};
 const newRecord=(tab:Tab,policy:MaterialPolicy=defaultMaterialPolicy,
     defaults:FormDefaults=DEFAULT_FORM_DEFAULTS,sites:References['sites']=[]):Row=>{
@@ -1040,8 +1045,9 @@ function MasterEditor({tab,draft,onChange,items,boms,resources,refs,skuSetup,mat
     </div>;
 }
 
-export default function ProductionFoundation({module,permissions}:{module:'PLN'|'MFG';permissions:string[]}){
-    const [active,setActive]=useState<Tab>(module==='PLN'?'sop':'materialPolicy');
+/** `phase` set: one submodule of Production Planning & MRP (its own screens only). Unset: the whole module, as the admin shell shows it. */
+export default function ProductionFoundation({module,permissions,phase}:{module:'PLN'|'MFG';permissions:string[];phase?:Phase}){
+    const [active,setActive]=useState<Tab>(phase?landingTab(phase):module==='PLN'?'sop':'materialPolicy');
     const [rows,setRows]=useState<Record<Kind,Row[]>>(emptyRows);
     const [skuSetup,setSkuSetup]=useState<SkuSetup>(emptySkuSetup);
     const [refs,setRefs]=useState<References>(emptyReferences);
@@ -1068,8 +1074,9 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
     const [loading,setLoading]=useState(true),[busy,setBusy]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState('');
     const canViewMasters=hasPerm(permissions,'MFG.view');
     const canViewPlanning=hasPerm(permissions,'PLN.view');
-    const visibleTabs=tabs.filter(t=>t.key==='documentation'?module==='PLN'&&canViewPlanning:
-        t.key==='formDefaults'||t.key==='config'||t.key==='demand'||t.key==='sop'||t.key==='requirements'||t.key==='sopSetup'?canViewPlanning:canViewMasters);
+    const permitted=(t:{key:Tab})=>t.key==='documentation'?module==='PLN'&&canViewPlanning:
+        t.key==='formDefaults'||t.key==='config'||t.key==='demand'||t.key==='sop'||t.key==='requirements'||t.key==='sopSetup'?canViewPlanning:canViewMasters;
+    const visibleTabs=tabs.filter(t=>permitted(t)&&(!phase||t.phase===phase));
     // Configuration progression depends on saved masters, not merely opening tabs.
     // Keep MFG master-data navigation and read-only PLN users usable.
     const enforceSetup=module==='PLN'&&canViewMasters&&canViewPlanning;
@@ -1091,6 +1098,14 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
             setViewBomId('');
         }
     },[active,visibleTabs.length,canViewPlanning,canViewMasters,module]);
+    // Opening another submodule from the menu (or from a link inside a screen) lands on its first screen, or the one asked for.
+    useEffect(()=>{
+        if(!phase)return;
+        const wanted=landingTab(phase);
+        setTimeout(()=>{pendingTab=null;},0);
+        setActive(wanted);setDraft(null);setViewSkuId('');setViewBomId('');setHistory([]);
+        setError('');setNotice('');setDecisionReason('');setSetupBlocked('');setBlockedTarget(null);
+    },[phase]);
     const canEdit=canViewMasters&&hasPerm(permissions,'MFG.master.edit');
     const canSkuConfig=canViewMasters&&hasPerm(permissions,'MFG.sku.configure');
     const canConfig=hasPerm(permissions,'PLN.configure');
@@ -1137,6 +1152,12 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
     const [stageMenu,setStageMenu]=useState(false);
     const activeTab=tabs.find(tab=>tab.key===active);
     const activePhase=phases.find(phase=>phase.key===activeTab?.phase);
+    const blockedText=(tab:Tab)=>{
+        const detail=(tab==='capacityOverview'?[]:setupProgress[tab as SetupStep]?.missing||[]).map(step=>setupProgress[step].detail).join(' ');
+        return 'Complete these configuration dependencies before continuing to '+(tabs.find(t=>t.key===tab)?.label||tab)+': '+prerequisiteNames(tab).join(', ')+'. '+detail;
+    };
+    // A stage that is not set up yet cannot be used: its screens stay closed and the missing steps are named.
+    const activeLocked=enforceSetup&&!loading&&prerequisiteNames(active).length>0;
     const changeTab=(tab:Tab)=>{
         if(enforceSetup&&loading&&tab!=='documentation'){
             setBlockedTarget(tab);
@@ -1146,14 +1167,20 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
         if(enforceSetup){
             const missing=prerequisiteNames(tab);
             if(missing.length){
-                const detail=(tab==='capacityOverview'?[]:setupProgress[tab as SetupStep]?.missing||[]).map(step=>setupProgress[step].detail).join(' ');
                 setBlockedTarget(tab);
-                setSetupBlocked('Complete these configuration dependencies before continuing to '+
-                    (tabs.find(t=>t.key===tab)?.label||tab)+': '+missing.join(', ')+'. '+detail);
+                setSetupBlocked(blockedText(tab));
                 return;
             }
         }
         setSetupBlocked('');setBlockedTarget(null);
+        const target=tabs.find(t=>t.key===tab);
+        if(phase&&target&&target.phase!==phase){
+            // The screen belongs to another submodule: open that one, landing on it.
+            if(!permitted(target)){setError('You do not have access to '+target.label+'.');return;}
+            pendingTab={tab,phase:target.phase};
+            navigate('organization_home/'+plnPathOfPhase(target.phase));
+            return;
+        }
         setActive(tab);setDraft(null);setViewSkuId('');setViewBomId('');setHistory([]);setError('');setNotice('');setDecisionReason('');
     };
     const copyVersion=(row:Row)=>{setViewSkuId('');setViewBomId('');const cloned={...row,id:'',name:String(row.name)+' — new revision',revision:undefined,status:'draft',effectiveFrom:'',createdBy:undefined,submittedBy:undefined,approvedBy:undefined,approvedAt:undefined};setDraft(cloned);setHistory([]);setError('');setNotice('Give this version a new unique code and effective date. The approved original remains unchanged.');};
@@ -1301,13 +1328,13 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
         finally{setBusy(false);}
     };
     return <div className='space-y-4'>
-        <PageTitle title={module==='PLN'?'Production Planning & MRP':'Manufacturing'} action={null}/>
+        <PageTitle title={module==='PLN'?(phase?PLN_SUBMODULES.find(s=>s.phase===phase)?.label??'Production Planning & MRP':'Production Planning & MRP'):'Manufacturing'} action={null}/>
         {/* One row: a menu of every stage (grouped by phase) and the stages of the current phase as quick tabs. */}
-        <nav aria-label='Production configuration menu' className='flex items-center gap-1 rounded-xl border border-line bg-panel p-1.5'>
-            <button type='button' aria-haspopup='menu' aria-expanded={stageMenu} aria-label='All stages' title='All stages'
+        {(!phase||visibleTabs.length>1)&&<nav aria-label='Production configuration menu' className='flex items-center gap-1 rounded-xl border border-line bg-panel p-1.5'>
+            {!phase&&<button type='button' aria-haspopup='menu' aria-expanded={stageMenu} aria-label='All stages' title='All stages'
                 onClick={()=>setStageMenu(true)} className='flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-brand hover:bg-brand/10'>
                 <LayoutGrid className='h-5 w-5'/>
-            </button>
+            </button>}
             <div role='tablist' aria-label={activePhase?.title??'Stages'} className='flex min-w-0 flex-1 gap-1 overflow-x-auto'>
                 {visibleTabs.filter(tab=>tab.phase===activeTab?.phase).map(tab=>
                     <button key={tab.key} type='button' role='tab' aria-selected={tab.key===active} onClick={()=>changeTab(tab.key)}
@@ -1315,8 +1342,8 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
                         {tab.shortLabel}
                     </button>)}
             </div>
-        </nav>
-        {stageMenu&&<div role='dialog' aria-modal='true' aria-label='Production planning menu' className='fixed inset-0 z-50 flex items-end justify-center bg-[#000000]/50 sm:items-center' onClick={()=>setStageMenu(false)}>
+        </nav>}
+        {!phase&&stageMenu&&<div role='dialog' aria-modal='true' aria-label='Production planning menu' className='fixed inset-0 z-50 flex items-end justify-center bg-[#000000]/50 sm:items-center' onClick={()=>setStageMenu(false)}>
             <div className='flex max-h-[85dvh] w-full max-w-lg flex-col rounded-t-2xl bg-panel text-ink sm:rounded-2xl' onClick={e=>e.stopPropagation()}>
                 <div className='flex items-center justify-between gap-2 border-b border-line p-3'>
                     <h2 className='text-base font-semibold'>{module==='PLN'?'Production Planning & MRP':'Manufacturing'}</h2>
@@ -1341,11 +1368,11 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
                 </div>
             </div>
         </div>}
-        {setupBlocked&&<div role='alert' className='space-y-2 rounded-xl border border-amber-500/50 p-3 text-sm'>
-            <p>{setupBlocked}</p>
+        {(setupBlocked||activeLocked)&&<div role='alert' className='space-y-2 rounded-xl border border-amber-500/50 p-3 text-sm'>
+            <p>{setupBlocked||blockedText(active)}</p>
             <Button variant='secondary' className='w-fit px-3 text-xs'
                 onClick={()=>{
-                    let step=blockedTarget as SetupStep|null;
+                    let step=(blockedTarget??active) as SetupStep|null;
                     const visited=new Set<string>();
                     while(step&&setupProgress[step].missing.length&&!visited.has(step)){
                         visited.add(step);step=setupProgress[step].missing[0];
@@ -1359,7 +1386,7 @@ export default function ProductionFoundation({module,permissions}:{module:'PLN'|
         </div>}
         {error&&<Alert tone='error'>{error}</Alert>}
         {notice&&<p role='status' className='rounded-lg border border-emerald-700/40 bg-emerald-900/20 p-3 text-sm text-brand'>{notice}</p>}
-        {active==='documentation'?<PlnDocumentation onNavigate={value=>changeTab(value as Tab)}/>:
+        {activeLocked?null:active==='documentation'?<PlnDocumentation onNavigate={value=>changeTab(value as Tab)}/>:
         loading?<Spinner/>:active==='formDefaults'?<PlnFormDefaultsPanel initial={formDefaults} revision={formDefaultsRevision} sites={refs.sites} canEdit={canConfig} onSaved={(next,revision)=>{
             setConfig(previous=>({...previous,formDefaults:next}));setFormDefaultsRevision(revision);
         }}/>:active==='sop'?<PlnPlanningWorkspace onOpenSetup={()=>changeTab('sopSetup')}/>:active==='requirements'?<PlnRequirements/>:active==='sopSetup'?<PlnPlanningSetup onOpenBoms={()=>changeTab('boms')}/>:active==='demand'?<PlnDemand permissions={permissions} formDefaults={formDefaults}/>: active==='skuSetup'?<SkuSetupPanel setup={skuSetup} canEdit={canSkuConfig} onSaved={refreshSkuSetup}

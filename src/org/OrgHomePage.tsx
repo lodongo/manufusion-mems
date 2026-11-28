@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { callBackend } from '../lib/backend';
 import { navigate } from '../lib/route';
+import { PLN_SUBMODULES, plnPhaseOfPath } from './plnSubmodules';
 import { hasPerm, type Session } from '../types';
 import { firebaseAuth } from '../firebase';
 import { Alert } from '../components/ui';
@@ -85,7 +86,7 @@ const MyDocSignatures = lazy(() => import('./MyDocSignatures'));
 const ProductionFoundation = lazy(() => import('./ProductionFoundation'));
 
 type Module = OrgContextData['modules'][number];
-type LinkItem = { label: string; path: string; permission?: string; prefix?: string; everyone?: boolean };
+type LinkItem = { label: string; path: string; permission?: string; anyPermission?: string[]; prefix?: string; everyone?: boolean; hint?: string };
 type ModuleMenu = { module: Module; links: LinkItem[]; capabilities: LinkItem[] };
 
 const ROUTE = 'organization_home';
@@ -93,7 +94,7 @@ const toHome = (path = '') => navigate(path ? `${ROUTE}/${path}` : ROUTE);
 
 const MODULE_LINKS: Record<string, LinkItem[]> = {
     MFG: [{label:'Materials, BOMs & routings',path:'mfg_foundation',permission:'MFG.view'}],
-    PLN: [{label:'Production Planning & MRP',path:'pln_foundation',permission:'PLN.view'}],
+    PLN: PLN_SUBMODULES.map((s) => ({ label: s.label, path: s.path, anyPermission: s.anyPermission, hint: s.hint })),
     HRM: [
         { label: 'My HR Portal', path: 'hr/HR01', permission: 'HRM.shell.view' },
         { label: 'Employee Records & Administration', path: 'hr/HR02', permission: 'HRM.shell.view' },
@@ -189,6 +190,7 @@ function hasAny(permissions: string[], code: string): boolean {
 function canOpen(permissions: string[], link: LinkItem): boolean {
     if (link.everyone) return true;
     if(link.path==='work_orders'&&(hasPerm(permissions,'MNT.view')||permissions.some(p=>p.startsWith('MNT.assessment.'))))return true;
+    if (link.anyPermission) return link.anyPermission.some((p) => hasPerm(permissions, p));
     if (link.permission) return hasPerm(permissions, link.permission);
     if (link.prefix) {
         return permissions.includes('*') || hasPerm(permissions, link.prefix!.slice(0,-1)+'.view')
@@ -269,7 +271,7 @@ function ModuleWorkspace({ menu, selectedFeature }: { menu: ModuleMenu; selected
                     <div className='grid gap-3 sm:grid-cols-2'>
                         {menu.links.map((link) => (
                             <button key={link.path} onClick={() => goTo(link.path)} className='flex items-center justify-between gap-3 rounded-xl border border-slate-800 bg-slate-900 p-4 text-left hover:border-emerald-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-emerald-400'>
-                                <span className='font-medium text-white'>{link.label}</span>
+                                <span className='min-w-0'><span className='block font-medium text-white'>{link.label}</span>{link.hint && <span className='mt-0.5 block text-xs text-slate-400'>{link.hint}</span>}</span>
                                 <ChevronRight className='h-4 w-4 shrink-0 text-emerald-400' />
                             </button>
                         ))}
@@ -457,7 +459,7 @@ export default function OrgHomePage({
         ...(hasPerm(data.permissions,'HRM.payroll.view') ? [{label:'Payroll',hint:'Every employee with role, grade, basic salary and payslip preview',path:'hr/HR20'}] : []),
       ]} />;
     else if (activeMenu?.module.code==='MFG' && (section==='mfg_foundation' || (section==='module'&&activeModule?.module.code==='MFG'))) content = <ProductionFoundation module='MFG' permissions={data.permissions} />;
-    else if (activeMenu?.module.code==='PLN' && (section==='pln_foundation' || (section==='module'&&activeModule?.module.code==='PLN'))) content = <ProductionFoundation module='PLN' permissions={data.permissions} />;
+    else if (activeMenu?.module.code==='PLN' && plnPhaseOfPath(section)) content = <ProductionFoundation module='PLN' phase={plnPhaseOfPath(section)} permissions={data.permissions} />;
     else if (section === 'module' && activeModule && activeModule.module.code==='DOC') content = <DocumentRegistryPage mode='register' canConfigure={hasPerm(data.permissions,'ADM.document_config')} canReview={hasPerm(data.permissions,'ADM.document_review')} />;
     else if (section === 'module' && activeModule && activeModule.module.code==='INV' && sub==='feature' && route.split('/')[4]==='0') content = <InventoryDashboard />;
     else if (section === 'module' && activeModule && activeModule.module.code==='INV' && sub==='feature' && route.split('/')[4]==='3') content = <StockTake />;
