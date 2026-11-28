@@ -9,9 +9,9 @@ import { lock, nameOfUser } from './purchaseOrders';
 import { validateSupplierRelationshipTemplate } from './supplierRelationshipTemplate';
 import {
     ACCOUNTABILITY, BAND_LABEL, FREQUENCIES, KIND_PROFILE, PROFILES, PROFILE_LABEL, STATES,
-    actionStats, adoptionProblems, answerKey, bandOf, bandProblems, cadenceOf, cleanEligible, contributionOf, effectiveProfile, inWindow, nextWindow, overallOf,
-    overdue, profilesFor, questionHistory, rankOf, scoreCard, submitProblems, windowId, windowProblems,
-    type Answer, type AnswerState, type Bands, type MasterProfile, type Profile, type ProfileId,
+    actionStats, adoptionProblems, answerKey, bandOf, bandProblems, cadenceOf, cardStatesOf, cleanEligible, contributionOf, effectiveProfile, finalAnswers, finalView, inWindow, nextWindow, overallOf,
+    overdue, profilesFor, questionHistory, rankOf, rollup, scoreCard, submitProblems, summaryStatus, windowId, windowProblems,
+    type Answer, type AnswerState, type Bands, type CardState, type MasterProfile, type Profile, type ProfileId,
 } from './supplierEvaluationModel';
 
 // ---------------------------------------------------------------------------
@@ -24,8 +24,10 @@ import {
 //                                                                    one scorecard per template, answers, actions
 //   organizations/{org}/srm_evaluation_keys/{window}_{le}_{vendor}  one evaluation per window, legal entity, supplier
 //
-// Flow: in_progress (evaluators tap questions; scores update live) -> submitted -> finalized by an independent
-// approver (or returned). The final score is written to the supplier's SRM score used in quotation analysis.
+// Flow, for each assessment (materials, services, assets and capital projects) on its own: in_progress (evaluators tap
+// questions; scores update live) -> submitted -> finalized by an independent approver (or returned). The evaluation keeps
+// a summary status of its assessments. The final score (the average of the approved assessments) is written to the
+// supplier's SRM score used in quotation analysis.
 // Improvement actions are raised on "not OK" questions and followed to verified completion.
 // ---------------------------------------------------------------------------
 
@@ -136,19 +138,32 @@ function cardsOf(d: Obj): Profile[] {
     return objs(d.scorecards).map((c) => ({ id: str(c.id) as ProfileId, name: str(c.name), categories: objs(c.categories) as unknown as Profile['categories'] }));
 }
 const answersOf = (d: Obj) => o(d.answers) as Record<string, Answer>;
+const bandsOf = (d: Obj): Bands => {
+    const b = o(d.bands);
+    return { improveFrom: Number(b.improveFrom) || 60, passFrom: Number(b.passFrom) || 75 };
+};
 function scores(d: Obj) {
     const cards = cardsOf(d).map((c) => scoreCard(c, answersOf(d)));
     const overall = overallOf(cards);
-    const b = o(d.bands);
-    const bands: Bands = { improveFrom: Number(b.improveFrom) || 60, passFrom: Number(b.passFrom) || 75 };
+    const bands = bandsOf(d);
     return { cards, overall: { ...overall, band: bandOf(overall.score, bands), bandLabel: BAND_LABEL[bandOf(overall.score, bands)] }, bands };
 }
-const evaluators = (d: Obj) => [...new Set([str(d.createdBy), ...Object.values(answersOf(d)).map((a) => str(a.by))].filter(Boolean))];
+/** Each assessment's own status (older evaluations take the evaluation's status for every assessment). */
+const statesOf = (d: Obj): Record<string, CardState> => cardStatesOf(d, cardsOf(d).map((c) => c.id));
+/** The approved assessments' result, or null when none is approved yet. */
+const finalOf = (d: Obj) => finalView(o(d.result), statesOf(d), bandsOf(d));
+const isFinal = (e: Doc) => !!finalOf(e.data);
+const evaluators = (d: Obj) => [...new Set([str(d.createdBy), ...Object.values(answersOf(d)).map((a) => str(a.by)), ...Object.values(statesOf(d)).map((s) => s.submittedBy)].filter(Boolean))];
 
-function approverCheck(ctx: OrgContext, d: Obj): { ok: boolean; why: string; testMode?: boolean } {
-    if (str(d.status) !== 'submitted' || !can(ctx, 'PRC.srm.approve')) return { ok: false, why: '' };
+/**
+ * May this person approve (or return) the evaluation's submitted assessment? Whoever took part in any assessment of the
+ * evaluation (started it, answered a question, submitted an assessment) cannot approve any of them.
+ */
+function approverCheck(ctx: OrgContext, d: Obj, profile = ''): { ok: boolean; why: string; testMode?: boolean } {
+    const submitted = Object.entries(statesOf(d)).filter(([p, s]) => s.status === 'submitted' && (!profile || p === profile));
+    if (str(d.status) === 'cancelled' || !submitted.length || !can(ctx, 'PRC.srm.approve')) return { ok: false, why: '' };
     let why = '';
-    if (evaluators(d).includes(ctx.uid) || str(d.submittedBy) === ctx.uid) why = 'You took part in this evaluation, so someone else must approve it.';
+    if (evaluators(d).includes(ctx.uid)) why = 'You took part in this evaluation, so someone else must approve it.';
     if (!why) return { ok: true, why: '' };
     if (ctx.testMode === true) return { ok: true, why: '', testMode: true };
     return { ok: false, why };
@@ -179,8 +194,16 @@ async function mutate(ctx: OrgContext, id: string, action: string, run: (d: Obj)
         const c = await run(d);
         const at = nowIso();
         const next: Obj = { ...d, ...c.patch, updatedAt: at, updatedBy: ctx.uid, version: (Number(d.version) || 1) + 1 };
+        // The assessments' own records are written explicitly (older evaluations are brought across here), and the
+        // evaluation's summary status and mirrors follow from them.
+        const states = statesOf(next);
+        next.cardStates = states;
+        Object.assign(next, rollup(states));
+        if (str(next.status) !== 'cancelled') next.status = summaryStatus(states, false);
         const sc = scores(next);
         next.result = { score: sc.overall.score, coverage: sc.overall.coverage, band: sc.overall.band, sub: sc.overall.sub, cards: sc.cards.map((c2) => ({ profile: c2.profile, score: c2.score, coverage: c2.coverage, sub: c2.sub, categories: c2.categories.map((x) => ({ id: x.id, name: x.name, weight: x.weight, earned: x.earned, pct: x.pct })) })) };
+        const fin = finalOf(next);
+        if (fin) { next.finalScore = fin.score; next.finalBand = fin.band; } else { delete next.finalScore; delete next.finalBand; }
         if (c.event) next.history = [...objs(d.history), { at, by: ctx.uid, byName: nameOfUser(ctx.me), action: c.event, note: (c.note ?? '').slice(0, 300), from: str(d.status), to: str(next.status) }].slice(-500);
         if (!(await writeDoc(path, next, { updateTime: fresh.updateTime }))) throw new HttpError(409, 'The evaluation changed at the same time. It has been refreshed; try again.');
         await record(ctx, `org.procurement.srm.${action}`, id, `${c.label}${c.note ? `. ${c.note}` : ''}`.slice(0, 400));
@@ -190,18 +213,27 @@ async function mutate(ctx: OrgContext, id: string, action: string, run: (d: Obj)
 
 const live = (d: Obj) => ({ scores: scores(d) });
 
+/** What the person may do: per assessment (card) and, for the evaluation as a whole, cancel and actions. */
 function flags(ctx: OrgContext, d: Obj, inEntity: boolean) {
-    const s = str(d.status);
+    const cancelled = str(d.status) === 'cancelled';
     const evalRight = can(ctx, 'PRC.srm.evaluate') && (inEntity || ctx.testMode === true);
-    const chk = approverCheck(ctx, d);
+    const states = statesOf(d);
+    const card = Object.fromEntries(Object.entries(states).map(([p, st]) => {
+        const open = !cancelled && ['in_progress', 'returned'].includes(st.status);
+        const chk = approverCheck(ctx, d, p);
+        return [p, { answer: evalRight && open, submit: evalRight && open, approve: chk.ok, approveWhy: st.status === 'submitted' && can(ctx, 'PRC.srm.approve') && !chk.ok ? chk.why : '' }];
+    }));
+    const all = Object.values(card);
     return {
-        answer: evalRight && ['in_progress', 'returned'].includes(s),
-        submit: evalRight && ['in_progress', 'returned'].includes(s),
-        cancel: evalRight && ['in_progress', 'returned'].includes(s),
-        actions: evalRight && s !== 'cancelled',
-        approve: chk.ok,
-        approveWhy: s === 'submitted' && can(ctx, 'PRC.srm.approve') && !chk.ok ? chk.why : '',
+        answer: all.some((c) => c.answer),
+        submit: all.some((c) => c.submit),
+        // An evaluation can be cancelled only while none of its assessments has gone for approval or been approved.
+        cancel: evalRight && !cancelled && Object.values(states).every((x) => ['in_progress', 'returned'].includes(x.status)),
+        actions: evalRight && !cancelled,
+        approve: all.some((c) => c.approve),
+        approveWhy: all.map((c) => c.approveWhy).find(Boolean) ?? '',
         verify: can(ctx, 'PRC.srm.approve'),
+        card,
     };
 }
 
@@ -209,7 +241,7 @@ function evalOut(ctx: OrgContext, id: string, d: Obj, inEntity: boolean) {
     return {
         id, number: str(d.number) || id, status: str(d.status), windowId: str(d.windowId), windowStart: str(d.windowStart), windowEnd: str(d.windowEnd),
         legalEntityId: str(d.legalEntityId), legalEntityName: str(d.legalEntityName), vendorId: str(d.vendorId), vendorNumber: str(d.vendorNumber), vendorName: str(d.vendorName),
-        scopes: objs(d.scopes), scorecards: objs(d.scorecards), answers: answersOf(d), actions: objs(d.actions), bands: o(d.bands),
+        scopes: objs(d.scopes), scorecards: objs(d.scorecards), cardStates: statesOf(d), answers: answersOf(d), actions: objs(d.actions), bands: o(d.bands),
         history: objs(d.history).slice().reverse().slice(0, 200), createdByName: str(d.createdByName), createdAt: str(d.createdAt),
         submittedByName: str(d.submittedByName), submittedAt: str(d.submittedAt), approvedByName: str(d.approvedByName), approvedAt: str(d.approvedAt),
         returnReason: str(d.returnReason), version: Number(d.version) || 1, configVersion: Number(d.configVersion) || 0,
@@ -219,17 +251,17 @@ function evalOut(ctx: OrgContext, id: string, d: Obj, inEntity: boolean) {
 
 // ----- Dashboard -----
 
+/** One row per evaluation that has at least one approved assessment; its score and cards are the approved ones. */
 function trendRows(evals: Doc[]) {
     return evals
-        .filter((e) => str(e.data.status) === 'finalized')
-        .sort((a, b) => str(a.data.windowStart).localeCompare(str(b.data.windowStart)) || str(a.data.approvedAt).localeCompare(str(b.data.approvedAt)))
-        .map((e) => {
-            const r = o(e.data.result);
-            return {
-                id: e.id, number: str(e.data.number) || e.id, windowStart: str(e.data.windowStart), windowEnd: str(e.data.windowEnd), legalEntityName: str(e.data.legalEntityName),
-                score: Number(r.score) || 0, band: str(r.band), sub: o(r.sub), cards: objs(r.cards), approvedAt: str(e.data.approvedAt),
-            };
-        });
+        .map((e) => ({ e, fin: finalOf(e.data) }))
+        .filter((x): x is { e: Doc; fin: NonNullable<ReturnType<typeof finalOf>> } => !!x.fin)
+        .sort((a, b) => str(a.e.data.windowStart).localeCompare(str(b.e.data.windowStart)) || str(a.e.data.approvedAt).localeCompare(str(b.e.data.approvedAt)))
+        .map(({ e, fin }) => ({
+            id: e.id, number: str(e.data.number) || e.id, windowStart: str(e.data.windowStart), windowEnd: str(e.data.windowEnd), legalEntityName: str(e.data.legalEntityName),
+            score: fin.score, band: fin.band, sub: fin.sub, cards: fin.cards, approvedAt: str(e.data.approvedAt),
+            assessments: fin.profiles.map((p) => PROFILE_LABEL[p as ProfileId] ?? p), complete: fin.complete,
+        }));
 }
 function dashboardOf(vendorId: string, evals: Doc[], setup: Setup | null) {
     const mine = evals.filter((e) => str(e.data.vendorId) === vendorId);
@@ -251,11 +283,12 @@ function dashboardOf(vendorId: string, evals: Doc[], setup: Setup | null) {
         });
     }
     const procurementCategories: Array<{ kind: string; categoryCode: string; categoryName: string; score: number | null; at: string }> = [];
-    for (const e of mine.filter((x) => str(x.data.status) === 'finalized').sort((a, b) => str(b.data.windowStart).localeCompare(str(a.data.windowStart)))) {
+    for (const e of mine.filter(isFinal).sort((a, b) => str(b.data.windowStart).localeCompare(str(a.data.windowStart)))) {
         for (const s of objs(e.data.scopes)) {
             if (procurementCategories.some((x) => x.kind === str(s.kind) && x.categoryCode === str(s.categoryCode))) continue;
-            const card = objs(o(e.data.result).cards).find((c) => str(c.profile) === KIND_PROFILE[str(s.kind)]);
-            procurementCategories.push({ kind: str(s.kind), categoryCode: str(s.categoryCode), categoryName: str(s.categoryName), score: card ? Number(card.score) || 0 : null, at: str(e.data.windowEnd) });
+            const card = finalOf(e.data)!.cards.find((c) => str(c.profile) === KIND_PROFILE[str(s.kind)]);
+            if (!card) continue;
+            procurementCategories.push({ kind: str(s.kind), categoryCode: str(s.categoryCode), categoryName: str(s.categoryName), score: Number(card.score) || 0, at: str(e.data.windowEnd) });
         }
     }
     const day = today();
@@ -279,17 +312,18 @@ function dashboardOf(vendorId: string, evals: Doc[], setup: Setup | null) {
         heatmap[p] = { columns: cols.map((t) => t.windowEnd), rows: [...rows.values()] };
     }
     // Recurring issues and consistent strengths, question by question.
-    const finals = mine.filter((e) => str(e.data.status) === 'finalized').sort((a, b) => str(a.data.windowStart).localeCompare(str(b.data.windowStart)));
-    const qh = questionHistory(finals.map((e) => ({ number: str(e.data.number) || e.id, at: str(e.data.windowEnd), answers: answersOf(e.data) })));
+    const finals = mine.filter(isFinal).sort((a, b) => str(a.data.windowStart).localeCompare(str(b.data.windowStart)));
+    const qh = questionHistory(finals.map((e) => ({ number: str(e.data.number) || e.id, at: str(e.data.windowEnd), answers: finalAnswers(answersOf(e.data), statesOf(e.data)) })));
     const qtext = new Map<string, { text: string; accountability: string; weight: number; category: string }>();
     for (const e of finals) for (const c of objs(e.data.scorecards)) for (const cat of objs(c.categories)) for (const q of objs(cat.questions)) qtext.set(answerKey(str(c.id), str(q.id)), { text: str(q.text), accountability: str(q.accountability), weight: Number(q.weight) || 0, category: str(cat.name) });
     const qrows = Object.entries(qh).map(([k, h]) => ({ key: k, profile: k.split('|')[0], questionId: k.split('|')[1], ...h, ...(qtext.get(k) ?? { text: '', accountability: '', weight: 0, category: '' }) }));
     const issues = qrows.filter((q) => q.notOk > 0).sort((a, b) => b.streak - a.streak || b.notOk - a.notOk || b.weight - a.weight).slice(0, 8);
     const strengths = qrows.filter((q) => q.notOk === 0 && q.assessed > 0).sort((a, b) => b.assessed - a.assessed || b.weight - a.weight).slice(0, 6);
     const lastFinal = finals[finals.length - 1];
-    const cadence = cadenceOf(setup?.window, setup?.frequency ?? 'quarterly', str(lastFinal?.data.windowEnd), str(lastFinal?.data.approvedAt), day);
+    const lastWhole = finals.filter((e) => str(e.data.status) === 'finalized').pop();
+    const cadence = cadenceOf(setup?.window, setup?.frequency ?? 'quarterly', str(lastWhole?.data.windowEnd), str(lastFinal?.data.approvedAt), day);
     const actions: Obj[] = mine.flatMap((e) => objs(e.data.actions).map((a) => ({ ...a, evaluationId: e.id, evaluationNumber: str(e.data.number) || e.id, legalEntityName: str(e.data.legalEntityName), overdue: overdue(a, day) })));
-    const current = mine.filter((e) => setup?.window && str(e.data.windowId) === setup.window.id).map((e) => ({ id: e.id, number: str(e.data.number), legalEntityName: str(e.data.legalEntityName), status: str(e.data.status), score: Number(o(e.data.result).score) || 0, coverage: Number(o(e.data.result).coverage) || 0 }));
+    const current = mine.filter((e) => setup?.window && str(e.data.windowId) === setup.window.id).map((e) => ({ id: e.id, number: str(e.data.number), legalEntityName: str(e.data.legalEntityName), status: str(e.data.status), score: Number(o(e.data.result).score) || 0, coverage: Number(o(e.data.result).coverage) || 0, assessments: Object.entries(statesOf(e.data)).map(([profile, st]) => ({ profile, status: st.status })) }));
     return {
         last, trend, lastCard, lastCategory, procurementCategories, current, contribution, contributionTrend, subTrend, heatmap, issues, strengths, cadence,
         actionStats: actionStats(actions, day),
@@ -298,11 +332,14 @@ function dashboardOf(vendorId: string, evals: Doc[], setup: Setup | null) {
     };
 }
 
+/** Approved score and sub-scores of an evaluation that has at least one approved assessment. */
+const finOf = (e: Doc) => finalOf(e.data)!;
+
 /** Each supplier's latest final evaluation. */
 function latestByVendor(evals: Doc[]): Map<string, Doc> {
     const m = new Map<string, Doc>();
     for (const e of evals) {
-        if (str(e.data.status) !== 'finalized') continue;
+        if (!isFinal(e)) continue;
         const cur = m.get(str(e.data.vendorId));
         if (!cur || `${str(e.data.windowStart)}${str(e.data.approvedAt)}` > `${str(cur.data.windowStart)}${str(cur.data.approvedAt)}`) m.set(str(e.data.vendorId), e);
     }
@@ -315,18 +352,18 @@ async function insights(ctx: OrgContext) {
     const day = today();
     const bands = setup?.bands ?? { improveFrom: 60, passFrom: 75 };
     const latest = latestByVendor(evals);
-    const finals = evals.filter((e) => str(e.data.status) === 'finalized');
-    const scoresAll = [...latest.values()].map((e) => Number(o(e.data.result).score) || 0);
+    const finals = evals.filter(isFinal);
+    const scoresAll = [...latest.values()].map((e) => finOf(e).score);
     const league = [...latest.values()].map((e) => {
         const vid = str(e.data.vendorId);
         const prev = finals.filter((x) => str(x.data.vendorId) === vid && x.id !== e.id && str(x.data.windowStart) < str(e.data.windowStart)).sort((a, b) => str(b.data.windowStart).localeCompare(str(a.data.windowStart)))[0];
         const acts = evals.filter((x) => str(x.data.vendorId) === vid).flatMap((x) => objs(x.data.actions));
-        const r = o(e.data.result), score = Number(r.score) || 0;
+        const r = finOf(e), score = r.score;
         const cur = setup?.window ? evals.filter((x) => str(x.data.vendorId) === vid && str(x.data.windowId) === setup.window!.id && str(x.data.status) !== 'cancelled') : [];
         return {
             vendorId: vid, vendorName: str(e.data.vendorName), vendorNumber: str(e.data.vendorNumber), score, band: bandOf(score, bands),
-            previous: prev ? Number(o(prev.data.result).score) || 0 : null, delta: prev ? Math.round((score - (Number(o(prev.data.result).score) || 0)) * 10) / 10 : null,
-            supplier: o(r.sub).SUPPLIER ?? null, organization: o(r.sub).ORGANIZATION ?? null, joint: o(r.sub).BOTH ?? null,
+            previous: prev ? finOf(prev).score : null, delta: prev ? Math.round((score - finOf(prev).score) * 10) / 10 : null,
+            supplier: r.sub.SUPPLIER ?? null, organization: r.sub.ORGANIZATION ?? null, joint: r.sub.BOTH ?? null,
             openActions: acts.filter((a) => str(a.status) === 'open').length, overdueActions: acts.filter((a) => overdue(a, day)).length,
             lastWindowEnd: str(e.data.windowEnd), lastLegalEntity: str(e.data.legalEntityName),
             currentStatus: cur.length ? (cur.every((x) => str(x.data.status) === 'finalized') ? 'finalized' : cur.some((x) => str(x.data.status) === 'submitted') ? 'submitted' : 'in_progress') : setup?.eligible.some((x) => x.vendorId === vid) ? 'not_started' : 'not_selected',
@@ -338,15 +375,15 @@ async function insights(ctx: OrgContext) {
     for (const e of finals) {
         const k = str(e.data.windowId);
         const w = byWindow.get(k) ?? { start: str(e.data.windowStart), end: str(e.data.windowEnd), scores: [], sub: { SUPPLIER: [], ORGANIZATION: [], BOTH: [] } };
-        w.scores.push(Number(o(e.data.result).score) || 0);
-        for (const a of ACCOUNTABILITY) { const v = o(o(e.data.result).sub)[a]; if (typeof v === 'number') w.sub[a].push(v); }
+        w.scores.push(finOf(e).score);
+        for (const a of ACCOUNTABILITY) { const v = finOf(e).sub[a]; if (typeof v === 'number') w.sub[a].push(v); }
         byWindow.set(k, w);
     }
     const avg = (xs: number[]) => (xs.length ? Math.round((xs.reduce((s, x) => s + x, 0) / xs.length) * 10) / 10 : null);
     const trend = [...byWindow.values()].sort((a, b) => a.start.localeCompare(b.start)).slice(-8).map((w) => ({ label: w.end, score: avg(w.scores) ?? 0, count: w.scores.length, SUPPLIER: avg(w.sub.SUPPLIER), ORGANIZATION: avg(w.sub.ORGANIZATION), BOTH: avg(w.sub.BOTH) }));
     // Weakest template categories across suppliers' latest evaluations.
     const cat = new Map<string, { profile: string; id: string; name: string; values: number[] }>();
-    for (const e of latest.values()) for (const c of objs(o(e.data.result).cards)) for (const x of objs(c.categories)) {
+    for (const e of latest.values()) for (const c of finOf(e).cards) for (const x of objs(c.categories)) {
         if (x.pct === null || x.pct === undefined) continue;
         const k = `${str(c.profile)}|${str(x.id)}`;
         const r = cat.get(k) ?? { profile: str(c.profile), id: str(x.id), name: str(x.name), values: [] };
@@ -361,7 +398,7 @@ async function insights(ctx: OrgContext) {
         return { legalEntityId: le.id, legalEntityName: le.name, total, started: ws.length, submitted: ws.filter((e) => str(e.data.status) === 'submitted').length, finalized: ws.filter((e) => str(e.data.status) === 'finalized').length, avgCoverage: avg(ws.map((e) => Number(o(e.data.result).coverage) || 0)) };
     }) : [];
     const actions = evals.flatMap((e) => objs(e.data.actions));
-    const contribution = contributionOf([...latest.values()].flatMap((e) => objs(o(e.data.result).cards).map((c) => ({ sub: o(c.sub) as never }))));
+    const contribution = contributionOf([...latest.values()].flatMap((e) => finOf(e).cards.map((c) => ({ sub: o(c.sub) as never }))));
     return {
         bands, cadence: cadenceOf(setup?.window, setup?.frequency ?? 'quarterly', '', '', day), frequencyLabel: FREQUENCIES[setup?.frequency ?? '']?.label ?? '',
         league, distribution: { pass: league.filter((x) => x.band === 'pass').length, improve: league.filter((x) => x.band === 'improve').length, fail: league.filter((x) => x.band === 'fail').length },
@@ -452,6 +489,9 @@ export const supplierEvaluationRoutes = {
                             key: `${le.id}|${e.vendorId}`, legalEntityId: le.id, legalEntityName: le.name, mine: mine.has(le.id),
                             vendorId: e.vendorId, vendorNumber: str(vmap.get(e.vendorId)?.data.number) || e.vendorId, vendorName: vendorName(vmap.get(e.vendorId)),
                             profiles: profilesFor(e.scopes), scopes: e.scopes,
+                            assessments: ev
+                                ? Object.entries(statesOf(ev.data)).map(([profile, st]) => { const rc = objs(r.cards).find((c) => str(c.profile) === profile); return { profile, status: st.status, score: rc ? Number(rc.score) || 0 : null, coverage: rc ? Number(rc.coverage) || 0 : 0 }; })
+                                : profilesFor(e.scopes).map((profile) => ({ profile, status: 'not_started', score: null, coverage: 0 })),
                             evaluationId: ev?.id ?? '', status: ev ? str(ev.data.status) : 'not_started', score: ev ? Number(r.score) || 0 : null, coverage: ev ? Number(r.coverage) || 0 : 0, band: str(r.band),
                             updatedAt: str(ev?.data.updatedAt),
                         });
@@ -502,7 +542,7 @@ export const supplierEvaluationRoutes = {
             const d: Obj = {
                 number: id, status: 'in_progress', windowId: setup.window.id, windowStart: setup.window.start, windowEnd: setup.window.end,
                 legalEntityId: le.id, legalEntityName: le.name, vendorId, vendorNumber: str(vendor.data.number) || vendorId, vendorName: vendorName(vendor),
-                scopes: el.scopes, scorecards: cards, answers: {}, actions: [], bands: setup.bands, configVersion: setup.version, templateVersion: m.version,
+                scopes: el.scopes, scorecards: cards, cardStates: cardStatesOf({}, cards.map((c) => c.id)), answers: {}, actions: [], bands: setup.bands, configVersion: setup.version, templateVersion: m.version,
                 createdAt: at, createdBy: ctx.uid, createdByName: nameOfUser(ctx.me), version: 1,
                 history: [{ at, by: ctx.uid, byName: nameOfUser(ctx.me), action: 'started', note: `${le.name} · ${cards.map((c) => c.name).join(', ')}`, from: '', to: 'in_progress' }],
             };
@@ -526,16 +566,20 @@ export const supplierEvaluationRoutes = {
             const inEntity = entities.has(str(doc.data.legalEntityId));
             // Earlier final evaluations of this supplier (same legal entity first), oldest first, for repeat findings.
             const earlier = all
-                .filter((e) => e.id !== doc.id && str(e.data.vendorId) === str(doc.data.vendorId) && str(e.data.status) === 'finalized')
+                .filter((e) => e.id !== doc.id && str(e.data.vendorId) === str(doc.data.vendorId) && isFinal(e))
                 .sort((a, b) => Number(str(a.data.legalEntityId) === str(doc.data.legalEntityId)) - Number(str(b.data.legalEntityId) === str(doc.data.legalEntityId)) || str(a.data.windowStart).localeCompare(str(b.data.windowStart)));
-            const last = earlier[earlier.length - 1];
+            // For each assessment, the latest earlier evaluation in which it was approved (same legal entity preferred).
+            const lastBy: Record<string, { id: string; number: string; score: number; windowEnd: string; legalEntityName: string; categories: Array<{ id: string; pct: number | null }> }> = {};
+            for (const e of earlier) {
+                for (const c of finOf(e).cards) lastBy[str(c.profile)] = { id: e.id, number: str(e.data.number) || e.id, score: Number(c.score) || 0, windowEnd: str(e.data.windowEnd), legalEntityName: str(e.data.legalEntityName), categories: objs(c.categories).map((x) => ({ id: str(x.id), pct: x.pct === null ? null : Number(x.pct) })) };
+            }
             const day = today();
             return {
                 unchanged: false,
                 evaluation: evalOut(ctx, doc.id, doc.data, inEntity),
                 previous: {
-                    history: questionHistory(earlier.map((e) => ({ number: str(e.data.number) || e.id, at: str(e.data.windowEnd), answers: answersOf(e.data) }))),
-                    last: last ? { id: last.id, number: str(last.data.number) || last.id, score: Number(o(last.data.result).score) || 0, windowEnd: str(last.data.windowEnd), legalEntityName: str(last.data.legalEntityName), cards: objs(o(last.data.result).cards).map((c) => ({ profile: str(c.profile), score: Number(c.score) || 0, categories: objs(c.categories).map((x) => ({ id: str(x.id), pct: x.pct === null ? null : Number(x.pct) })) })) } : null,
+                    history: questionHistory(earlier.map((e) => ({ number: str(e.data.number) || e.id, at: str(e.data.windowEnd), answers: finalAnswers(answersOf(e.data), statesOf(e.data)) }))),
+                    cards: lastBy,
                     evaluations: earlier.length,
                 },
                 window: { daysLeft: str(doc.data.windowEnd) >= day ? Math.max(0, Math.round((Date.parse(`${str(doc.data.windowEnd)}T00:00:00Z`) - Date.parse(`${day}T00:00:00Z`)) / 86_400_000)) : 0, closed: str(doc.data.windowEnd) < day },
@@ -554,10 +598,10 @@ export const supplierEvaluationRoutes = {
             if (!STATES.includes(state)) throw new HttpError(400, 'Choose unassessed, OK or not OK.');
             const note = clean(ctx.body.note, 600);
             return mutate(ctx, doc.id, 'answer', async (d) => {
-                if (!['in_progress', 'returned'].includes(str(d.status))) throw new HttpError(409, 'This evaluation is no longer open for scoring.');
                 const card = cardsOf(d).find((c) => c.id === profile);
                 const q = card?.categories.flatMap((c) => c.questions).find((x) => x.id === qid);
                 if (!card || !q) throw new HttpError(404, 'Question not found in this evaluation.');
+                if (str(d.status) === 'cancelled' || !['in_progress', 'returned'].includes(statesOf(d)[profile]?.status ?? '')) throw new HttpError(409, `${card.name} is no longer open for scoring.`);
                 const key = answerKey(profile, qid);
                 const answers = { ...answersOf(d) };
                 const cur = answers[key]?.state ?? 'unassessed';
@@ -571,17 +615,25 @@ export const supplierEvaluationRoutes = {
         }),
     ],
 
+    // Each assessment (materials, services, assets and capital projects) goes for approval on its own.
     'POST /api/org/procurement/srm/evaluations/submit': [
         orgRoute('org.procurement.srm.evaluations.submit', 'PRC.srm.evaluate', async (ctx) => {
             const doc = await loadEval(ctx, str(ctx.body.id));
             await needEntity(ctx, doc.data);
             if (ctx.body.acknowledge !== true) throw new HttpError(400, 'Confirm that every answer is backed by evidence.');
+            const profile = str(ctx.body.profile);
             return mutate(ctx, doc.id, 'submit', async (d) => {
-                if (!['in_progress', 'returned'].includes(str(d.status))) throw new HttpError(409, 'Only an evaluation in progress can be submitted.');
-                const p = submitProblems(cardsOf(d), answersOf(d));
+                const card = cardsOf(d).find((c) => c.id === profile);
+                if (!card) throw new HttpError(404, 'Assessment not found in this evaluation.');
+                const states = statesOf(d);
+                if (str(d.status) === 'cancelled' || !['in_progress', 'returned'].includes(states[profile].status)) throw new HttpError(409, `${card.name} is not open for submission.`);
+                const p = submitProblems([card], answersOf(d));
                 if (p.length) throw new HttpError(409, p.slice(0, 12).join(' '));
-                const sc = scores(d);
-                return { patch: { status: 'submitted', submittedAt: nowIso(), submittedBy: ctx.uid, submittedByName: nameOfUser(ctx.me), returnReason: '' }, event: 'submitted for approval', note: `Score ${sc.overall.score} (${sc.overall.bandLabel})`, label: 'Submitted' };
+                const sc = scoreCard(card, answersOf(d));
+                const band = bandOf(sc.score, bandsOf(d));
+                const at = nowIso();
+                const cardStates = { ...states, [profile]: { ...states[profile], status: 'submitted', submittedAt: at, submittedBy: ctx.uid, submittedByName: nameOfUser(ctx.me), returnReason: '' } };
+                return { patch: { cardStates }, event: `${card.name} submitted for approval`, note: `Score ${sc.score} (${BAND_LABEL[band]})`, label: `${card.name} submitted` };
             });
         }),
     ],
@@ -590,20 +642,28 @@ export const supplierEvaluationRoutes = {
         orgRoute('org.procurement.srm.evaluations.approve', 'PRC.srm.approve', async (ctx) => {
             const doc = await loadEval(ctx, str(ctx.body.id));
             if (ctx.body.acknowledge !== true) throw new HttpError(400, 'Confirm that you reviewed the answers, findings and actions.');
+            const profile = str(ctx.body.profile);
             const out = await mutate(ctx, doc.id, 'approve', async (d) => {
-                const chk = approverCheck(ctx, d);
-                if (!chk.ok) throw new HttpError(403, chk.why || 'You cannot approve this evaluation.');
+                const card = cardsOf(d).find((c) => c.id === profile);
+                if (!card) throw new HttpError(404, 'Assessment not found in this evaluation.');
+                const states = statesOf(d);
+                if (states[profile].status !== 'submitted') throw new HttpError(409, `${card.name} is not awaiting approval.`);
+                const chk = approverCheck(ctx, d, profile);
+                if (!chk.ok) throw new HttpError(403, chk.why || 'You cannot approve this assessment.');
                 if (chk.testMode) bypass(ctx, 'prc.srm.approver_independence');
-                const sc = scores(d);
-                return { patch: { status: 'finalized', approvedAt: nowIso(), approvedBy: ctx.uid, approvedByName: nameOfUser(ctx.me), finalScore: sc.overall.score, finalBand: sc.overall.band }, event: 'approved and finalized', note: clean(ctx.body.note, 300) || `Score ${sc.overall.score} (${sc.overall.bandLabel})`, label: 'Finalized', result: { finalScore: sc.overall.score } };
+                const sc = scoreCard(card, answersOf(d));
+                const band = bandOf(sc.score, bandsOf(d));
+                const cardStates = { ...states, [profile]: { ...states[profile], status: 'finalized', approvedAt: nowIso(), approvedBy: ctx.uid, approvedByName: nameOfUser(ctx.me) } };
+                return { patch: { cardStates }, event: `${card.name} approved and finalized`, note: clean(ctx.body.note, 300) || `Score ${sc.score} (${BAND_LABEL[band]})`, label: `${card.name} finalized`, result: { assessmentScore: sc.score } };
             });
-            // The supplier's SRM score (used in quotation analysis) becomes the latest final score.
+            // The supplier's SRM score (used in quotation analysis) becomes the latest final score of the approved assessments.
             const vpath = `${vendorsPath(ctx.orgId)}/${str(doc.data.vendorId)}`;
             const v = await getDoc(vpath);
             const fresh = await getDoc(`${evalPath(ctx.orgId)}/${doc.id}`);
-            if (v && fresh && str(fresh.data.status) === 'finalized') {
-                const score = Number(fresh.data.finalScore) || 0, at = nowIso();
-                const note = `${doc.id} ${str(fresh.data.legalEntityName)} ${str(fresh.data.windowStart)} to ${str(fresh.data.windowEnd)}`.slice(0, 200);
+            const fin = fresh ? finalOf(fresh.data) : null;
+            if (v && fresh && fin) {
+                const score = fin.score, at = nowIso();
+                const note = `${doc.id} ${str(fresh.data.legalEntityName)} ${str(fresh.data.windowStart)} to ${str(fresh.data.windowEnd)} (${fin.profiles.map((p) => PROFILE_LABEL[p as ProfileId] ?? p).join(', ')})`.slice(0, 200);
                 await writeDoc(vpath, { ...v.data, srmScore: Math.round(score * 10) / 10, srmAt: at, srmNote: note, srmSource: doc.id, history: [...objs(v.data.history), { at, by: ctx.uid, byName: nameOfUser(ctx.me), action: 'SRM score from evaluation', note: `${score} · ${note}` }].slice(-200) }, { updateTime: v.updateTime });
                 await record(ctx, 'org.procurement.srm.vendor_score', str(doc.data.vendorId), `${score} from ${doc.id}`);
             }
@@ -615,11 +675,17 @@ export const supplierEvaluationRoutes = {
         orgRoute('org.procurement.srm.evaluations.return', 'PRC.srm.approve', async (ctx) => {
             const doc = await loadEval(ctx, str(ctx.body.id));
             const reason = reasonOf(ctx.body);
+            const profile = str(ctx.body.profile);
             return mutate(ctx, doc.id, 'return', async (d) => {
-                const chk = approverCheck(ctx, d);
-                if (!chk.ok) throw new HttpError(403, chk.why || 'You cannot return this evaluation.');
+                const card = cardsOf(d).find((c) => c.id === profile);
+                if (!card) throw new HttpError(404, 'Assessment not found in this evaluation.');
+                const states = statesOf(d);
+                if (states[profile].status !== 'submitted') throw new HttpError(409, `${card.name} is not awaiting approval.`);
+                const chk = approverCheck(ctx, d, profile);
+                if (!chk.ok) throw new HttpError(403, chk.why || 'You cannot return this assessment.');
                 if (chk.testMode) bypass(ctx, 'prc.srm.approver_independence');
-                return { patch: { status: 'returned', returnReason: reason, returnedBy: ctx.uid, returnedAt: nowIso() }, event: 'returned for correction', note: reason, label: 'Returned' };
+                const cardStates = { ...states, [profile]: { ...states[profile], status: 'returned', returnReason: reason, returnedBy: ctx.uid, returnedAt: nowIso() } };
+                return { patch: { cardStates }, event: `${card.name} returned for correction`, note: reason, label: `${card.name} returned` };
             });
         }),
     ],
@@ -630,7 +696,7 @@ export const supplierEvaluationRoutes = {
             await needEntity(ctx, doc.data);
             const reason = reasonOf(ctx.body);
             return mutate(ctx, doc.id, 'cancel', async (d) => {
-                if (!['in_progress', 'returned'].includes(str(d.status))) throw new HttpError(409, 'Only an evaluation in progress can be cancelled.');
+                if (str(d.status) === 'cancelled' || !Object.values(statesOf(d)).every((x) => ['in_progress', 'returned'].includes(x.status))) throw new HttpError(409, 'An evaluation can be cancelled only while none of its assessments is awaiting approval or final.');
                 return { patch: { status: 'cancelled', cancelReason: reason, cancelledAt: nowIso(), cancelledBy: ctx.uid }, event: 'cancelled', note: reason, label: 'Cancelled' };
             });
         }),
@@ -708,7 +774,7 @@ export const supplierEvaluationRoutes = {
             const latest = latestByVendor(evals);
             const own = latest.get(vendorId);
             return {
-                rank: own ? rankOf(Number(o(own.data.result).score) || 0, [...latest.values()].map((e) => Number(o(e.data.result).score) || 0)) : null,
+                rank: own ? rankOf(finOf(own).score, [...latest.values()].map((e) => finOf(e).score)) : null,
                 vendor: { id: v.id, number: str(v.data.number) || v.id, name: vendorName(v), srmScore: typeof v.data.srmScore === 'number' ? v.data.srmScore : null },
                 bands: setup?.bands ?? { improveFrom: 60, passFrom: 75 }, eligible: !!setup?.eligible.some((e) => e.vendorId === vendorId),
                 ...dashboardOf(vendorId, evals, setup),

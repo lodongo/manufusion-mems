@@ -319,3 +319,96 @@ export function rankOf(score: number, all: number[]): { rank: number; of: number
     const below = all.filter((x) => x < score).length;
     return { rank, of: all.length, percentile: all.length > 1 ? round((below / (all.length - 1)) * 100) : 100 };
 }
+
+// ---------------------------------------------------------------------------
+// Independent assessments: each scorecard (materials, services, assets and capital projects) of an evaluation is
+// submitted, approved or returned on its own. The evaluation keeps a summary status for lists and workflow tasks.
+// ---------------------------------------------------------------------------
+
+export const CARD_STATUSES = ['in_progress', 'returned', 'submitted', 'finalized'] as const;
+export type CardStatus = (typeof CARD_STATUSES)[number];
+export const CARD_STATUS_LABEL: Record<string, string> = { not_started: 'Not started', in_progress: 'In progress', returned: 'Returned', submitted: 'Awaiting approval', finalized: 'Final', cancelled: 'Cancelled' };
+export interface CardState {
+    status: CardStatus; submittedAt: string; submittedBy: string; submittedByName: string;
+    approvedAt: string; approvedBy: string; approvedByName: string; returnedAt: string; returnedBy: string; returnReason: string;
+}
+const blankState = (status: CardStatus): CardState => ({ status, submittedAt: '', submittedBy: '', submittedByName: '', approvedAt: '', approvedBy: '', approvedByName: '', returnedAt: '', returnedBy: '', returnReason: '' });
+const cardStatusOf = (v: unknown): CardStatus => ((CARD_STATUSES as readonly string[]).includes(str(v)) ? (str(v) as CardStatus) : 'in_progress');
+
+/**
+ * Each scorecard's own status. Evaluations made before assessments were independent have no per-card record, so every
+ * card takes the evaluation's status and its submission or approval details.
+ */
+export function cardStatesOf(d: Obj, profiles: string[]): Record<string, CardState> {
+    const stored = isObj(d.cardStates) ? d.cardStates : {};
+    const out: Record<string, CardState> = {};
+    for (const p of profiles) {
+        const s = isObj(stored[p]) ? (stored[p] as Obj) : null;
+        if (s) {
+            out[p] = {
+                status: cardStatusOf(s.status), submittedAt: str(s.submittedAt), submittedBy: str(s.submittedBy), submittedByName: str(s.submittedByName),
+                approvedAt: str(s.approvedAt), approvedBy: str(s.approvedBy), approvedByName: str(s.approvedByName),
+                returnedAt: str(s.returnedAt), returnedBy: str(s.returnedBy), returnReason: str(s.returnReason),
+            };
+            continue;
+        }
+        const legacy = cardStatusOf(d.status);
+        out[p] = {
+            ...blankState(legacy),
+            submittedAt: str(d.submittedAt), submittedBy: str(d.submittedBy), submittedByName: str(d.submittedByName),
+            approvedAt: legacy === 'finalized' ? str(d.approvedAt) : '', approvedBy: legacy === 'finalized' ? str(d.approvedBy) : '', approvedByName: legacy === 'finalized' ? str(d.approvedByName) : '',
+            returnedAt: legacy === 'returned' ? str(d.returnedAt) : '', returnedBy: legacy === 'returned' ? str(d.returnedBy) : '', returnReason: legacy === 'returned' ? str(d.returnReason) : '',
+        };
+    }
+    return out;
+}
+
+/**
+ * The evaluation's summary status: whatever needs someone's attention first. Approval waiting beats a correction
+ * waiting, which beats work in progress; an evaluation is final only when every assessment is.
+ */
+export function summaryStatus(states: Record<string, { status: string }>, cancelled: boolean): string {
+    if (cancelled) return 'cancelled';
+    const s = Object.values(states).map((x) => x.status);
+    if (!s.length) return 'in_progress';
+    if (s.includes('submitted')) return 'submitted';
+    if (s.includes('returned')) return 'returned';
+    if (s.includes('in_progress')) return 'in_progress';
+    return 'finalized';
+}
+
+/** Evaluation-level mirrors of the card records (what older screens, tasks and audit lines read). */
+export function rollup(states: Record<string, CardState>): Obj {
+    const list = Object.values(states);
+    const latest = (st: CardStatus, at: (s: CardState) => string) => list.filter((x) => x.status === st).sort((a, b) => at(b).localeCompare(at(a)))[0];
+    const sub = latest('submitted', (s) => s.submittedAt);
+    const ret = latest('returned', (s) => s.returnedAt);
+    const fin = latest('finalized', (s) => s.approvedAt);
+    const out: Obj = { returnReason: ret?.returnReason ?? '', returnedAt: ret?.returnedAt ?? '' };
+    if (sub) Object.assign(out, { submittedAt: sub.submittedAt, submittedBy: sub.submittedBy, submittedByName: sub.submittedByName });
+    if (fin) Object.assign(out, { approvedAt: fin.approvedAt, approvedBy: fin.approvedBy, approvedByName: fin.approvedByName });
+    return out;
+}
+
+export interface FinalView { score: number; coverage: number; band: Band; sub: Record<Accountability, number | null>; cards: Obj[]; profiles: string[]; complete: boolean }
+/**
+ * What counts as the evaluation's final result: only the approved assessments. The score is their average, so a supplier
+ * approved for services alone has a score from services alone until the others are approved too.
+ */
+export function finalView(result: Obj, states: Record<string, { status: string }>, bands: Bands): FinalView | null {
+    const all = Array.isArray(result.cards) ? result.cards.filter(isObj) : [];
+    const cards = all.filter((c) => states[str(c.profile)]?.status === 'finalized');
+    if (!cards.length) return null;
+    const avg = (xs: number[]) => (xs.length ? round(xs.reduce((s, x) => s + x, 0) / xs.length, 2) : null);
+    const score = avg(cards.map((c) => Number(c.score) || 0)) ?? 0;
+    return {
+        score, coverage: avg(cards.map((c) => Number(c.coverage) || 0)) ?? 0, band: bandOf(score, bands),
+        sub: Object.fromEntries(ACCOUNTABILITY.map((a) => [a, avg(cards.map((c) => (isObj(c.sub) && isObj(c.sub[a]) ? c.sub[a] : null)).filter((x): x is Obj => !!x && typeof x.pct === 'number').map((x) => Number(x.pct)))])) as Record<Accountability, number | null>,
+        cards, profiles: cards.map((c) => str(c.profile)), complete: Object.values(states).every((s) => s.status === 'finalized'),
+    };
+}
+
+/** Answers of the approved assessments only (the ones that count in history). */
+export function finalAnswers(answers: Record<string, Answer>, states: Record<string, { status: string }>): Record<string, Answer> {
+    return Object.fromEntries(Object.entries(answers).filter(([k]) => states[k.split('|')[0]]?.status === 'finalized'));
+}

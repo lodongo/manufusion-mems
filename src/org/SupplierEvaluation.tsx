@@ -9,8 +9,8 @@ import { Badge, Button, Spinner, useLoad } from '../admin/kit';
 import { fmtDate } from '../admin/format';
 import { Screen, Segmented, messageOf, useConfirm } from '../components/screen';
 import {
-    ACCOUNTABILITY, ACCOUNTABILITY_LABEL, KIND_PROFILE, PROFILE_LABEL, answerKey, contributionOf, nextState, overallOf, projectionOf, scoreCard,
-    type Accountability, type ActionStats, type Answer, type AnswerState, type Cadence, type Contribution, type Profile, type ProfileId, type QuestionHistory,
+    ACCOUNTABILITY, ACCOUNTABILITY_LABEL, KIND_PROFILE, PROFILE_LABEL, answerKey, contributionOf, nextState, overallOf, projectionOf, scoreCard, submitProblems,
+    type Accountability, type ActionStats, type Answer, type AnswerState, type Cadence, type CardState, type Contribution, type Profile, type ProfileId, type QuestionHistory,
 } from '../../backend/supplierEvaluationModel';
 import { BandChip, BandStrip, ClosureFunnel, ContributionBar, Countdown, Heatmap, MultiTrend, Ring, ScoreBar, ScoreGauge, accColor, answerStyle, fmt, scoreColor } from './srmVisuals';
 
@@ -18,7 +18,8 @@ import { BandChip, BandStrip, ClosureFunnel, ContributionBar, Countdown, Heatmap
 // Setup (frequency, bands, eligible suppliers and categories, window, adopted template questions) -> per legal entity
 // and supplier, a scorecard per template: tap a question to cycle not assessed / OK / not OK; the score out of 100
 // and the supplier, organization and joint scores update at once and every few seconds from other evaluators.
-// Submitted evaluations are approved independently; the final score becomes the supplier's SRM score.
+// Each assessment (materials, services, assets and capital projects) is submitted and approved on its own by an
+// independent approver; the approved assessments' score becomes the supplier's SRM score.
 
 const BASE = 'organization_home/procurement_srm';
 const API = '/api/org/procurement/srm';
@@ -27,6 +28,7 @@ const VND = /^VND\d{6}$/;
 const today = () => new Date().toISOString().slice(0, 10);
 type Bands = { improveFrom: number; passFrom: number };
 const STATUS: Record<string, string> = { not_started: 'Not started', in_progress: 'In progress', returned: 'Returned', submitted: 'Awaiting approval', finalized: 'Final', cancelled: 'Cancelled' };
+const SHORT: Record<string, string> = { MAT: 'Materials', SVC: 'Services', PRJ: 'Assets' };
 const statusTone = (s: string): 'brand' | 'muted' | 'warn' | 'danger' => (s === 'finalized' ? 'brand' : ['submitted', 'returned', 'in_progress'].includes(s) ? 'warn' : s === 'cancelled' ? 'danger' : 'muted');
 
 /** Re-runs `fn` every `ms` while the page is visible: the "real time" refresh. */
@@ -48,8 +50,9 @@ export default function SupplierEvaluation({ id }: { id?: string }) {
 
 // =============================== Home ===============================
 
-interface Row { key: string; legalEntityId: string; legalEntityName: string; mine: boolean; vendorId: string; vendorNumber: string; vendorName: string; profiles: ProfileId[]; evaluationId: string; status: string; score: number | null; coverage: number; band: string; updatedAt: string }
-interface Hist { id: string; number: string; vendorId: string; vendorName: string; legalEntityName: string; windowStart: string; windowEnd: string; score: number; band: string; sub: Record<string, number | null>; approvedAt: string }
+interface RowAssessment { profile: ProfileId; status: string; score: number | null; coverage: number }
+interface Row { key: string; legalEntityId: string; legalEntityName: string; mine: boolean; vendorId: string; vendorNumber: string; vendorName: string; profiles: ProfileId[]; assessments: RowAssessment[]; evaluationId: string; status: string; score: number | null; coverage: number; band: string; updatedAt: string }
+interface Hist { id: string; number: string; vendorId: string; vendorName: string; legalEntityName: string; windowStart: string; windowEnd: string; score: number; band: string; sub: Record<string, number | null>; approvedAt: string; assessments: string[]; complete: boolean }
 interface ListData { setup: { version: number; frequencyLabel: string; bands: Bands; window: { id: string; start: string; end: string } | null } | null; windowOpen: boolean; rows: Row[]; history: Hist[]; open: number; can: { evaluate: boolean; approve: boolean; setup: boolean }; stamp: string }
 
 function Home({ initial }: { initial: 'evaluate' | 'insights' | 'results' | 'setup' }) {
@@ -127,7 +130,7 @@ function EvaluateTab({ data }: { data: ListData }) {
         if (!data.can.evaluate) return setFailure('You need the supplier evaluator right to start an evaluation.');
         if (!r.mine) return setFailure(`You can evaluate only for the legal entities you work in, not ${r.legalEntityName}.`);
         if (!data.windowOpen) return setFailure('The evaluation window is not open.');
-        ask({ title: `Evaluate ${r.vendorName}?`, message: `For ${r.legalEntityName}, window ${data.setup!.window!.start} to ${data.setup!.window!.end}. Scorecards: ${r.profiles.map((p) => PROFILE_LABEL[p]).join(', ')}.`, confirmLabel: 'Start evaluation' }, async () => {
+        ask({ title: `Evaluate ${r.vendorName}?`, message: `For ${r.legalEntityName}, window ${data.setup!.window!.start} to ${data.setup!.window!.end}. Assessments, each submitted on its own: ${r.profiles.map((p) => PROFILE_LABEL[p]).join(', ')}.`, confirmLabel: 'Start evaluation' }, async () => {
             setBusy(true);
             try {
                 const x = await callBackend<{ id: string }>(`${API}/evaluations/start`, { legalEntityId: r.legalEntityId, vendorId: r.vendorId });
@@ -144,7 +147,10 @@ function EvaluateTab({ data }: { data: ListData }) {
         { key: 'score', label: 'Score', type: 'number', value: (r) => r.score, render: (r) => (r.score === null ? '—' : <span className='font-semibold' style={{ color: scoreColor(r.score) }}>{fmt(r.score)}</span>) },
         { key: 'coverage', label: 'Assessed %', type: 'number', value: (r) => (r.evaluationId ? r.coverage : null) },
         { key: 'band', label: 'Band', value: (r) => (r.band === 'pass' ? 'Pass' : r.band === 'improve' ? 'Needs improvement' : r.band === 'fail' && r.status === 'finalized' ? 'Fail' : '') },
-        { key: 'templates', label: 'Templates', value: (r) => r.profiles.map((p) => PROFILE_LABEL[p]).join(', ') },
+        {
+            key: 'assessments', label: 'Assessments', value: (r) => r.assessments.map((a) => `${SHORT[a.profile] ?? a.profile}: ${STATUS[a.status] ?? a.status}`).join(', '),
+            render: (r) => <span className='flex flex-wrap gap-1'>{r.assessments.map((a) => <Badge key={a.profile} tone={statusTone(a.status)}>{SHORT[a.profile] ?? a.profile}: {STATUS[a.status] ?? a.status}</Badge>)}</span>,
+        },
         { key: 'number', label: 'Supplier number', value: (r) => r.vendorNumber, hidden: true },
         { key: 'updated', label: 'Updated', type: 'date', value: (r) => r.updatedAt.slice(0, 10), hidden: true },
     ];
@@ -172,6 +178,7 @@ function ResultsTab({ data }: { data: ListData }) {
         { key: 'sup', label: 'Supplier score', type: 'number', value: (r) => r.sub.SUPPLIER ?? null },
         { key: 'org', label: 'Organization score', type: 'number', value: (r) => r.sub.ORGANIZATION ?? null },
         { key: 'joint', label: 'Joint score', type: 'number', value: (r) => r.sub.BOTH ?? null },
+        { key: 'assessments', label: 'Approved assessments', value: (r) => `${r.assessments.join(', ')}${r.complete ? '' : ' (more to approve)'}` },
         { key: 'le', label: 'Legal entity', value: (r) => r.legalEntityName },
         { key: 'window', label: 'Window', value: (r) => `${r.windowStart} to ${r.windowEnd}` },
         { key: 'number', label: 'Evaluation', value: (r) => r.number, hidden: true },
@@ -394,13 +401,14 @@ function AccChip({ a }: { a: Accountability }) {
 
 // =============================== Scorecard ===============================
 
-interface Prev { history: Record<string, QuestionHistory>; last: { id: string; number: string; score: number; windowEnd: string; legalEntityName: string; cards: Array<{ profile: string; score: number; categories: Array<{ id: string; pct: number | null }> }> } | null; evaluations: number }
+interface Prev { history: Record<string, QuestionHistory>; cards: Record<string, { id: string; number: string; score: number; windowEnd: string; legalEntityName: string; categories: Array<{ id: string; pct: number | null }> }>; evaluations: number }
+interface CardCan { answer: boolean; submit: boolean; approve: boolean; approveWhy: string }
 interface Action { id: string; profile: string; questionId: string; question: string; description: string; accountability: Accountability; owner: string; dueDate: string; status: string; evidence?: string; doneByName?: string; verifiedByName?: string; createdByName: string; createdAt: string }
 interface Evaluation {
     id: string; number: string; status: string; windowStart: string; windowEnd: string; legalEntityName: string; vendorId: string; vendorNumber: string; vendorName: string;
-    scopes: Scope[]; scorecards: Profile[]; answers: Record<string, Answer>; actions: Action[]; bands: Bands; history: Array<{ at: string; byName: string; action: string; note: string }>;
+    scopes: Scope[]; scorecards: Profile[]; cardStates: Record<string, CardState>; answers: Record<string, Answer>; actions: Action[]; bands: Bands; history: Array<{ at: string; byName: string; action: string; note: string }>;
     createdByName: string; submittedByName: string; approvedByName: string; returnReason: string; version: number;
-    can: { answer: boolean; submit: boolean; cancel: boolean; actions: boolean; approve: boolean; approveWhy: string; verify: boolean };
+    can: { answer: boolean; submit: boolean; cancel: boolean; actions: boolean; approve: boolean; approveWhy: string; verify: boolean; card: Record<string, CardCan> };
 }
 
 function Scorecard({ id }: { id: string }) {
@@ -416,6 +424,8 @@ function Scorecard({ id }: { id: string }) {
     const [prev, setPrev] = useState<Prev | null>(null);
     const [win, setWin] = useState<{ daysLeft: number; closed: boolean } | null>(null);
     const [filter, setFilter] = useState<'all' | 'open' | 'not_ok' | 'ok' | 'repeat'>('all');
+    const [notReady, setNotReady] = useState<{ name: string; problems: string[] } | null>(null);
+    const topRef = useRef<HTMLDivElement>(null);
     const pending = useRef(0);
     const verRef = useRef(0);
     const { ask, sheet } = useConfirm();
@@ -437,6 +447,8 @@ function Scorecard({ id }: { id: string }) {
     }, [id]);
     useEffect(() => { void load(true); }, [load]);
     usePoll(() => void load(), 4000);
+    // Opening a category, moving to the next one or switching assessment starts at the top of the content.
+    useEffect(() => { topRef.current?.scrollIntoView({ block: 'start' }); }, [category, profile]);
 
     const scores = useMemo(() => {
         if (!ev) return null;
@@ -451,10 +463,17 @@ function Scorecard({ id }: { id: string }) {
     const cardScore = scores.cards.find((c) => c.profile === profile);
     const cat = card?.categories.find((c) => c.id === category);
     const catScore = cardScore?.categories.find((c) => c.id === category);
+    const cardCan: CardCan | undefined = card ? ev.can.card[card.id] : undefined;
+    const cardState = card ? ev.cardStates[card.id] : undefined;
+    const catIndex = card && category ? card.categories.findIndex((c) => c.id === category) : -1;
+    const nextCat = card && catIndex >= 0 ? card.categories[catIndex + 1] ?? null : null;
+    // Next category of this assessment; after the last one, back to the assessment overview (where it is submitted).
+    const goNext = () => { setFilter('all'); setCategory(nextCat ? nextCat.id : null); };
+    const approvedCount = ev.scorecards.filter((c) => ev.cardStates[c.id]?.status === 'finalized').length;
 
     // One tap: optimistic, then confirmed by the server (which refuses if someone else changed it meanwhile).
     const tap = async (p: string, qid: string, findingText?: string) => {
-        if (!ev.can.answer) return;
+        if (!ev.can.card[p]?.answer) return;
         const key = answerKey(p, qid);
         const cur = ev.answers[key]?.state ?? 'unassessed';
         const next: AnswerState = findingText !== undefined ? cur : nextState(cur);
@@ -476,39 +495,66 @@ function Scorecard({ id }: { id: string }) {
     };
 
     const actions: Array<{ key: string; label: string; run: () => void; danger?: boolean }> = [];
-    if (ev.can.submit) actions.push({ key: 'submit', label: 'Submit for approval', run: () => ask({ title: 'Submit the evaluation?', message: `Overall ${fmt(scores.overall.score)} out of 100. Every question must be assessed and every "not OK" needs its finding.`, confirmLabel: 'Submit', acknowledge: 'Every answer is backed by evidence.' }, async () => { await callBackend(`${API}/evaluations/submit`, { id, acknowledge: true }); setNote({ tone: 'success', text: 'Submitted for approval.' }); void load(true); }) });
-    if (ev.can.approve) {
-        actions.push({ key: 'approve', label: 'Approve and finalize', run: () => ask({ title: 'Approve and finalize?', message: `${ev.vendorName}: ${fmt(scores.overall.score)} out of 100. This becomes the supplier's SRM score used in quotation analysis.`, confirmLabel: 'Approve', acknowledge: 'I reviewed the answers, findings and actions.' }, async () => { await callBackend(`${API}/evaluations/approve`, { id, acknowledge: true }); setNote({ tone: 'success', text: 'Finalized.' }); void load(true); }) });
-        actions.push({ key: 'return', label: 'Return for correction', run: () => ask({ title: 'Return the evaluation?', message: 'It goes back to the evaluators with your reason.', confirmLabel: 'Return', reason: { label: 'Reason', minLength: 20 } }, async (reason) => { await callBackend(`${API}/evaluations/return`, { id, reason }); setNote({ tone: 'success', text: 'Returned.' }); void load(true); }) });
+    // Submit, approve and return act on one assessment at a time: the open one, or each when no assessment is open.
+    const submitCard = (c: Profile, sc: ReturnType<typeof scoreCard>) => {
+        const problems = submitProblems([c], ev.answers);
+        if (problems.length) return setNotReady({ name: c.name, problems });
+        ask({ title: `Submit ${c.name}?`, message: `${c.name}: ${fmt(sc.score)} out of 100. This assessment goes to an independent approver on its own; the other assessments are not affected.`, confirmLabel: 'Submit', acknowledge: 'Every answer is backed by evidence.' }, async () => { await callBackend(`${API}/evaluations/submit`, { id, profile: c.id, acknowledge: true }); setNote({ tone: 'success', text: `${c.name} submitted for approval.` }); setCategory(null); void load(true); });
+    };
+    const focus = card ? [card] : ev.scorecards;
+    for (const c of focus) {
+        const sc = scores.cards.find((x) => x.profile === c.id)!;
+        const can = ev.can.card[c.id];
+        const tag = focus.length > 1 ? ` ${c.name}` : '';
+        if (can?.submit) actions.push({ key: `submit:${c.id}`, label: `Submit${tag || ' for approval'}`, run: () => submitCard(c, sc) });
+        if (can?.approve) {
+            actions.push({ key: `approve:${c.id}`, label: `Approve and finalize${tag}`, run: () => ask({ title: `Approve ${c.name}?`, message: `${ev.vendorName}, ${c.name}: ${fmt(sc.score)} out of 100. Once approved it counts towards the supplier's SRM score used in quotation analysis.`, confirmLabel: 'Approve', acknowledge: 'I reviewed the answers, findings and actions.' }, async () => { await callBackend(`${API}/evaluations/approve`, { id, profile: c.id, acknowledge: true }); setNote({ tone: 'success', text: `${c.name} finalized.` }); setCategory(null); void load(true); }) });
+            actions.push({ key: `return:${c.id}`, label: `Return for correction${tag}`, run: () => ask({ title: `Return ${c.name}?`, message: 'It goes back to the evaluators with your reason.', confirmLabel: 'Return', reason: { label: 'Reason', minLength: 20 } }, async (reason) => { await callBackend(`${API}/evaluations/return`, { id, profile: c.id, reason }); setNote({ tone: 'success', text: `${c.name} returned.` }); setCategory(null); void load(true); }) });
+        }
     }
-    if (ev.can.cancel) actions.push({ key: 'cancel', label: 'Cancel the evaluation', danger: true, run: () => ask({ title: 'Cancel the evaluation?', message: 'A cancelled evaluation can be started again in the same window.', confirmLabel: 'Cancel evaluation', tone: 'danger', reason: { label: 'Reason', minLength: 20 } }, async (reason) => { await callBackend(`${API}/evaluations/cancel`, { id, reason }); setNote({ tone: 'success', text: 'Cancelled.' }); void load(true); }) });
+    if (ev.can.cancel) actions.push({ key: 'cancel', label: 'Cancel the evaluation', danger: true, run: () => ask({ title: 'Cancel the evaluation?', message: 'All assessments are cancelled. A cancelled evaluation can be started again in the same window.', confirmLabel: 'Cancel evaluation', tone: 'danger', reason: { label: 'Reason', minLength: 20 } }, async (reason) => { await callBackend(`${API}/evaluations/cancel`, { id, reason }); setNote({ tone: 'success', text: 'Cancelled.' }); void load(true); }) });
     actions.push({ key: 'dashboard', label: 'Supplier dashboard', run: () => navigate(`${BASE}/${ev.vendorId}`) });
-    const primary = actions.find((x) => ['approve', 'submit'].includes(x.key));
+    // The header button follows the assessment on screen.
+    const primary = card ? actions.find((x) => x.key.startsWith('approve:')) ?? actions.find((x) => x.key.startsWith('submit:')) : undefined;
     const openActions = ev.actions.filter((a) => a.status === 'open').length;
 
     return (
         <Screen
             eyebrow={`${ev.number} · ${ev.legalEntityName}`}
             title={ev.vendorName}
-            subtitle={`Window ${ev.windowStart} to ${ev.windowEnd} · ${STATUS[ev.status] ?? ev.status}`}
+            subtitle={`Window ${ev.windowStart} to ${ev.windowEnd} · ${ev.status === 'cancelled' ? 'Cancelled' : `${approvedCount} of ${ev.scorecards.length} assessments final`}`}
             onBack={() => (category ? setCategory(null) : navigate(BASE))}
             actions={
                 <>
                     <span className='flex items-center gap-1 text-xs text-muted' title={live ? 'Live' : 'Offline'}><span className='h-2 w-2 rounded-full' style={{ background: live ? scoreColor(100) : scoreColor(0) }} />{live ? 'Live' : 'Offline'}</span>
-                    {primary && <Button onClick={primary.run}>{primary.key === 'submit' ? <Send className='h-4 w-4' /> : null}{primary.key === 'submit' ? 'Submit' : 'Approve'}</Button>}
+                    {primary && <Button onClick={primary.run}>{primary.key.startsWith('submit') ? <Send className='h-4 w-4' /> : null}{primary.key.startsWith('submit') ? 'Submit' : 'Approve'}</Button>}
                     <button type='button' aria-label='More actions' onClick={() => setMenu(true)} className='flex h-11 w-11 items-center justify-center rounded-xl border border-line text-soft active:bg-panel'><MoreVertical className='h-5 w-5' /></button>
                 </>
             }
             toolbar={!category ? <Segmented label='Scorecards' value={(profile ?? 'actions') as string} onChange={(v) => { setProfile(v as ProfileId); setCategory(null); }} options={[...ev.scorecards.map((c) => ({ value: c.id as string, label: PROFILE_LABEL[c.id] })), { value: 'actions', label: 'Actions', count: openActions || undefined }, { value: 'history', label: 'History' }]} /> : undefined}
         >
+            <div ref={topRef} />
             {note && <Alert tone={note.tone}>{note.text}</Alert>}
-            {ev.returnReason && ['returned', 'in_progress'].includes(ev.status) && <Alert tone='warn'>Returned: {ev.returnReason}</Alert>}
-            {ev.can.approveWhy && <Alert tone='info'>{ev.can.approveWhy}</Alert>}
+            {cardState?.status === 'returned' && cardState.returnReason && <Alert tone='warn'>Returned: {cardState.returnReason}</Alert>}
+            {cardCan?.approveWhy && <Alert tone='info'>{cardCan.approveWhy}</Alert>}
 
-            {!category && card && cardScore && (
+            {!category && card && cardScore && cardState && (
                 <div className='space-y-3'>
+                    <div className='flex items-center justify-between gap-3 rounded-2xl border border-line bg-panel p-3'>
+                        <div className='min-w-0'>
+                            <p className='text-xs uppercase tracking-wide text-muted'>Assessment status</p>
+                            <p className='truncate text-sm font-semibold text-ink'>{card.name}</p>
+                            <p className='text-xs text-soft'>
+                                {cardState.status === 'submitted' ? `Submitted by ${cardState.submittedByName || 'an evaluator'}${cardState.submittedAt ? ` on ${fmtDate(cardState.submittedAt)}` : ''}. Waiting for an independent approver.`
+                                    : cardState.status === 'finalized' ? `Approved by ${cardState.approvedByName || 'an approver'}${cardState.approvedAt ? ` on ${fmtDate(cardState.approvedAt)}` : ''}. It counts towards the supplier's score.`
+                                        : cardScore.open > 0 ? `${cardScore.open} question${cardScore.open === 1 ? '' : 's'} still to assess before it can be submitted.`
+                                            : 'Every question is assessed. It is ready to submit.'}
+                            </p>
+                        </div>
+                        <span className='shrink-0 whitespace-nowrap'><Badge tone={statusTone(cardState.status)}>{STATUS[cardState.status] ?? cardState.status}</Badge></span>
+                    </div>
                     {(() => {
-                        const lastCard = prev?.last?.cards.find((c) => c.profile === card.id);
+                        const lastCard = prev?.cards[card.id];
                         const proj = projectionOf(cardScore);
                         return (
                             <div className='grid grid-cols-2 gap-2'>
@@ -518,7 +564,7 @@ function Scorecard({ id }: { id: string }) {
                                     {lastCard ? (
                                         <>
                                             <p className='mt-0.5 text-3xl font-bold' style={{ color: scoreColor(lastCard.score) }}>{fmt(lastCard.score)}</p>
-                                            <p className='text-xs text-soft'>{prev!.last!.number} · {prev!.last!.windowEnd}</p>
+                                            <p className='text-xs text-soft'>{lastCard.number} · {lastCard.windowEnd}</p>
                                             {cardScore.coverage >= 99.9 ? <p className='text-xs font-semibold' style={{ color: scoreColor(cardScore.score >= lastCard.score ? 100 : 0) }}>{cardScore.score >= lastCard.score ? '▲' : '▼'} {fmt(Math.abs(cardScore.score - lastCard.score))} vs last</p> : <p className='text-xs text-soft'>This one can reach <strong style={{ color: scoreColor(proj.high) }}>{fmt(proj.high)}</strong></p>}
                                         </>
                                     ) : <p className='mt-1 text-sm text-soft'>First evaluation of this supplier{prev?.evaluations ? '' : ' here'}.</p>}
@@ -554,7 +600,7 @@ function Scorecard({ id }: { id: string }) {
                                     <Count icon={<Circle className='h-4 w-4' />} n={cardScore.open} label='Open' tone={null} />
                                 </div>
                                 {ev.scorecards.length > 1 && (
-                                    <p className='text-center text-xs text-muted'>Overall across {ev.scorecards.length} scorecards: <strong style={{ color: scoreColor(scores.overall.score) }}>{fmt(scores.overall.score)}</strong></p>
+                                    <p className='text-center text-xs text-muted'>Assessments approved: <strong className='text-ink'>{approvedCount} of {ev.scorecards.length}</strong>. Each is submitted on its own.</p>
                                 )}
                             </div>
                         </div>
@@ -567,7 +613,7 @@ function Scorecard({ id }: { id: string }) {
                     <p className='px-1 text-xs text-muted'>Scope: {ev.scopes.filter((s) => KIND_PROFILE[s.kind] === card.id).map((s) => s.categoryName).join(', ')}</p>
                     {card.categories.map((c) => {
                         const cs = cardScore.categories.find((x) => x.id === c.id)!;
-                        const before = prev?.last?.cards.find((x) => x.profile === card.id)?.categories.find((x) => x.id === c.id)?.pct ?? null;
+                        const before = prev?.cards[card.id]?.categories.find((x) => x.id === c.id)?.pct ?? null;
                         const atStake = cs.weight - cs.assessed;
                         const repeats = c.questions.filter((x) => (prev?.history[answerKey(card.id, x.id)]?.streak ?? 0) > 0).length;
                         return (
@@ -594,7 +640,12 @@ function Scorecard({ id }: { id: string }) {
 
             {category && card && cat && catScore && (
                 <div className='space-y-2'>
-                    <button type='button' onClick={() => setCategory(null)} className='flex min-h-[44px] items-center gap-1 text-sm text-soft'><ChevronLeft className='h-4 w-4' />{PROFILE_LABEL[card.id]}</button>
+                    <div className='flex items-center justify-between gap-2'>
+                        <button type='button' onClick={() => setCategory(null)} className='flex min-h-[44px] min-w-0 items-center gap-1 text-sm text-soft'><ChevronLeft className='h-4 w-4 shrink-0' /><span className='truncate'>{PROFILE_LABEL[card.id]}</span></button>
+                        <button type='button' onClick={goNext} aria-label={nextCat ? `Next topic: ${nextCat.name}` : `Finish ${PROFILE_LABEL[card.id]}`} className='flex min-h-[44px] shrink-0 items-center gap-1 rounded-xl border-2 border-brand px-4 text-sm font-semibold text-brand active:bg-brand/10'>
+                            <span className='text-xs font-normal text-soft'>{catIndex + 1} of {card.categories.length}</span>{nextCat ? 'Next' : 'Finish'}<ChevronRight className='h-4 w-4' />
+                        </button>
+                    </div>
                     <div className='sticky top-0 z-10 rounded-2xl border border-line bg-panel p-3 shadow-sm'>
                         <div className='flex items-center justify-between gap-2'>
                             <p className='min-w-0 text-sm font-semibold text-ink'>{cat.name}</p>
@@ -623,7 +674,7 @@ function Scorecard({ id }: { id: string }) {
                         return (
                             <div key={x.id} className='rounded-2xl border border-line p-3 transition-colors duration-300' style={answerStyle(st)}>
                                 <div className='flex items-start gap-2'>
-                                    <button type='button' disabled={!ev.can.answer} onClick={() => void tap(card.id, x.id)} className='min-h-[56px] min-w-0 flex-1 text-left disabled:cursor-default' aria-label={`${x.id}: ${st === 'ok' ? 'OK' : st === 'not_ok' ? 'not OK' : 'not assessed'}. Tap to change.`}>
+                                    <button type='button' disabled={!cardCan?.answer} onClick={() => void tap(card.id, x.id)} className='min-h-[56px] min-w-0 flex-1 text-left disabled:cursor-default' aria-label={`${x.id}: ${st === 'ok' ? 'OK' : st === 'not_ok' ? 'not OK' : 'not assessed'}. Tap to change.`}>
                                         <p className='text-sm text-ink'>{x.text}</p>
                                         <p className='mt-1.5 flex flex-wrap items-center gap-2 text-xs text-muted'>
                                             <span className='font-mono'>{x.id}</span><AccChip a={x.accountability} /><span>{fmt(x.weight, 2)} pts</span>
@@ -641,7 +692,7 @@ function Scorecard({ id }: { id: string }) {
                                     <button type='button' aria-label='How to measure' onClick={() => setInfo(x)} className='flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-muted active:bg-page'><Info className='h-5 w-5' /></button>
                                 </div>
                                 {st === 'not_ok' && (
-                                    <Finding key={`${x.id}-${a?.note ?? ''}`} initial={a?.note ?? ''} readOnly={!ev.can.answer} onSave={(t) => void tap(card.id, x.id, t)} />
+                                    <Finding key={`${x.id}-${a?.note ?? ''}`} initial={a?.note ?? ''} readOnly={!cardCan?.answer} onSave={(t) => void tap(card.id, x.id, t)} />
                                 )}
                                 {st === 'not_ok' && (
                                     <div className='mt-2 flex flex-wrap items-center gap-2'>
@@ -652,6 +703,9 @@ function Scorecard({ id }: { id: string }) {
                             </div>
                         );
                     })}
+                    <button type='button' onClick={goNext} className='flex min-h-[48px] w-full items-center justify-center gap-1 rounded-xl border-2 border-brand text-sm font-semibold text-brand active:bg-brand/10'>
+                        {nextCat ? <>Next: {nextCat.name}</> : <>Finish {PROFILE_LABEL[card.id]}</>}<ChevronRight className='h-4 w-4' />
+                    </button>
                 </div>
             )}
 
@@ -681,6 +735,13 @@ function Scorecard({ id }: { id: string }) {
                     <div className='flex flex-wrap gap-2 text-xs'><AccChip a={info.accountability} /><span className='text-muted'>{fmt(info.weight, 2)} points</span>{info.critical && <span className='font-semibold' style={{ color: scoreColor(0) }}>Critical control</span>}</div>
                     {info.measurement && <div><p className='text-xs font-semibold text-muted'>How it is measured</p><p className='text-sm text-soft'>{info.measurement}</p></div>}
                     {info.evidence.length > 0 && <div><p className='text-xs font-semibold text-muted'>Evidence</p><p className='text-sm text-soft'>{info.evidence.join(', ')}</p></div>}
+                </Sheet>
+            )}
+            {notReady && (
+                <Sheet title={`${notReady.name} is not ready to submit`} onClose={() => setNotReady(null)}>
+                    <p className='text-sm text-soft'>Every question of this assessment must be assessed, and every "not OK" needs its finding. Other assessments are not affected.</p>
+                    <ul className='space-y-1 text-sm text-ink'>{notReady.problems.slice(0, 12).map((t) => <li key={t} className='rounded-lg bg-page px-3 py-2'>{t}</li>)}</ul>
+                    <Button className='w-full' onClick={() => setNotReady(null)}>Close</Button>
                 </Sheet>
             )}
             {actionFor && <ActionSheet evId={id} target={actionFor} onClose={() => setActionFor(null)} onDone={(t) => { setActionFor(null); setNote({ tone: 'success', text: t }); void load(true); }} />}
@@ -788,7 +849,7 @@ interface Dash {
     heatmap: Record<string, { columns: string[]; rows: Array<{ id: string; name: string; cells: Array<number | null> }> }>;
     issues: QRow[]; strengths: QRow[]; cadence: Cadence;
     procurementCategories: Array<{ kind: string; categoryCode: string; categoryName: string; score: number | null; at: string }>;
-    current: Array<{ id: string; number: string; legalEntityName: string; status: string; score: number; coverage: number }>;
+    current: Array<{ id: string; number: string; legalEntityName: string; status: string; score: number; coverage: number; assessments: Array<{ profile: string; status: string }> }>;
     actions: ActRow[]; actionStats: ActionStats; actionCounts: { open: number; overdue: number; done: number; verified: number };
     stamp: string;
 }
@@ -952,7 +1013,8 @@ export function SupplierRelationshipDashboard({ vendorId }: { vendorId: string }
                                 <button key={c.id} type='button' onClick={() => navigate(`${BASE}/${c.id}`)} className='flex min-h-[48px] w-full items-center gap-3 text-left'>
                                     <span className='min-w-0 flex-1'>
                                         <span className='block text-sm text-ink'>{c.legalEntityName}</span>
-                                        <span className='block text-xs text-muted'>{STATUS[c.status] ?? c.status} · {fmt(c.coverage, 0)}% assessed</span>
+                                        <span className='block text-xs text-muted'>{fmt(c.coverage, 0)}% assessed</span>
+                                        <span className='mt-1 flex flex-wrap gap-1'>{c.assessments.map((a) => <Badge key={a.profile} tone={statusTone(a.status)}>{SHORT[a.profile] ?? a.profile}: {STATUS[a.status] ?? a.status}</Badge>)}</span>
                                         <span className='mt-1 block'><ScoreBar pct={c.coverage} height={4} /></span>
                                     </span>
                                     <span className='text-lg font-bold' style={{ color: scoreColor(c.score) }}>{fmt(c.score)}</span>

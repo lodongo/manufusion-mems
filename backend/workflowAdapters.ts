@@ -127,10 +127,19 @@ const supplierEvaluations: Adapter = {
     by: lastBy,
     async stage(env, id, d) {
         const { srmApproverCheck } = await import('./supplierEvaluation');
+        const { cardStatesOf, PROFILE_LABEL } = await import('./supplierEvaluationModel');
         const { can } = await import('./procurementSetup');
+        // Each assessment (materials, services, assets and capital projects) is submitted and approved on its own.
+        const states = Object.entries(cardStatesOf(d, objs(d.scorecards).map((c) => str(c.id))));
+        const named = (list: typeof states) => list.map(([p]) => (PROFILE_LABEL as Record<string, string>)[p] ?? p).join(', ');
+        const waiting = states.filter(([, x]) => x.status === 'submitted');
+        const back = states.filter(([, x]) => x.status === 'returned');
         const details = [{ label: 'Supplier', value: str(d.vendorName) }, { label: 'Legal entity', value: str(d.legalEntityName) }, { label: 'Window', value: `${str(d.windowStart)} to ${str(d.windowEnd)}` }, { label: 'Score', value: String(Number(o(d.result).score) || 0) }];
-        if (str(d.status) === 'submitted') return stage(`approve|${str(d.submittedAt)}`, 'Approve or return the supplier evaluation', rule(env, (p) => can(p.ctx, 'PRC.srm.approve') && srmApproverCheck(p.ctx, d).ok), { details });
-        if (str(d.status) === 'returned') return stage(`returned|${short(str(d.returnReason))}|${str(d.returnedAt)}`, 'Correct the returned supplier evaluation and submit it again', only(env, str(d.submittedBy) || str(d.createdBy)), { details: [...details, { label: 'Reason', value: str(d.returnReason) }] });
+        if (str(d.status) === 'submitted' && waiting.length) return stage(`approve|${short(waiting.map(([p, x]) => `${p}:${x.submittedAt}`).join(','))}`, `Approve or return the supplier evaluation: ${named(waiting)}`, rule(env, (p) => can(p.ctx, 'PRC.srm.approve') && srmApproverCheck(p.ctx, d).ok), { details: [...details, { label: 'Awaiting approval', value: named(waiting) }] });
+        if (str(d.status) === 'returned' && back.length) {
+            const who = back.map(([, x]) => x.submittedBy).filter(Boolean);
+            return stage(`returned|${short(back.map(([p, x]) => `${p}:${x.returnReason}:${x.returnedAt}`).join('|'))}`, `Correct the returned supplier evaluation and submit it again: ${named(back)}`, only(env, ...(who.length ? who : [str(d.createdBy)])), { details: [...details, { label: 'Returned', value: named(back) }, { label: 'Reason', value: back.map(([, x]) => x.returnReason).filter(Boolean).join(' · ') }] });
+        }
         return null;
     },
 };
