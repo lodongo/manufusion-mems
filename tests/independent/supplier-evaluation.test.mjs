@@ -184,3 +184,108 @@ test('the screens show the deeper views', () => {
     for (const s of ['Where the points come from', 'Can finish between', 'Last time:', "'repeat'", 'Recurring issues', 'Action closure tracker', 'Category heat-map', 'Supplier league table', 'Weakest categories', 'Assessment due in', 'Since last final assessment']) assert.ok(ui.includes(s), s);
     assert.match(read('backend/supplierEvaluation.ts'), /'POST \/api\/org\/procurement\/srm\/insights'/);
 });
+
+// ---------------------------------------------------------------------------
+// Independent assessments: each scorecard is submitted and approved on its own.
+// ---------------------------------------------------------------------------
+
+import { cardStatesOf, finalAnswers, finalView, rollup, summaryStatus } from '../../backend/supplierEvaluationModel.ts';
+
+const bands = { improveFrom: 60, passFrom: 75 };
+const sub = (e, w, a) => ({ earned: e, weight: w, assessed: a, pct: w ? (e / w) * 100 : null });
+const resultOf = (scores) => ({
+    cards: Object.entries(scores).map(([profile, score]) => ({ profile, score, coverage: 100, sub: { SUPPLIER: sub(score, 100, 100), ORGANIZATION: sub(0, 0, 0), BOTH: sub(0, 0, 0) }, categories: [] })),
+});
+
+test('every assessment has its own status; older evaluations take the evaluation status', () => {
+    const fresh = cardStatesOf({}, ['MAT', 'SVC']);
+    assert.deepEqual(Object.values(fresh).map((s) => s.status), ['in_progress', 'in_progress']);
+    const legacy = cardStatesOf({ status: 'submitted', submittedAt: '2026-11-20T10:00:00Z', submittedBy: 'u1', submittedByName: 'Una' }, ['MAT', 'SVC']);
+    assert.equal(legacy.SVC.status, 'submitted');
+    assert.equal(legacy.SVC.submittedBy, 'u1');
+    const done = cardStatesOf({ status: 'finalized', approvedAt: '2026-11-21T10:00:00Z', approvedBy: 'u2' }, ['MAT']);
+    assert.equal(done.MAT.status, 'finalized');
+    assert.equal(done.MAT.approvedBy, 'u2');
+    // A stored record wins over the evaluation status, and an unknown status is treated as in progress.
+    const stored = cardStatesOf({ status: 'in_progress', cardStates: { MAT: { status: 'finalized', approvedBy: 'u3' }, SVC: { status: 'nonsense' } } }, ['MAT', 'SVC']);
+    assert.equal(stored.MAT.status, 'finalized');
+    assert.equal(stored.SVC.status, 'in_progress');
+});
+
+test('the evaluation summary shows what needs attention first and is final only when every assessment is', () => {
+    const st = (...xs) => Object.fromEntries(xs.map((s, i) => [`P${i}`, { status: s }]));
+    assert.equal(summaryStatus(st('finalized', 'submitted', 'in_progress'), false), 'submitted');
+    assert.equal(summaryStatus(st('finalized', 'returned', 'in_progress'), false), 'returned');
+    assert.equal(summaryStatus(st('finalized', 'in_progress'), false), 'in_progress');
+    assert.equal(summaryStatus(st('finalized', 'finalized'), false), 'finalized');
+    assert.equal(summaryStatus(st('finalized', 'finalized'), true), 'cancelled');
+});
+
+test('only approved assessments count: the final score is their average', () => {
+    const result = resultOf({ MAT: 90, SVC: 40, PRJ: 70 });
+    assert.equal(finalView(result, { MAT: { status: 'submitted' }, SVC: { status: 'in_progress' }, PRJ: { status: 'in_progress' } }, bands), null, 'nothing approved yet');
+    const one = finalView(result, { MAT: { status: 'finalized' }, SVC: { status: 'submitted' }, PRJ: { status: 'in_progress' } }, bands);
+    assert.equal(one.score, 90);
+    assert.equal(one.band, 'pass');
+    assert.deepEqual(one.profiles, ['MAT']);
+    assert.equal(one.complete, false);
+    assert.equal(one.sub.SUPPLIER, 90);
+    const two = finalView(result, { MAT: { status: 'finalized' }, SVC: { status: 'finalized' }, PRJ: { status: 'in_progress' } }, bands);
+    assert.equal(two.score, 65);
+    assert.equal(two.band, 'improve');
+    const all = finalView(result, { MAT: { status: 'finalized' }, SVC: { status: 'finalized' }, PRJ: { status: 'finalized' } }, bands);
+    assert.equal(all.complete, true);
+    assert.equal(all.score, 66.67);
+    // History counts only the approved assessments' answers.
+    const answers = { 'MAT|a': { state: 'ok' }, 'SVC|b': { state: 'not_ok' } };
+    assert.deepEqual(Object.keys(finalAnswers(answers, { MAT: { status: 'finalized' }, SVC: { status: 'submitted' } })), ['MAT|a']);
+});
+
+test('evaluation-level mirrors follow the latest submission, return and approval', () => {
+    const r = rollup({
+        MAT: { status: 'finalized', approvedAt: '2026-11-21T10:00:00Z', approvedBy: 'a1', approvedByName: 'Ann', submittedAt: '', submittedBy: '', submittedByName: '', returnedAt: '', returnedBy: '', returnReason: '' },
+        SVC: { status: 'submitted', submittedAt: '2026-11-22T10:00:00Z', submittedBy: 'e1', submittedByName: 'Eve', approvedAt: '', approvedBy: '', approvedByName: '', returnedAt: '', returnedBy: '', returnReason: '' },
+        PRJ: { status: 'returned', returnedAt: '2026-11-23T10:00:00Z', returnReason: 'Evidence missing for delivery', submittedAt: '', submittedBy: '', submittedByName: '', approvedAt: '', approvedBy: '', approvedByName: '', returnedBy: 'a1' },
+    });
+    assert.equal(r.submittedBy, 'e1');
+    assert.equal(r.approvedBy, 'a1');
+    assert.equal(r.returnReason, 'Evidence missing for delivery');
+});
+
+test('submit, approve, return and scoring act on one assessment; independence, locking and audit still hold', () => {
+    const src = read('backend/supplierEvaluation.ts');
+    // The three actions name the assessment and refuse anything not in the right state for that assessment.
+    assert.match(src, /const profile = str\(ctx\.body\.profile\);\s*return mutate\(ctx, doc\.id, 'submit'/);
+    assert.match(src, /submitProblems\(\[card\], answersOf\(d\)\)/, 'only the assessment being submitted must be complete');
+    assert.match(src, /approverCheck\(ctx, d, profile\)/);
+    assert.match(src, /states\[profile\]\.status !== 'submitted'/);
+    assert.match(src, /is no longer open for scoring/, 'answers are refused once an assessment is submitted or final');
+    assert.match(src, /An evaluation can be cancelled only while none of its assessments is awaiting approval or final/);
+    // Whoever took part in any assessment of the evaluation cannot approve any of them.
+    assert.match(src, /evaluators\(d\)\.includes\(ctx\.uid\)/);
+    assert.match(src, /\.\.\.Object\.values\(statesOf\(d\)\)\.map\(\(s\) => s\.submittedBy\)/);
+    // Each assessment's change is written with the evaluation's summary status and the supplier's score follows approved assessments.
+    assert.match(src, /next\.cardStates = states;/);
+    assert.match(src, /summaryStatus\(states, false\)/);
+    assert.match(src, /const fin = fresh \? finalOf\(fresh\.data\) : null;/);
+    assert.match(src, /await record\(ctx, `org\.procurement\.srm\.\$\{action\}`/);
+    // The list, the supplier dashboard and the results use approved assessments only.
+    assert.match(src, /\.filter\(\(x\): x is \{ e: Doc; fin:/);
+    assert.match(src, /finalAnswers\(answersOf\(e\.data\), statesOf\(e\.data\)\)/);
+});
+
+test('the scorecard submits each assessment on its own and has a red-bordered Next button', () => {
+    const ui = read('src/org/SupplierEvaluation.tsx');
+    assert.match(ui, /submitProblems\(\[c\], ev\.answers\)/, 'checked for this assessment only');
+    assert.match(ui, /evaluations\/submit`, \{ id, profile: c\.id, acknowledge: true \}/);
+    assert.match(ui, /evaluations\/approve`, \{ id, profile: c\.id, acknowledge: true \}/);
+    assert.match(ui, /evaluations\/return`, \{ id, profile: c\.id, reason \}/);
+    assert.match(ui, /ev\.can\.card\[p\]\?\.answer/, 'taps follow the assessment\'s own state');
+    assert.match(ui, /is not ready to submit/);
+    // Next topic: top and bottom of the category, brand (red) border, Finish after the last one, starts at the top.
+    assert.equal((ui.match(/onClick=\{goNext\}/g) ?? []).length, 2);
+    assert.equal((ui.match(/border-2 border-brand/g) ?? []).length >= 2, true);
+    assert.match(ui, /nextCat \? 'Next' : 'Finish'/);
+    assert.match(ui, /topRef\.current\?\.scrollIntoView\(\{ block: 'start' \}\)/);
+    assert.match(ui, /setFilter\('all'\); setCategory\(nextCat \? nextCat\.id : null\)/);
+});
